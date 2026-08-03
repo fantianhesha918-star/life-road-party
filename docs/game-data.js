@@ -74,3 +74,7 @@ const FORTUNE_MAX = 10;
 const START_MONEY = 300; // 単位: 万円
 
 const TOKEN_COLORS = ["#e4572e", "#2e86ab", "#5cb270", "#f4a300", "#8e5ea2", "#e05d9c"];
+
+// room.js はESモジュールで読み込むため、classicスクリプト側のconst宣言と
+// スコープが分かれていても確実に参照できるよう、必要な値をwindow経由でも公開しておく
+window.LifeRoadData = { START_MONEY, TOKEN_COLORS };

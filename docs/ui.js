@@ -26,7 +26,78 @@ function renderTitleScreen(hasSave) {
       <p class="lead">友達と通信、または一人でCPUと対戦して遊べる、人生ゲーム風すごろくです。</p>
       ${hasSave ? `<button class="btn btn-primary" onclick="App.continueGame()">続きから再開する</button>` : ""}
       <button class="btn ${hasSave ? "" : "btn-primary"}" onclick="App.goSetup()">一人で遊ぶ(CPU対戦)</button>
-      <button class="btn btn-disabled" disabled>友達と通信して遊ぶ(準備中)</button>
+      <button class="btn" onclick="App.goOnlineMenu()">友達と通信して遊ぶ</button>
+    </section>
+  `;
+}
+
+function renderOnlineMenuScreen(error, busy) {
+  const sizeOptions = [2, 3, 4, 5, 6]
+    .map((n) => `<option value="${n}" ${n === 4 ? "selected" : ""}>${n}人まで</option>`)
+    .join("");
+  return `
+    <section class="screen screen-online-menu">
+      <h2>通信対戦</h2>
+      ${error ? `<p class="error-text">${escapeHtml(error)}</p>` : ""}
+      <label class="field">
+        <span>あなたのニックネーム</span>
+        <input id="online-nickname-input" type="text" maxlength="10" value="プレイヤー" />
+      </label>
+
+      <div class="field">
+        <h3>部屋を作る</h3>
+        <label class="field">
+          <span>最大人数</span>
+          <select id="online-maxplayers-select">${sizeOptions}</select>
+        </label>
+        <button class="btn btn-primary" ${busy ? "disabled" : ""} onclick="App.createOnlineRoom()">部屋を作る</button>
+      </div>
+
+      <div class="field">
+        <h3>部屋に入る</h3>
+        <label class="field">
+          <span>部屋番号(友達に聞いてください)</span>
+          <input id="online-roomcode-input" type="text" maxlength="6" placeholder="例: A3F9K2" />
+        </label>
+        <button class="btn btn-primary" ${busy ? "disabled" : ""} onclick="App.joinOnlineRoom()">部屋に入る</button>
+      </div>
+
+      <button class="btn" onclick="App.goTitle()">戻る</button>
+    </section>
+  `;
+}
+
+function renderOnlineLobbyScreen(room, roomCode, myUid) {
+  const players = Object.entries(room.players || {}).sort(
+    (a, b) => (a[1].seatIndex || 0) - (b[1].seatIndex || 0)
+  );
+  const rows = players
+    .map(([uid, p]) => {
+      const tags = [uid === room.hostUid ? "ホスト" : null, uid === myUid ? "あなた" : null]
+        .filter(Boolean)
+        .join("・");
+      return `
+        <li class="player-row">
+          <span class="p-name">${escapeHtml(p.nickname)}</span>
+          ${tags ? `<span class="badge">${tags}</span>` : ""}
+        </li>
+      `;
+    })
+    .join("");
+  const isHost = room.hostUid === myUid;
+  const canStart = players.length >= 2;
+  return `
+    <section class="screen screen-online-lobby">
+      <h2>部屋番号</h2>
+      <div class="room-code">${escapeHtml(roomCode)}</div>
+      <p class="lead">この番号を友達に伝えてください(現在 ${players.length}/${room.maxPlayers}人)</p>
+      <ul class="player-list">${rows}</ul>
+      ${
+        isHost
+          ? `<button class="btn btn-primary" ${canStart ? "" : "disabled"} onclick="App.startOnlineGame()">対戦を開始する</button>`
+          : `<p class="lead">ホストが開始するのを待っています…</p>`
+      }
+      <button class="btn" onclick="App.leaveOnlineRoom()">退出する</button>
     </section>
   `;
 }
@@ -91,10 +162,11 @@ function renderLog(entries) {
   return `<ul class="log-list">${items}</ul>`;
 }
 
-function renderJobModal(pendingChoice) {
+function renderJobModal(pendingChoice, mode) {
   if (!pendingChoice) return "";
+  const chooseFn = mode === "online" ? "App.chooseOnlineJob" : "App.chooseJob";
   const offerButtons = pendingChoice.offers
-    .map((o, i) => `<button class="btn btn-offer" onclick="App.chooseJob(${i})">${escapeHtml(o.name)}(給料${o.salary}万円/回)</button>`)
+    .map((o, i) => `<button class="btn btn-offer" onclick="${chooseFn}(${i})">${escapeHtml(o.name)}(給料${o.salary}万円/回)</button>`)
     .join("");
   return `
     <div class="modal-backdrop">
@@ -107,8 +179,8 @@ function renderJobModal(pendingChoice) {
   `;
 }
 
-function renderGameScreen(state, log, humanId) {
-  const human = state.players.find((p) => p.id === humanId);
+function renderGameScreen(state, log, humanId, mode) {
+  const rollFn = mode === "online" ? "App.handleOnlineRoll" : "App.handleRoll";
   const turnPlayer = state.players[state.currentTurnIndex];
   const isHumanTurn = state.status === "playing" && turnPlayer && turnPlayer.id === humanId && !state.pendingChoice;
   const rollDisabled = !isHumanTurn;
@@ -117,15 +189,15 @@ function renderGameScreen(state, log, humanId) {
       <div class="turn-banner">${state.status === "playing" ? `${escapeHtml(turnPlayer.name)} の番です` : "ゲーム終了"}</div>
       ${renderBoard(state)}
       ${renderPlayerList(state)}
-      <button id="roll-btn" class="btn btn-primary" ${rollDisabled ? "disabled" : ""} onclick="App.handleRoll()">サイコロを振る</button>
+      <button id="roll-btn" class="btn btn-primary" ${rollDisabled ? "disabled" : ""} onclick="${rollFn}()">サイコロを振る</button>
       <h3>できごとログ</h3>
       ${renderLog(log)}
-      ${renderJobModal(state.pendingChoice && state.pendingChoice.playerId === humanId ? state.pendingChoice : null)}
+      ${renderJobModal(state.pendingChoice && state.pendingChoice.playerId === humanId ? state.pendingChoice : null, mode)}
     </section>
   `;
 }
 
-function renderResultScreen(state) {
+function renderResultScreen(state, mode) {
   const ranking = getRanking(state);
   const rows = ranking.map((p, i) => `
     <li class="result-row">
@@ -136,12 +208,17 @@ function renderResultScreen(state) {
       <span class="p-money">${p.money}万円</span>
     </li>
   `).join("");
+  const buttons = mode === "online"
+    ? `<button class="btn btn-primary" onclick="App.leaveOnlineRoom()">タイトルへ戻る</button>`
+    : `
+      <button class="btn btn-primary" onclick="App.goSetup()">もう一度遊ぶ</button>
+      <button class="btn" onclick="App.goTitle()">タイトルへ</button>
+    `;
   return `
     <section class="screen screen-result">
       <h2>結果発表</h2>
       <ul class="result-list">${rows}</ul>
-      <button class="btn btn-primary" onclick="App.goSetup()">もう一度遊ぶ</button>
-      <button class="btn" onclick="App.goTitle()">タイトルへ</button>
+      ${buttons}
     </section>
   `;
 }

@@ -1,0 +1,81 @@
+rules_version = '2';
+
+// ライフロード Firestoreセキュリティルール
+// 方針: 個人情報を持たない設計(匿名認証のみ)。部屋番号(ドキュメントID)を知っている
+// 人だけがアクセスでき、一覧(list)は誰にも許可しない。書き込みはロビー中は自分の
+// 参加情報のみ、対戦中は「今の手番のプレイヤー」のみに限定して競合を防ぐ。
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /rooms/{roomCode} {
+
+      function isSignedIn() {
+        return request.auth != null;
+      }
+
+      function myUid() {
+        return request.auth.uid;
+      }
+
+      // 部屋コードを直接指定したget以外(list等)は常に拒否
+      allow get: if isSignedIn();
+      allow list: if false;
+
+      allow create: if isSignedIn() && isValidNewRoom();
+
+      // 注意: create操作はドキュメントが未存在の場合にのみ発火するため、ここでは
+      // 「衝突しない新規部屋コードであること」は暗黙に保証される(既存コードと衝突
+      // した場合はそもそもcreateではなくupdate扱いとなり、下のupdateルールを満たさ
+      // ない限り拒否される)。衝突時の再試行はクライアント側(room.js)で行う。
+      function isValidNewRoom() {
+        let d = request.resource.data;
+        return d.hostUid == myUid()
+          && d.status == "lobby"
+          && d.maxPlayers is int && d.maxPlayers >= 2 && d.maxPlayers <= 6
+          && d.players.size() == 1
+          && (myUid() in d.players)
+          && d.players[myUid()].nickname is string
+          && d.players[myUid()].nickname.size() >= 1
+          && d.players[myUid()].nickname.size() <= 10;
+      }
+
+      allow update: if isSignedIn() && (isHeartbeatUpdate() || isLobbyUpdate() || isTurnUpdate());
+
+      // 誰でも(参加中なら)自分のハートビートだけは常に更新できる(離脱検知用)
+      function isHeartbeatUpdate() {
+        let changedKeys = request.resource.data.diff(resource.data).affectedKeys();
+        let beforePlayers = resource.data.players;
+        let afterPlayers = request.resource.data.players;
+        return myUid() in beforePlayers
+          && changedKeys.hasOnly(["players"])
+          && afterPlayers.diff(beforePlayers).affectedKeys().hasOnly([myUid()])
+          && afterPlayers[myUid()].diff(beforePlayers[myUid()]).affectedKeys().hasOnly(["lastSeenAt"]);
+      }
+
+      // ロビー中: 自分の参加情報(参加/ニックネーム変更/準備完了など)のみ追加・変更できる
+      function isLobbyUpdate() {
+        let changedKeys = request.resource.data.diff(resource.data).affectedKeys();
+        let beforePlayers = resource.data.players;
+        let afterPlayers = request.resource.data.players;
+        return resource.data.status == "lobby"
+          && request.resource.data.status == "lobby"
+          && changedKeys.hasOnly(["players", "lastActionAt", "expireAt"])
+          && afterPlayers.diff(beforePlayers).affectedKeys().hasOnly([myUid()])
+          && afterPlayers[myUid()].nickname is string
+          && afterPlayers[myUid()].nickname.size() <= 10;
+      }
+
+      // 対戦中: 今の手番のプレイヤーだけが盤面を進められる(ホストが開始する遷移も含む)
+      function isTurnUpdate() {
+        let wasLobby = resource.data.status == "lobby";
+        let hostStartingGame = wasLobby
+          && myUid() == resource.data.hostUid
+          && request.resource.data.status == "playing";
+
+        let isCurrentTurnPlayer = resource.data.status == "playing"
+          && resource.data.currentTurnPlayerUid == myUid();
+
+        return hostStartingGame || isCurrentTurnPlayer;
+      }
+    }
+  }
+}
