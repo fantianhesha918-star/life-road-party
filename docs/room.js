@@ -7,7 +7,7 @@ import {
   onSnapshot,
   serverTimestamp,
   Timestamp,
-} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
 
 const ROOM_CODE_CHARS = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"; // 0/O/1/I/L等の紛らわしい文字を除外
 const ROOM_CODE_LENGTH = 6;

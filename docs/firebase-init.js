@@ -4,22 +4,21 @@
 // 注意: このファイルのAPIキーは「公開前提」の値です(Firebaseのクライアント向け
 // APIキーは秘密情報ではありません)。実際のアクセス制御は firestore.rules 側の
 // セキュリティルールで行っています。
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-app.js";
 import {
   getAuth,
   signInAnonymously,
   onAuthStateChanged,
-} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { getFirestore } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/12.17.0/firebase-auth.js";
+import { getFirestore } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
 
-// TODO: Firebaseコンソールでプロジェクトを作成後、実際の値に置き換える(フェーズ2セットアップ手順を参照)
 const firebaseConfig = {
-  apiKey: "PLACEHOLDER_API_KEY",
-  authDomain: "PLACEHOLDER.firebaseapp.com",
-  projectId: "PLACEHOLDER",
-  storageBucket: "PLACEHOLDER.appspot.com",
-  messagingSenderId: "PLACEHOLDER",
-  appId: "PLACEHOLDER",
+  apiKey: "AIzaSyCYDqffmRtgvGp-PNAC5TPzHp8v9o4zqSs",
+  authDomain: "life-road-party.firebaseapp.com",
+  projectId: "life-road-party",
+  storageBucket: "life-road-party.firebasestorage.app",
+  messagingSenderId: "688927743205",
+  appId: "1:688927743205:web:722f3fc37731828db4c80c",
 };
 
 const firebaseApp = initializeApp(firebaseConfig);
