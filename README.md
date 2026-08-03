@@ -5,12 +5,13 @@
 - 公開URL: https://fantianhesha918-star.github.io/life-road-party/
 - 公開元フォルダ: `docs/`(GitHub Pages)
 - ビルド不要。`docs/`配下を直接編集して`git push`すれば反映される。
+- Firebaseプロジェクト: `life-road-party`(Firestore + 匿名認証、リージョン`asia-northeast1`)
 
-## 現在の状態(フェーズ2: Firebase未接続)
+## 現在の状態(フェーズ2・3: 通信モード動作確認済み)
 
-- 一人モード(CPU対戦)は動作する(フェーズ1で公開済み)。
-- 通信モード(部屋番号で友達と接続)のコードは実装済みだが、**Firebaseプロジェクトが未作成のため未接続**。`docs/firebase-init.js`の`firebaseConfig`がプレースホルダーのままで、実際のFirebaseプロジェクトの値に差し替えるまで通信モードは動作しない。
-- Firestoreセキュリティルールは`firestore.rules`に実装済み。手動でのロジックレビューと、Firestore非依存の変換ロジック(`roomToEngineState`/`engineStateToRoomPatch`)のシミュレーションテストは実施済みだが、**実際のFirestoreエミュレータでの動作検証は未実施**(このマシンにJavaが入っておらずエミュレータを起動できなかったため)。実機・実プロジェクトでの動作確認が必要。
+- 一人モード(CPU対戦)・通信モード(部屋番号で友達と接続)ともに動作確認済み。
+- Firestoreセキュリティルール(`firestore.rules`)は、本番のFirebaseプロジェクトに対するREST APIテスト(部屋作成・参加・不正書き込み拒否・手番制御・ハートビートの8パターン)と、実機(スマホ2端末)での通信対戦の両方で動作確認済み(2026-08-03)。
+- **未完了**: FirestoreのTTLポリシー(`rooms`コレクション・`expireAt`フィールド、放置部屋の自動削除用)がGoogle Cloud Console側で403エラーになり未設定。新規プロジェクトの権限反映待ちの可能性があるため、時間を置いて再設定が必要(手順は下記)。TTL未設定でもゲーム自体の動作には影響しない。
 
 ## ファイル構成
 
@@ -25,17 +26,14 @@
 - `firestore.rules` — Firestoreセキュリティルール(部屋単位アクセス制限・手番プレイヤーのみ書き込み可)
 - `docs/manifest.json` / `docs/service-worker.js` / `docs/icons/` — PWA対応
 
-## Firebaseセットアップ手順(未実施・要作業)
+## 残作業: TTLポリシーの設定
 
-1. https://console.firebase.google.com/ でGoogleアカウントを使い新規プロジェクトを作成する。
-2. Firestore Database を有効化(本番モード、リージョンは`asia-northeast1`推奨)。
-3. Authentication > Sign-in method で「匿名」を有効化する。
-4. Firestore > ルール で`firestore.rules`の内容を貼り付けて公開する。
-5. Firestore > TTL で`rooms`コレクション・`expireAt`フィールドを対象にTTLポリシーを設定する(放置された部屋を自動削除するため)。
-6. プロジェクト設定 > 全般 からWebアプリを追加し、`firebaseConfig`の値を`docs/firebase-init.js`の該当箇所に貼り付ける。
-7. `~/OneDrive/Desktop/クロードコード/API連携リスト.md`にFirebase連携を追記する。
+1. https://console.firebase.google.com/ → `life-road-party`プロジェクト → Firestore Database
+2. 「インデックス」タブ内の「TTL」を開く(Google Cloud Console側の場合は左メニューの「有効期間(TTL)」)
+3. 「ポリシーを作成」→ コレクション グループ`rooms`、タイムスタンプ フィールド`expireAt`で保存
+4. 403エラーが出る場合はプロジェクト作成直後で権限反映待ちの可能性があるため、時間を置いて再試行する
 
-## 今後の予定
+## 今後の予定(フェーズ4・任意)
 
-- 上記Firebaseセットアップ完了後、実機2台以上での通信対戦の動作確認
-- 株・保険などの追加ギミック、CPU AIの強化(フェーズ4)
+- 株・保険などの追加ギミック、CPU AIの性格プリセット
+- 通信モードへのCPU枠混在、演出強化
