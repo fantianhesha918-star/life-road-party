@@ -1,4 +1,4 @@
-const CACHE_NAME = "liferoad-cache-v1";
+const CACHE_NAME = "liferoad-cache-v2";
 const ASSETS = [
   "./",
   "./index.html",
@@ -8,6 +8,8 @@ const ASSETS = [
   "./cpu.js",
   "./game-engine.js",
   "./game-data.js",
+  "./shop-data.js",
+  "./profile.js",
   "./manifest.json",
   "./icons/icon-192.png",
   "./icons/icon-512.png",

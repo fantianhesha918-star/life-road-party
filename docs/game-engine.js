@@ -10,6 +10,7 @@ function createInitialState(playerConfigs) {
       name: p.name,
       isCPU: !!p.isCPU,
       color: TOKEN_COLORS[i % TOKEN_COLORS.length],
+      avatar: p.avatar || { color: TOKEN_COLORS[i % TOKEN_COLORS.length], hatEmoji: null, accessoryEmoji: null },
       position: 0,
       money: START_MONEY,
       job: null,

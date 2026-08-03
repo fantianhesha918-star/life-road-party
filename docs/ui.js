@@ -20,13 +20,110 @@ function escapeHtml(str) {
   }[c]));
 }
 
-function renderTitleScreen(hasSave) {
+function renderAvatarBadge(visual, size) {
+  const px = size || 28;
+  const hatSize = Math.round(px * 0.55);
+  const accSize = Math.round(px * 0.45);
+  return `
+    <span class="avatar-badge" style="width:${px}px;height:${px}px;background:${visual.color}">
+      ${visual.hatEmoji ? `<span class="avatar-hat" style="font-size:${hatSize}px">${visual.hatEmoji}</span>` : ""}
+      ${visual.accessoryEmoji ? `<span class="avatar-acc" style="font-size:${accSize}px">${visual.accessoryEmoji}</span>` : ""}
+    </span>
+  `;
+}
+
+function renderTitleScreen(hasSave, profile) {
+  const visual = LifeRoadProfile.getAvatarVisual(profile.equipped);
   return `
     <section class="screen screen-title">
+      <div class="title-profile-row">
+        ${renderAvatarBadge(visual, 40)}
+        <span class="coin-display">🪙 ${profile.coins}</span>
+      </div>
       <p class="lead">友達と通信、または一人でCPUと対戦して遊べる、人生ゲーム風すごろくです。</p>
       ${hasSave ? `<button class="btn btn-primary" onclick="App.continueGame()">続きから再開する</button>` : ""}
       <button class="btn ${hasSave ? "" : "btn-primary"}" onclick="App.goSetup()">一人で遊ぶ(CPU対戦)</button>
       <button class="btn" onclick="App.goOnlineMenu()">友達と通信して遊ぶ</button>
+      <button class="btn" onclick="App.goProfile()">キャラクターを編集</button>
+      <button class="btn" onclick="App.goShop()">ショップ</button>
+    </section>
+  `;
+}
+
+function renderProfileScreen(profile) {
+  const visual = LifeRoadProfile.getAvatarVisual(profile.equipped);
+  const categories = [
+    { key: "color", label: "色", allowNone: false },
+    { key: "hat", label: "帽子", allowNone: true },
+    { key: "accessory", label: "アクセサリー", allowNone: true },
+  ];
+  const sections = categories
+    .map((cat) => {
+      const owned = ALL_ITEMS.filter((it) => it.category === cat.key && profile.ownedItems.includes(it.id));
+      const noneButton = cat.allowNone
+        ? `<button class="btn item-btn ${!profile.equipped[cat.key] ? "item-equipped" : ""}" onclick="App.equipAvatarItem('${cat.key}', null)">なし</button>`
+        : "";
+      const itemButtons = owned
+        .map((it) => {
+          const isEquipped = profile.equipped[cat.key] === it.id;
+          const preview = it.category === "color" ? `<span class="swatch" style="background:${it.value}"></span>` : it.emoji;
+          return `<button class="btn item-btn ${isEquipped ? "item-equipped" : ""}" onclick="App.equipAvatarItem('${cat.key}', '${it.id}')">${preview} ${escapeHtml(it.name)}</button>`;
+        })
+        .join("");
+      return `
+        <div class="field">
+          <h3>${cat.label}</h3>
+          <div class="item-grid">${noneButton}${itemButtons}</div>
+        </div>
+      `;
+    })
+    .join("");
+  return `
+    <section class="screen screen-profile">
+      <h2>キャラクターを編集</h2>
+      <div class="avatar-preview">${renderAvatarBadge(visual, 72)}</div>
+      <p class="coin-display">🪙 ${profile.coins}</p>
+      ${sections}
+      <button class="btn" onclick="App.goShop()">ショップへ</button>
+      <button class="btn" onclick="App.goTitle()">タイトルへ戻る</button>
+    </section>
+  `;
+}
+
+function renderShopScreen(profile) {
+  const categories = [
+    { key: "color", label: "色" },
+    { key: "hat", label: "帽子" },
+    { key: "accessory", label: "アクセサリー" },
+  ];
+  const sections = categories
+    .map((cat) => {
+      const items = ALL_ITEMS.filter((it) => it.category === cat.key);
+      const rows = items
+        .map((it) => {
+          const owned = profile.ownedItems.includes(it.id);
+          const canBuy = !owned && profile.coins >= it.price;
+          const preview = it.category === "color" ? `<span class="swatch" style="background:${it.value}"></span>` : it.emoji;
+          const actionLabel = owned ? "所持済み" : `🪙${it.price} で購入`;
+          return `
+            <li class="player-row">
+              <span>${preview}</span>
+              <span class="p-name">${escapeHtml(it.name)}</span>
+              <button class="btn btn-offer" ${owned || !canBuy ? "disabled" : ""} onclick="App.buyShopItem('${it.id}')">${actionLabel}</button>
+            </li>
+          `;
+        })
+        .join("");
+      return `<div class="field"><h3>${cat.label}</h3><ul class="player-list">${rows}</ul></div>`;
+    })
+    .join("");
+  return `
+    <section class="screen screen-shop">
+      <h2>ショップ</h2>
+      <p class="coin-display">🪙 ${profile.coins}</p>
+      ${sections}
+      <button class="btn" onclick="App.goProfile()">キャラクター編集へ</button>
+      <button class="btn" onclick="App.goTitle()">タイトルへ戻る</button>
     </section>
   `;
 }
@@ -81,8 +178,10 @@ function renderOnlineLobbyScreen(room, roomCode, myUid) {
       const tags = [uid === room.hostUid ? "ホスト" : null, uid === myUid ? "あなた" : null]
         .filter(Boolean)
         .join("・");
+      const visual = p.avatar || { color: "#999999", hatEmoji: null, accessoryEmoji: null };
       return `
         <li class="player-row">
+          ${renderAvatarBadge(visual, 26)}
           <span class="p-name">${escapeHtml(p.nickname)}</span>
           ${tags ? `<span class="badge">${tags}</span>` : ""}
         </li>
@@ -149,9 +248,10 @@ function renderBoard(state) {
 function renderPlayerList(state) {
   const rows = state.players.map((p, i) => {
     const isTurn = i === state.currentTurnIndex && state.status === "playing";
+    const visual = p.avatar || { color: p.color, hatEmoji: null, accessoryEmoji: null };
     return `
       <li class="player-row ${isTurn ? "is-turn" : ""} ${p.finished ? "is-finished" : ""}">
-        <span class="swatch" style="background:${p.color}"></span>
+        ${renderAvatarBadge(visual, 26)}
         <span class="p-name">${escapeHtml(p.name)}${p.isCPU ? "(CPU)" : ""}</span>
         <span class="p-job">${p.job ? escapeHtml(p.job.name) : "無職"}</span>
         <span class="p-money">${p.money}万円</span>
@@ -202,17 +302,21 @@ function renderGameScreen(state, log, humanId, mode) {
   `;
 }
 
-function renderResultScreen(state, mode) {
+function renderResultScreen(state, mode, rewardCoins) {
   const ranking = getRanking(state);
-  const rows = ranking.map((p, i) => `
+  const rows = ranking.map((p, i) => {
+    const visual = p.avatar || { color: p.color, hatEmoji: null, accessoryEmoji: null };
+    return `
     <li class="result-row">
       <span class="result-rank">${i + 1}位</span>
-      <span class="swatch" style="background:${p.color}"></span>
+      ${renderAvatarBadge(visual, 26)}
       <span class="p-name">${escapeHtml(p.name)}${p.isCPU ? "(CPU)" : ""}</span>
       <span class="p-job">${p.job ? escapeHtml(p.job.name) : "無職"}</span>
       <span class="p-money">${p.money}万円</span>
     </li>
-  `).join("");
+  `;
+  }).join("");
+  const rewardHtml = typeof rewardCoins === "number" ? `<p class="coin-display">獲得コイン: +${rewardCoins} 🪙</p>` : "";
   const buttons = mode === "online"
     ? `<button class="btn btn-primary" onclick="App.leaveOnlineRoom()">タイトルへ戻る</button>`
     : `
@@ -223,6 +327,7 @@ function renderResultScreen(state, mode) {
     <section class="screen screen-result">
       <h2>結果発表</h2>
       <ul class="result-list">${rows}</ul>
+      ${rewardHtml}
       ${buttons}
     </section>
   `;

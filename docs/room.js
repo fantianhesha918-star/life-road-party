@@ -30,6 +30,13 @@ function roomRef(roomCode) {
   return doc(window.FirebaseCtx.db, "rooms", roomCode);
 }
 
+// 端末のローカルプロフィールから、現在装備している見た目だけを取り出す
+// (コイン・所持アイテム一覧はFirestoreには送らない)
+function currentAvatarVisual() {
+  const profile = window.LifeRoadProfile.loadProfile();
+  return window.LifeRoadProfile.getAvatarVisual(profile.equipped);
+}
+
 // 部屋を新規作成する。部屋コードが偶然重複した場合は数回リトライする。
 async function createRoom({ nickname, maxPlayers }) {
   const user = await window.FirebaseCtx.ensureSignedIn();
@@ -54,6 +61,7 @@ async function createRoom({ nickname, maxPlayers }) {
           nickname,
           seatIndex: 0,
           isCPU: false,
+          avatar: currentAvatarVisual(),
           position: 0,
           money: window.LifeRoadData.START_MONEY,
           job: null,
@@ -100,6 +108,7 @@ async function joinRoom({ roomCode, nickname }) {
       nickname,
       seatIndex: existingUids.length,
       isCPU: false,
+      avatar: currentAvatarVisual(),
       position: 0,
       money: window.LifeRoadData.START_MONEY,
       job: null,

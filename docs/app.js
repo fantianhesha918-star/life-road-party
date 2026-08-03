@@ -15,6 +15,7 @@ function roomToEngineState(room) {
       name: p.nickname || `プレイヤー${i + 1}`,
       isCPU: !!p.isCPU,
       color: TOKEN_COLORS[i % TOKEN_COLORS.length],
+      avatar: p.avatar || { color: TOKEN_COLORS[i % TOKEN_COLORS.length], hatEmoji: null, accessoryEmoji: null },
       position: typeof p.position === "number" ? p.position : 0,
       money: typeof p.money === "number" ? p.money : window.LifeRoadData.START_MONEY,
       job: p.job || null,
@@ -62,6 +63,7 @@ const App = {
   state: null,
   log: [],
   humanId: "human",
+  lastReward: null,
 
   // ---- 通信モード用の状態 ----
   online: null, // { roomCode, uid, nickname, room, unsubscribe, log, localTurnState }
@@ -95,6 +97,32 @@ const App = {
     this.render();
   },
 
+  goProfile() {
+    this.screen = "profile";
+    this.render();
+  },
+
+  goShop() {
+    this.screen = "shop";
+    this.render();
+  },
+
+  equipAvatarItem(category, itemId) {
+    const profile = LifeRoadProfile.loadProfile();
+    LifeRoadProfile.equipItem(profile, category, itemId);
+    LifeRoadProfile.saveProfile(profile);
+    this.render();
+  },
+
+  buyShopItem(itemId) {
+    const profile = LifeRoadProfile.loadProfile();
+    const result = LifeRoadProfile.purchaseItem(profile, itemId);
+    if (result.ok) {
+      LifeRoadProfile.saveProfile(profile);
+    }
+    this.render();
+  },
+
   continueGame() {
     const saved = this.loadSave();
     if (!saved) {
@@ -116,9 +144,16 @@ const App = {
     const nickname = ((nicknameInput && nicknameInput.value) || "プレイヤー").trim().slice(0, 10) || "プレイヤー";
     const cpuCount = parseInt((cpuSelect && cpuSelect.value) || "1", 10);
 
-    const configs = [{ id: "human", name: nickname, isCPU: false }];
+    const profile = LifeRoadProfile.loadProfile();
+    const humanAvatar = LifeRoadProfile.getAvatarVisual(profile.equipped);
+    const configs = [{ id: "human", name: nickname, isCPU: false, avatar: humanAvatar }];
     for (let i = 1; i <= cpuCount; i++) {
-      configs.push({ id: `cpu${i}`, name: `CPU${i}`, isCPU: true });
+      configs.push({
+        id: `cpu${i}`,
+        name: `CPU${i}`,
+        isCPU: true,
+        avatar: { color: TOKEN_COLORS[i % TOKEN_COLORS.length], hatEmoji: null, accessoryEmoji: "🤖" },
+      });
     }
     this.humanId = "human";
     this.state = createInitialState(configs);
@@ -150,6 +185,8 @@ const App = {
     this.saveGame();
     this.render();
     if (this.state.status === "finished") {
+      const human = this.state.players.find((p) => p.id === this.humanId);
+      this.lastReward = this.grantGameReward(human ? human.money : 0);
       setTimeout(() => {
         this.screen = "result";
         this.clearSave();
@@ -158,6 +195,13 @@ const App = {
       return;
     }
     this.maybeRunCPUTurn();
+  },
+
+  grantGameReward(finalMoney) {
+    const profile = LifeRoadProfile.loadProfile();
+    const reward = LifeRoadProfile.applyGameReward(profile, finalMoney);
+    LifeRoadProfile.saveProfile(profile);
+    return reward;
   },
 
   maybeRunCPUTurn() {
@@ -318,6 +362,8 @@ const App = {
       unsubscribe: null,
       log: [{ type: "info", text: "部屋に接続しました" }],
       localTurnState: null,
+      rewardGranted: false,
+      lastReward: null,
     };
     this.saveOnlineRoomRef();
     this.screen = "online-lobby";
@@ -363,6 +409,12 @@ const App = {
     } else if (status === "finished") {
       this.screen = "online-result";
       this.stopHeartbeat();
+      if (!this.online.rewardGranted) {
+        this.online.rewardGranted = true;
+        const state = roomToEngineState(this.online.room);
+        const me = state.players.find((p) => p.id === this.online.uid);
+        this.online.lastReward = this.grantGameReward(me ? me.money : 0);
+      }
     }
     this.render();
   },
@@ -429,13 +481,17 @@ const App = {
   render() {
     const view = document.getElementById("view");
     if (this.screen === "title") {
-      view.innerHTML = renderTitleScreen(this.hasSave());
+      view.innerHTML = renderTitleScreen(this.hasSave(), LifeRoadProfile.loadProfile());
+    } else if (this.screen === "profile") {
+      view.innerHTML = renderProfileScreen(LifeRoadProfile.loadProfile());
+    } else if (this.screen === "shop") {
+      view.innerHTML = renderShopScreen(LifeRoadProfile.loadProfile());
     } else if (this.screen === "setup") {
       view.innerHTML = renderSetupScreen();
     } else if (this.screen === "game") {
       view.innerHTML = renderGameScreen(this.state, this.log, this.humanId, "solo");
     } else if (this.screen === "result") {
-      view.innerHTML = renderResultScreen(this.state, "solo");
+      view.innerHTML = renderResultScreen(this.state, "solo", this.lastReward);
     } else if (this.screen === "online-menu") {
       view.innerHTML = renderOnlineMenuScreen(this.onlineError, this.onlineBusy, this.loadOnlineRoomRef());
     } else if (this.screen === "online-lobby" && this.online && this.online.room) {
@@ -446,7 +502,7 @@ const App = {
       view.innerHTML = renderGameScreen(displayState, this.online.log, this.online.uid, "online");
     } else if (this.screen === "online-result" && this.online && this.online.room) {
       const state = roomToEngineState(this.online.room);
-      view.innerHTML = renderResultScreen(state, "online");
+      view.innerHTML = renderResultScreen(state, "online", this.online.lastReward);
     }
   },
 };

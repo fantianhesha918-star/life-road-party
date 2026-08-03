@@ -313,3 +313,66 @@ body {
   font-weight: bold;
   width: 36px;
 }
+
+.avatar-badge {
+  position: relative;
+  display: inline-flex;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.avatar-hat {
+  position: absolute;
+  top: -0.65em;
+  left: 50%;
+  transform: translateX(-50%);
+  line-height: 1;
+}
+
+.avatar-acc {
+  position: absolute;
+  bottom: -0.3em;
+  right: -0.3em;
+  line-height: 1;
+}
+
+.title-profile-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.coin-display {
+  font-weight: bold;
+  color: var(--brand-dark);
+  text-align: center;
+}
+
+.avatar-preview {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0;
+}
+
+.item-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.item-btn {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.item-equipped {
+  outline: 2px solid var(--brand);
+  background: #e6f4ea;
+}
