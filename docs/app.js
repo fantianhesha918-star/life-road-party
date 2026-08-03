@@ -1,6 +1,7 @@
 // ライフロード 起動・画面遷移・全体配線
 
 const SAVE_KEY = "liferoad_solo_save_v1";
+const ONLINE_ROOM_KEY = "liferoad_online_room_v1";
 const HEARTBEAT_INTERVAL_MS = 15000;
 
 // Firestoreの部屋ドキュメント(playersがuidキーのマップ)を、game-engine.jsが
@@ -262,6 +263,45 @@ const App = {
       .catch((err) => this.handleOnlineError(err));
   },
 
+  resumeOnlineRoom() {
+    const saved = this.loadOnlineRoomRef();
+    if (!saved) {
+      this.goOnlineMenu();
+      return;
+    }
+    this.onlineError = null;
+    this.onlineBusy = true;
+    this.render();
+    this.loadFirebaseModules()
+      .then(() => window.Room.joinRoom({ roomCode: saved.roomCode, nickname: saved.nickname }))
+      .then(({ roomCode, uid }) => this.enterOnlineRoom(roomCode, uid, saved.nickname))
+      .catch((err) => this.handleOnlineError(err));
+  },
+
+  saveOnlineRoomRef() {
+    if (!this.online) return;
+    try {
+      localStorage.setItem(
+        ONLINE_ROOM_KEY,
+        JSON.stringify({ roomCode: this.online.roomCode, nickname: this.online.nickname })
+      );
+    } catch (e) {
+      // 保存できなくても致命的ではないので無視
+    }
+  },
+
+  loadOnlineRoomRef() {
+    try {
+      return JSON.parse(localStorage.getItem(ONLINE_ROOM_KEY));
+    } catch (e) {
+      return null;
+    }
+  },
+
+  clearOnlineRoomRef() {
+    localStorage.removeItem(ONLINE_ROOM_KEY);
+  },
+
   handleOnlineError(err) {
     this.onlineBusy = false;
     this.onlineError = (err && err.message) || "通信エラーが発生しました";
@@ -279,6 +319,7 @@ const App = {
       log: [{ type: "info", text: "部屋に接続しました" }],
       localTurnState: null,
     };
+    this.saveOnlineRoomRef();
     this.screen = "online-lobby";
     this.render();
     this.online.unsubscribe = window.Room.subscribeRoom(roomCode, (room) => {
@@ -371,6 +412,7 @@ const App = {
   },
 
   leaveOnlineRoom() {
+    this.clearOnlineRoomRef();
     this.teardownOnline();
     this.mode = "solo";
     this.goTitle();
@@ -395,7 +437,7 @@ const App = {
     } else if (this.screen === "result") {
       view.innerHTML = renderResultScreen(this.state, "solo");
     } else if (this.screen === "online-menu") {
-      view.innerHTML = renderOnlineMenuScreen(this.onlineError, this.onlineBusy);
+      view.innerHTML = renderOnlineMenuScreen(this.onlineError, this.onlineBusy, this.loadOnlineRoomRef());
     } else if (this.screen === "online-lobby" && this.online && this.online.room) {
       view.innerHTML = renderOnlineLobbyScreen(this.online.room, this.online.roomCode, this.online.uid);
     } else if (this.screen === "online-game" && this.online && this.online.room) {

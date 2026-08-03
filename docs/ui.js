@@ -31,7 +31,7 @@ function renderTitleScreen(hasSave) {
   `;
 }
 
-function renderOnlineMenuScreen(error, busy) {
+function renderOnlineMenuScreen(error, busy, lastRoom) {
   const sizeOptions = [2, 3, 4, 5, 6]
     .map((n) => `<option value="${n}" ${n === 4 ? "selected" : ""}>${n}人まで</option>`)
     .join("");
@@ -39,6 +39,11 @@ function renderOnlineMenuScreen(error, busy) {
     <section class="screen screen-online-menu">
       <h2>通信対戦</h2>
       ${error ? `<p class="error-text">${escapeHtml(error)}</p>` : ""}
+      ${
+        lastRoom
+          ? `<button class="btn btn-primary" ${busy ? "disabled" : ""} onclick="App.resumeOnlineRoom()">前回の部屋(${escapeHtml(lastRoom.roomCode)})に戻る</button>`
+          : ""
+      }
       <label class="field">
         <span>あなたのニックネーム</span>
         <input id="online-nickname-input" type="text" maxlength="10" value="プレイヤー" />

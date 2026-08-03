@@ -82,12 +82,14 @@ async function joinRoom({ roomCode, nickname }) {
     throw new Error("部屋が見つかりませんでした。部屋番号を確認してください");
   }
   const room = snap.data();
+  const existingUids = Object.keys(room.players || {});
+
+  // 既に参加済みのメンバーなら、対戦中・終了後でも再入室できる(タブを閉じた/リロードした場合の復帰)
+  if (existingUids.includes(uid)) {
+    return { roomCode, uid };
+  }
   if (room.status !== "lobby") {
     throw new Error("この部屋はすでに対戦が始まっています");
-  }
-  const existingUids = Object.keys(room.players || {});
-  if (existingUids.includes(uid)) {
-    return { roomCode, uid }; // 再入室(リロード等)
   }
   if (existingUids.length >= room.maxPlayers) {
     throw new Error("この部屋は満員です");
