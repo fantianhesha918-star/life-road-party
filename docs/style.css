@@ -1,0 +1,291 @@
+:root {
+  --brand: #2e7d6b;
+  --brand-dark: #1f5b4d;
+  --bg: #f5f7f6;
+  --card: #ffffff;
+  --text: #24312d;
+  --muted: #6b7a75;
+  --danger: #c0392b;
+  --ok: #2e7d6b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  padding-bottom: 24px;
+}
+
+.app-header {
+  background: var(--brand);
+  color: #fff;
+  padding: 14px 16px;
+  text-align: center;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+#view {
+  padding: 12px;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lead {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.btn {
+  display: block;
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 1rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn-primary {
+  background: var(--brand);
+  color: #fff;
+  font-weight: bold;
+}
+
+.btn-disabled,
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--card);
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+.field input,
+.field select {
+  font-size: 1rem;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid #ccd6d2;
+}
+
+.turn-banner {
+  background: var(--brand-dark);
+  color: #fff;
+  padding: 10px;
+  border-radius: 10px;
+  text-align: center;
+  font-weight: bold;
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+}
+
+.cell {
+  background: var(--card);
+  border-radius: 8px;
+  padding: 4px;
+  min-height: 64px;
+  font-size: 0.65rem;
+  text-align: center;
+  position: relative;
+  border: 1px solid #e1e8e5;
+}
+
+.cell-start,
+.cell-goal {
+  background: #fff3cd;
+  border-color: #e9c46a;
+}
+
+.cell-job {
+  background: #e8f0fe;
+}
+
+.cell-payday {
+  background: #e6f4ea;
+}
+
+.cell-event {
+  background: #fdeaea;
+}
+
+.cell-fortune {
+  background: #f3e8fd;
+}
+
+.cell-index {
+  font-size: 0.6rem;
+  color: var(--muted);
+}
+
+.cell-icon {
+  font-size: 1.1rem;
+  line-height: 1.2;
+}
+
+.cell-label {
+  font-size: 0.6rem;
+  line-height: 1.1;
+}
+
+.cell-tokens {
+  display: flex;
+  justify-content: center;
+  gap: 2px;
+  flex-wrap: wrap;
+  min-height: 10px;
+}
+
+.token {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+
+.player-list,
+.result-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.player-row,
+.result-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--card);
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+.player-row.is-turn {
+  outline: 2px solid var(--brand);
+}
+
+.player-row.is-finished {
+  opacity: 0.7;
+}
+
+.swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.p-name {
+  flex: 1;
+  font-weight: bold;
+}
+
+.p-job {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.p-money {
+  font-weight: bold;
+  color: var(--brand-dark);
+}
+
+.badge {
+  background: var(--brand);
+  color: #fff;
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--card);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+}
+
+.log-list li {
+  font-size: 0.8rem;
+  border-bottom: 1px dashed #e1e8e5;
+  padding-bottom: 4px;
+}
+
+.log-list li:last-child {
+  border-bottom: none;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 10;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.btn-offer {
+  background: #e8f0fe;
+  text-align: left;
+}
+
+.result-rank {
+  font-weight: bold;
+  width: 36px;
+}
