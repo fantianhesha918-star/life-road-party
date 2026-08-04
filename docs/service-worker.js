@@ -35,6 +35,10 @@ self.addEventListener("activate", (event) => {
 // ネットワーク優先(取得できたら常に最新を使い、キャッシュに保存)・オフライン時のみキャッシュに
 // フォールバックする方式にする(2026-08-04変更)。
 self.addEventListener("fetch", (event) => {
+  const url = new URL(event.request.url);
+  const isSameOriginGet = event.request.method === "GET" && url.origin === self.location.origin;
+  if (!isSameOriginGet) return; // Firestore通信(POST等)・外部CDNはこのアプリのキャッシュ対象外、素通しする
+
   event.respondWith(
     fetch(event.request)
       .then((response) => {

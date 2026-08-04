@@ -35,7 +35,6 @@ let currentAction = null;
 
 let hopState = null; // { fromIndex, toIndex, startTime, durationMs, onDone }
 let currentIndex = 0;
-let cameraTarget = new THREE.Vector3();
 let cameraCurrentPos = new THREE.Vector3();
 
 function squarePosition(index) {
@@ -198,8 +197,6 @@ function updateHop(now) {
 }
 
 function updateCamera() {
-  const focusPos = squarePosition(hopState ? character.position.x / SQUARE_SPACING : currentIndex);
-  cameraTarget.set(focusPos.x, 0, focusPos.z);
   const desired = new THREE.Vector3(character.position.x, CAMERA_UP, CAMERA_BACK);
   cameraCurrentPos.lerp(desired, CAMERA_LERP);
   camera.position.copy(cameraCurrentPos);
