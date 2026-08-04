@@ -15,7 +15,7 @@ function roomToEngineState(room) {
       name: p.nickname || `プレイヤー${i + 1}`,
       isCPU: !!p.isCPU,
       color: TOKEN_COLORS[i % TOKEN_COLORS.length],
-      avatar: p.avatar || { color: TOKEN_COLORS[i % TOKEN_COLORS.length], hatEmoji: null, accessoryEmoji: null },
+      avatar: p.avatar || { color: TOKEN_COLORS[i % TOKEN_COLORS.length], speciesEmoji: null, hatEmoji: null, accessoryEmoji: null },
       position: typeof p.position === "number" ? p.position : 0,
       money: typeof p.money === "number" ? p.money : window.LifeRoadData.START_MONEY,
       job: p.job || null,
@@ -65,6 +65,11 @@ const App = {
   humanId: "human",
   lastReward: null,
 
+  // ---- ターンハブ(演出+選択肢メニュー)のUI状態。solo/online共通で使う ----
+  hub: { view: "menu", spinNumber: null, itemMessage: null },
+  // ---- マップ上のホップ移動アニメーション中の一時的な表示位置。solo/online共通で使う ----
+  hopAnimation: null, // { playerId, position }
+
   // ---- 通信モード用の状態 ----
   online: null, // { roomCode, uid, nickname, room, unsubscribe, log, localTurnState }
   onlineError: null,
@@ -88,6 +93,8 @@ const App = {
     this.screen = "title";
     this.state = null;
     this.log = [];
+    this.hub = { view: "menu", spinNumber: null, itemMessage: null };
+    this.hopAnimation = null;
     this.render();
   },
 
@@ -105,6 +112,27 @@ const App = {
   goShop() {
     this.screen = "shop";
     this.render();
+  },
+
+  // ==================== 盤面3D化・フェーズA(技術検証) ====================
+  // 本番のプレイ導線には未接続。タイトル画面の検証ボタンからのみ呼ばれる。
+
+  loadBoard3DModules() {
+    if (window.LifeRoadBoard3D) return Promise.resolve();
+    return import("./board3d.js");
+  },
+
+  testBoard3D() {
+    this.loadBoard3DModules().then(() => {
+      document.getElementById("board3d-overlay").classList.add("is-active");
+      window.LifeRoadBoard3D.mount(document.getElementById("board3d-canvas"));
+      window.LifeRoadBoard3D.hopSteps(0, 6, { stepDurationMs: 150 });
+    });
+  },
+
+  closeBoard3DTest() {
+    document.getElementById("board3d-overlay").classList.remove("is-active");
+    if (window.LifeRoadBoard3D) window.LifeRoadBoard3D.dispose();
   },
 
   equipAvatarItem(category, itemId) {
@@ -133,6 +161,8 @@ const App = {
     this.state = saved.state;
     this.log = saved.log;
     this.humanId = saved.humanId;
+    this.hub = { view: "menu", spinNumber: null, itemMessage: null };
+    this.hopAnimation = null;
     this.screen = "game";
     this.render();
     this.maybeRunCPUTurn();
@@ -152,26 +182,126 @@ const App = {
         id: `cpu${i}`,
         name: `CPU${i}`,
         isCPU: true,
+        personality: LifeRoadCPU.pickRandomPersonality(),
         avatar: { color: TOKEN_COLORS[i % TOKEN_COLORS.length], hatEmoji: null, accessoryEmoji: "🤖" },
       });
     }
     this.humanId = "human";
     this.state = createInitialState(configs);
     this.log = [{ type: "info", text: "ゲーム開始！" }];
+    this.hub = { view: "menu", spinNumber: null, itemMessage: null };
+    this.hopAnimation = null;
     this.screen = "game";
     this.saveGame();
     this.render();
     this.maybeRunCPUTurn();
   },
 
-  handleRoll() {
+  handleRoll(roll) {
     if (!this.state || this.state.status !== "playing") return;
     const turnPlayer = currentPlayer(this.state);
     if (turnPlayer.id !== this.humanId || this.state.pendingChoice) return;
-    const roll = rollDice();
-    const result = applyRoll(this.state, roll);
-    this.pushLog(result.entries);
-    this.afterTurnAction();
+    const actualRoll = typeof roll === "number" ? roll : rollDice();
+    const playerId = turnPlayer.id;
+    const fromPos = turnPlayer.position;
+    const result = applyRoll(this.state, actualRoll);
+    const toPos = turnPlayer.position;
+    this.runHopSteps(playerId, fromPos, toPos, () => {
+      this.pushLog(result.entries);
+      this.afterTurnAction();
+    });
+  },
+
+  // ---- マップ上のホップ移動アニメーション(solo/online共通) ----
+
+  runHopSteps(playerId, fromPos, toPos, onDone) {
+    if (toPos <= fromPos) {
+      this.hopAnimation = null;
+      onDone();
+      return;
+    }
+    let pos = fromPos;
+    this.hopAnimation = { playerId, position: pos };
+    this.render();
+    const step = () => {
+      pos += 1;
+      this.hopAnimation = { playerId, position: pos };
+      this.render();
+      if (pos >= toPos) {
+        setTimeout(() => {
+          this.hopAnimation = null;
+          onDone();
+        }, 150);
+      } else {
+        setTimeout(step, 150);
+      }
+    };
+    setTimeout(step, 150);
+  },
+
+  // ---- ターンハブ(演出+選択肢メニュー) ----
+
+  showHubView(view) {
+    this.hub = { view, spinNumber: null, itemMessage: null };
+    this.render();
+  },
+
+  useConsumable(itemId) {
+    const profile = LifeRoadProfile.loadProfile();
+    const result = LifeRoadProfile.useConsumableItem(profile, itemId);
+    if (!result.ok) return;
+    LifeRoadProfile.saveProfile(profile);
+
+    if (this.mode === "online") {
+      if (!this.online || !this.online.room) return;
+      if (!this.online.localTurnState) this.online.localTurnState = roomToEngineState(this.online.room);
+      const entry = applyItemEffect(this.online.localTurnState, this.online.uid, result.delta, result.item.name);
+      this.pushOnlineLog([entry]);
+    } else {
+      if (!this.state) return;
+      const entry = applyItemEffect(this.state, this.humanId, result.delta, result.item.name);
+      this.pushLog([entry]);
+      this.saveGame();
+    }
+
+    this.hub = {
+      view: "items",
+      spinNumber: null,
+      itemMessage: `「${result.item.name}」を使った(${result.delta >= 0 ? "+" : ""}${result.delta}万円)`,
+    };
+    this.render();
+  },
+
+  spinRoulette() {
+    if (this.hub.view === "spinning") return;
+    const finalRoll = rollDice();
+    this.hub = { view: "spinning", spinNumber: rollDice(), itemMessage: null };
+    this.render();
+
+    let ticks = 0;
+    const totalTicks = 9;
+    const timer = setInterval(() => {
+      ticks++;
+      if (ticks >= totalTicks) {
+        clearInterval(timer);
+        this.hub.spinNumber = finalRoll;
+        this.render();
+        setTimeout(() => this.commitRoulette(finalRoll), 400);
+        return;
+      }
+      this.hub.spinNumber = rollDice();
+      this.render();
+    }, 90);
+  },
+
+  commitRoulette(roll) {
+    this.hub = { view: "menu", spinNumber: null, itemMessage: null };
+    this.hopAnimation = null;
+    if (this.mode === "online") {
+      this.handleOnlineRoll(roll);
+    } else {
+      this.handleRoll(roll);
+    }
   },
 
   chooseJob(offerIndex) {
@@ -212,7 +342,7 @@ const App = {
       if (choosingPlayer && choosingPlayer.isCPU) {
         setTimeout(() => {
           if (!this.state || !this.state.pendingChoice) return;
-          const idx = cpuDecideJobOffer(this.state.pendingChoice.offers);
+          const idx = cpuDecideJobOffer(this.state.pendingChoice.offers, choosingPlayer.personality);
           this.chooseJob(idx);
         }, 700);
       }
@@ -223,10 +353,16 @@ const App = {
     if (!turnPlayer.isCPU) return;
     setTimeout(() => {
       if (!this.state || this.state.status !== "playing") return;
+      const player = currentPlayer(this.state);
+      const playerId = player.id;
+      const fromPos = player.position;
       const roll = rollDice();
       const result = applyRoll(this.state, roll);
-      this.pushLog(result.entries);
-      this.afterTurnAction();
+      const toPos = player.position;
+      this.runHopSteps(playerId, fromPos, toPos, () => {
+        this.pushLog(result.entries);
+        this.afterTurnAction();
+      });
     }, 900);
   },
 
@@ -365,6 +501,8 @@ const App = {
       rewardGranted: false,
       lastReward: null,
     };
+    this.hub = { view: "menu", spinNumber: null, itemMessage: null };
+    this.hopAnimation = null;
     this.saveOnlineRoomRef();
     this.screen = "online-lobby";
     this.render();
@@ -424,22 +562,28 @@ const App = {
     window.Room.startGame(this.online.roomCode, this.online.room).catch((err) => this.handleOnlineError(err));
   },
 
-  handleOnlineRoll() {
+  handleOnlineRoll(roll) {
     if (!this.online || !this.online.room) return;
     const room = this.online.room;
     if (room.status !== "playing" || room.currentTurnPlayerUid !== this.online.uid) return;
 
-    const localState = roomToEngineState(room);
-    const roll = rollDice();
-    const result = applyRoll(localState, roll);
-    this.pushOnlineLog(result.entries);
+    const localState = this.online.localTurnState || roomToEngineState(room);
+    const actualRoll = typeof roll === "number" ? roll : rollDice();
+    const turnPlayer = currentPlayer(localState);
+    const playerId = turnPlayer.id;
+    const fromPos = turnPlayer.position;
+    const result = applyRoll(localState, actualRoll);
+    const toPos = turnPlayer.position;
 
     // 楽観的に自分の画面だけ即時反映する(サーバー確定はonSnapshotで後追い)
     this.online.localTurnState = localState;
-    this.render();
 
-    if (result.pendingChoice) return;
-    this.commitOnlineTurn(localState);
+    this.runHopSteps(playerId, fromPos, toPos, () => {
+      this.pushOnlineLog(result.entries);
+      this.render();
+      if (result.pendingChoice) return;
+      this.commitOnlineTurn(localState);
+    });
   },
 
   chooseOnlineJob(offerIndex) {
@@ -489,7 +633,7 @@ const App = {
     } else if (this.screen === "setup") {
       view.innerHTML = renderSetupScreen();
     } else if (this.screen === "game") {
-      view.innerHTML = renderGameScreen(this.state, this.log, this.humanId, "solo");
+      view.innerHTML = renderGameScreen(this.state, this.log, this.humanId, "solo", LifeRoadProfile.loadProfile(), this.hub, this.hopAnimation);
     } else if (this.screen === "result") {
       view.innerHTML = renderResultScreen(this.state, "solo", this.lastReward);
     } else if (this.screen === "online-menu") {
@@ -499,11 +643,28 @@ const App = {
     } else if (this.screen === "online-game" && this.online && this.online.room) {
       const baseState = roomToEngineState(this.online.room);
       const displayState = this.online.localTurnState || baseState;
-      view.innerHTML = renderGameScreen(displayState, this.online.log, this.online.uid, "online");
+      view.innerHTML = renderGameScreen(displayState, this.online.log, this.online.uid, "online", LifeRoadProfile.loadProfile(), this.hub, this.hopAnimation);
     } else if (this.screen === "online-result" && this.online && this.online.room) {
       const state = roomToEngineState(this.online.room);
       view.innerHTML = renderResultScreen(state, "online", this.online.lastReward);
     }
+    this.scrollBoardIfNeeded();
+  },
+
+  // 手番プレイヤーの位置(ホップ移動中はその一時的な位置)に盤面のスクロール位置を追従させる
+  scrollBoardIfNeeded() {
+    if (this.screen !== "game" && this.screen !== "online-game") return;
+    let state = null;
+    if (this.mode === "online") {
+      if (!this.online || !this.online.room) return;
+      state = this.online.localTurnState || roomToEngineState(this.online.room);
+    } else {
+      state = this.state;
+    }
+    if (!state || !state.players[state.currentTurnIndex]) return;
+    const pos = this.hopAnimation ? this.hopAnimation.position : state.players[state.currentTurnIndex].position;
+    const el = document.getElementById(`board-cell-${pos}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
   },
 };
 

@@ -8,6 +8,7 @@ function defaultProfile() {
     coins: 0,
     ownedItems: [...FREE_ITEM_IDS],
     equipped: { ...DEFAULT_EQUIPPED },
+    consumables: {},
     gamesPlayed: 0,
   };
 }
@@ -17,12 +18,19 @@ function loadProfile() {
     const raw = localStorage.getItem(PROFILE_KEY);
     if (!raw) return defaultProfile();
     const parsed = JSON.parse(raw);
+    const consumables = {};
+    if (parsed.consumables && typeof parsed.consumables === "object") {
+      for (const [id, count] of Object.entries(parsed.consumables)) {
+        if (typeof count === "number" && count > 0 && findShopItem(id)) consumables[id] = count;
+      }
+    }
     return {
       coins: typeof parsed.coins === "number" ? parsed.coins : 0,
       ownedItems: Array.isArray(parsed.ownedItems)
         ? Array.from(new Set([...parsed.ownedItems, ...FREE_ITEM_IDS]))
         : [...FREE_ITEM_IDS],
       equipped: { ...DEFAULT_EQUIPPED, ...(parsed.equipped || {}) },
+      consumables,
       gamesPlayed: typeof parsed.gamesPlayed === "number" ? parsed.gamesPlayed : 0,
     };
   } catch (e) {
@@ -45,6 +53,12 @@ function findShopItem(itemId) {
 function purchaseItem(profile, itemId) {
   const item = findShopItem(itemId);
   if (!item) return { ok: false, reason: "item-not-found" };
+  if (item.category === "consumable") {
+    if (profile.coins < item.price) return { ok: false, reason: "insufficient-coins" };
+    profile.coins -= item.price;
+    profile.consumables[itemId] = (profile.consumables[itemId] || 0) + 1;
+    return { ok: true };
+  }
   if (profile.ownedItems.includes(itemId)) return { ok: false, reason: "already-owned" };
   if (profile.coins < item.price) return { ok: false, reason: "insufficient-coins" };
   profile.coins -= item.price;
@@ -52,14 +66,34 @@ function purchaseItem(profile, itemId) {
   return { ok: true };
 }
 
-// category: "color" | "hat" | "accessory"。hat/accessoryはitemId=nullで「なし」にできる
+// 消耗品を1つ使う。所持数を減らし、効果(所持金の増減額)を返す
+function useConsumableItem(profile, itemId) {
+  const item = findShopItem(itemId);
+  if (!item || item.category !== "consumable") return { ok: false, reason: "item-not-found" };
+  const count = profile.consumables[itemId] || 0;
+  if (count <= 0) return { ok: false, reason: "not-owned" };
+  if (count <= 1) {
+    delete profile.consumables[itemId];
+  } else {
+    profile.consumables[itemId] = count - 1;
+  }
+  const { min, max } = item.effect;
+  const delta = min === max ? min : randIntInclusive(min, max);
+  return { ok: true, item, delta };
+}
+
+function randIntInclusive(min, max) {
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+// category: "color" | "species" | "hat" | "accessory"。hat/accessoryはitemId=nullで「なし」にできる
 function equipItem(profile, category, itemId) {
   if (itemId !== null) {
     if (!profile.ownedItems.includes(itemId)) return { ok: false, reason: "not-owned" };
     const item = findShopItem(itemId);
     if (!item || item.category !== category) return { ok: false, reason: "category-mismatch" };
-  } else if (category === "color") {
-    return { ok: false, reason: "color-required" }; // 色は「なし」にできない
+  } else if (category === "color" || category === "species") {
+    return { ok: false, reason: category === "color" ? "color-required" : "species-required" }; // 色・種は「なし」にできない
   }
   profile.equipped[category] = itemId;
   return { ok: true };
@@ -79,10 +113,12 @@ function applyGameReward(profile, finalMoney) {
 
 function getAvatarVisual(equipped) {
   const colorItem = findShopItem(equipped.color) || findShopItem(DEFAULT_EQUIPPED.color);
+  const speciesItem = findShopItem(equipped.species) || findShopItem(DEFAULT_EQUIPPED.species);
   const hatItem = equipped.hat ? findShopItem(equipped.hat) : null;
   const accItem = equipped.accessory ? findShopItem(equipped.accessory) : null;
   return {
     color: colorItem ? colorItem.value : "#999999",
+    speciesEmoji: speciesItem ? speciesItem.emoji : null,
     hatEmoji: hatItem ? hatItem.emoji : null,
     accessoryEmoji: accItem ? accItem.emoji : null,
   };
@@ -92,6 +128,7 @@ window.LifeRoadProfile = {
   loadProfile,
   saveProfile,
   purchaseItem,
+  useConsumableItem,
   equipItem,
   computeGameReward,
   applyGameReward,

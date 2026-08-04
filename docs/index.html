@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>ライフロード</title>
+<title>アニマルライフ</title>
 <meta name="theme-color" content="#2e7d6b" />
 <link rel="manifest" href="manifest.json" />
 <link rel="icon" href="icons/icon-192.png" />
@@ -14,10 +14,14 @@
 </head>
 <body>
 <header class="app-header">
-  <h1>ライフロード</h1>
+  <h1>アニマルライフ</h1>
 </header>
 
 <main id="view"></main>
+<div id="board3d-overlay">
+  <canvas id="board3d-canvas"></canvas>
+  <button id="board3d-close" onclick="App.closeBoard3DTest()">✕ 閉じる</button>
+</div>
 
 <script src="game-data.js"></script>
 <script src="shop-data.js"></script>

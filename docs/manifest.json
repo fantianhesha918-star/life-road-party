@@ -1,6 +1,6 @@
 {
-  "name": "ライフロード",
-  "short_name": "ライフロード",
+  "name": "アニマルライフ",
+  "short_name": "アニマルライフ",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

@@ -1,4 +1,4 @@
-const CACHE_NAME = "liferoad-cache-v2";
+const CACHE_NAME = "liferoad-cache-v3";
 const ASSETS = [
   "./",
   "./index.html",

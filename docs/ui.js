@@ -2,7 +2,7 @@
 
 const SQUARE_ICON = {
   start: "🚩",
-  event: "🎲",
+  event: "🎉",
   fortune: "🔮",
   job: "💼",
   payday: "💰",
@@ -22,10 +22,12 @@ function escapeHtml(str) {
 
 function renderAvatarBadge(visual, size) {
   const px = size || 28;
+  const speciesSize = Math.round(px * 0.7);
   const hatSize = Math.round(px * 0.55);
   const accSize = Math.round(px * 0.45);
   return `
     <span class="avatar-badge" style="width:${px}px;height:${px}px;background:${visual.color}">
+      ${visual.speciesEmoji ? `<span class="avatar-species" style="font-size:${speciesSize}px">${visual.speciesEmoji}</span>` : ""}
       ${visual.hatEmoji ? `<span class="avatar-hat" style="font-size:${hatSize}px">${visual.hatEmoji}</span>` : ""}
       ${visual.accessoryEmoji ? `<span class="avatar-acc" style="font-size:${accSize}px">${visual.accessoryEmoji}</span>` : ""}
     </span>
@@ -46,6 +48,7 @@ function renderTitleScreen(hasSave, profile) {
       <button class="btn" onclick="App.goOnlineMenu()">友達と通信して遊ぶ</button>
       <button class="btn" onclick="App.goProfile()">キャラクターを編集</button>
       <button class="btn" onclick="App.goShop()">ショップ</button>
+      <button class="btn btn-test" onclick="App.testBoard3D()">🧪3D盤面テスト(開発用)</button>
     </section>
   `;
 }
@@ -53,6 +56,7 @@ function renderTitleScreen(hasSave, profile) {
 function renderProfileScreen(profile) {
   const visual = LifeRoadProfile.getAvatarVisual(profile.equipped);
   const categories = [
+    { key: "species", label: "動物の種類", allowNone: false },
     { key: "color", label: "色", allowNone: false },
     { key: "hat", label: "帽子", allowNone: true },
     { key: "accessory", label: "アクセサリー", allowNone: true },
@@ -117,11 +121,26 @@ function renderShopScreen(profile) {
       return `<div class="field"><h3>${cat.label}</h3><ul class="player-list">${rows}</ul></div>`;
     })
     .join("");
+  const consumableRows = CONSUMABLE_ITEMS
+    .map((it) => {
+      const count = (profile.consumables && profile.consumables[it.id]) || 0;
+      const canBuy = profile.coins >= it.price;
+      return `
+        <li class="player-row">
+          <span>${it.emoji}</span>
+          <span class="p-name">${escapeHtml(it.name)}${count > 0 ? `(所持${count}個)` : ""}</span>
+          <button class="btn btn-offer" ${canBuy ? "" : "disabled"} onclick="App.buyShopItem('${it.id}')">🪙${it.price} で購入</button>
+        </li>
+      `;
+    })
+    .join("");
+  const consumableSection = `<div class="field"><h3>消耗品(対戦中に使える)</h3><ul class="player-list">${consumableRows}</ul></div>`;
   return `
     <section class="screen screen-shop">
       <h2>ショップ</h2>
       <p class="coin-display">🪙 ${profile.coins}</p>
       ${sections}
+      ${consumableSection}
       <button class="btn" onclick="App.goProfile()">キャラクター編集へ</button>
       <button class="btn" onclick="App.goTitle()">タイトルへ戻る</button>
     </section>
@@ -178,7 +197,7 @@ function renderOnlineLobbyScreen(room, roomCode, myUid) {
       const tags = [uid === room.hostUid ? "ホスト" : null, uid === myUid ? "あなた" : null]
         .filter(Boolean)
         .join("・");
-      const visual = p.avatar || { color: "#999999", hatEmoji: null, accessoryEmoji: null };
+      const visual = p.avatar || { color: "#999999", speciesEmoji: null, hatEmoji: null, accessoryEmoji: null };
       return `
         <li class="player-row">
           ${renderAvatarBadge(visual, 26)}
@@ -227,14 +246,21 @@ function renderSetupScreen() {
   `;
 }
 
-function renderBoard(state) {
+function renderBoard(state, hopOverride) {
+  const positions = state.players.map((p) => {
+    if (hopOverride && hopOverride.playerId === p.id) return hopOverride.position;
+    return p.position;
+  });
   const cells = BOARD_SQUARES.map((sq) => {
     const tokens = state.players
-      .filter((p) => p.position === sq.index)
-      .map((p) => `<span class="token" style="background:${p.color}" title="${escapeHtml(p.name)}"></span>`)
+      .filter((p, i) => positions[i] === sq.index)
+      .map((p) => {
+        const visual = p.avatar || { color: p.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null };
+        return renderAvatarBadge(visual, 20);
+      })
       .join("");
     return `
-      <div class="cell cell-${sq.type}">
+      <div class="cell cell-${sq.type}" id="board-cell-${sq.index}">
         <div class="cell-index">${sq.index}</div>
         <div class="cell-icon">${SQUARE_ICON[sq.type] || ""}</div>
         <div class="cell-label">${sq.label}</div>
@@ -242,17 +268,17 @@ function renderBoard(state) {
       </div>
     `;
   }).join("");
-  return `<div class="board">${cells}</div>`;
+  return `<div class="board" id="board-scroll">${cells}</div>`;
 }
 
 function renderPlayerList(state) {
   const rows = state.players.map((p, i) => {
     const isTurn = i === state.currentTurnIndex && state.status === "playing";
-    const visual = p.avatar || { color: p.color, hatEmoji: null, accessoryEmoji: null };
+    const visual = p.avatar || { color: p.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null };
     return `
       <li class="player-row ${isTurn ? "is-turn" : ""} ${p.finished ? "is-finished" : ""}">
         ${renderAvatarBadge(visual, 26)}
-        <span class="p-name">${escapeHtml(p.name)}${p.isCPU ? "(CPU)" : ""}</span>
+        <span class="p-name">${escapeHtml(p.name)}${p.isCPU ? `(CPU${LifeRoadCPU.personalityLabel(p.personality) ? "・" + LifeRoadCPU.personalityLabel(p.personality) : ""})` : ""}</span>
         <span class="p-job">${p.job ? escapeHtml(p.job.name) : "無職"}</span>
         <span class="p-money">${p.money}万円</span>
         ${p.finished ? '<span class="badge">ゴール</span>' : ""}
@@ -284,19 +310,98 @@ function renderJobModal(pendingChoice, mode) {
   `;
 }
 
-function renderGameScreen(state, log, humanId, mode) {
-  const rollFn = mode === "online" ? "App.handleOnlineRoll" : "App.handleRoll";
+function renderTurnBanner(state) {
+  if (state.status !== "playing") return `<div class="turn-banner">ゲーム終了</div>`;
+  const turnPlayer = state.players[state.currentTurnIndex];
+  const visual = turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null };
+  return `
+    <div class="turn-banner">
+      ${renderAvatarBadge(visual, 30)}
+      <span>${escapeHtml(turnPlayer.name)} の番です</span>
+    </div>
+  `;
+}
+
+function renderTurnHub(state, humanId, profile, hub) {
+  const turnPlayer = state.players[state.currentTurnIndex];
+  const visual = turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null };
+  const view = (hub && hub.view) || "menu";
+
+  let body;
+  if (view === "spinning") {
+    body = `
+      <div class="roulette-display">
+        <div class="roulette-number">${hub.spinNumber}</div>
+        <p class="lead">ルーレットが回転中…</p>
+      </div>
+    `;
+  } else if (view === "status") {
+    const me = state.players.find((p) => p.id === humanId);
+    body = `
+      <ul class="player-list">
+        <li class="player-row">
+          <span class="p-name">${escapeHtml(me.name)}</span>
+          <span class="p-job">${me.job ? escapeHtml(me.job.name) : "無職"}</span>
+          <span class="p-money">${me.money}万円</span>
+        </li>
+      </ul>
+      <p class="lead">${me.job ? `給料: ${me.job.salary}万円/回` : "まだ就職していません(給料日はアルバイト収入)"}</p>
+      <button class="btn" onclick="App.showHubView('menu')">戻る</button>
+    `;
+  } else if (view === "items") {
+    const owned = Object.entries(profile.consumables || {}).filter(([, count]) => count > 0);
+    const rows = owned.length
+      ? owned
+          .map(([id, count]) => {
+            const item = findShopItem(id);
+            if (!item) return "";
+            return `
+              <li class="player-row">
+                <span>${item.emoji}</span>
+                <span class="p-name">${escapeHtml(item.name)}(所持${count}個)</span>
+                <button class="btn btn-offer" onclick="App.useConsumable('${id}')">使う</button>
+              </li>
+            `;
+          })
+          .join("")
+      : `<p class="lead">消耗品を持っていません。ショップで購入できます。</p>`;
+    body = `
+      <ul class="player-list">${rows}</ul>
+      ${hub.itemMessage ? `<p class="coin-display">${escapeHtml(hub.itemMessage)}</p>` : ""}
+      <button class="btn" onclick="App.showHubView('menu')">戻る</button>
+    `;
+  } else {
+    body = `
+      <div class="hub-menu-grid">
+        <button class="btn btn-primary" onclick="App.spinRoulette()">🎡 ルーレットを回す</button>
+        <button class="btn" onclick="App.showHubView('items')">🎒 アイテムを使う</button>
+        <button class="btn" onclick="App.showHubView('status')">📊 ステータスを見る</button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="turn-hub-modal">
+      <div class="turn-hub-card">
+        <div class="turn-hub-avatar">${renderAvatarBadge(visual, 72)}</div>
+        <h3>${escapeHtml(turnPlayer.name)} のターン！</h3>
+        ${body}
+      </div>
+    </div>
+  `;
+}
+
+function renderGameScreen(state, log, humanId, mode, profile, hub, hopOverride) {
   const turnPlayer = state.players[state.currentTurnIndex];
   const isHumanTurn = state.status === "playing" && turnPlayer && turnPlayer.id === humanId && !state.pendingChoice;
-  const rollDisabled = !isHumanTurn;
   return `
     <section class="screen screen-game">
-      <div class="turn-banner">${state.status === "playing" ? `${escapeHtml(turnPlayer.name)} の番です` : "ゲーム終了"}</div>
-      ${renderBoard(state)}
+      ${renderTurnBanner(state)}
+      ${renderBoard(state, hopOverride)}
       ${renderPlayerList(state)}
-      <button id="roll-btn" class="btn btn-primary" ${rollDisabled ? "disabled" : ""} onclick="${rollFn}()">サイコロを振る</button>
       <h3>できごとログ</h3>
       ${renderLog(log)}
+      ${isHumanTurn ? renderTurnHub(state, humanId, profile, hub) : ""}
       ${renderJobModal(state.pendingChoice && state.pendingChoice.playerId === humanId ? state.pendingChoice : null, mode)}
     </section>
   `;
@@ -305,12 +410,12 @@ function renderGameScreen(state, log, humanId, mode) {
 function renderResultScreen(state, mode, rewardCoins) {
   const ranking = getRanking(state);
   const rows = ranking.map((p, i) => {
-    const visual = p.avatar || { color: p.color, hatEmoji: null, accessoryEmoji: null };
+    const visual = p.avatar || { color: p.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null };
     return `
     <li class="result-row">
       <span class="result-rank">${i + 1}位</span>
       ${renderAvatarBadge(visual, 26)}
-      <span class="p-name">${escapeHtml(p.name)}${p.isCPU ? "(CPU)" : ""}</span>
+      <span class="p-name">${escapeHtml(p.name)}${p.isCPU ? `(CPU${LifeRoadCPU.personalityLabel(p.personality) ? "・" + LifeRoadCPU.personalityLabel(p.personality) : ""})` : ""}</span>
       <span class="p-job">${p.job ? escapeHtml(p.job.name) : "無職"}</span>
       <span class="p-money">${p.money}万円</span>
     </li>

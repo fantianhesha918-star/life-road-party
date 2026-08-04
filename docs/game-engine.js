@@ -9,8 +9,9 @@ function createInitialState(playerConfigs) {
       id: p.id,
       name: p.name,
       isCPU: !!p.isCPU,
+      personality: p.personality || null,
       color: TOKEN_COLORS[i % TOKEN_COLORS.length],
-      avatar: p.avatar || { color: TOKEN_COLORS[i % TOKEN_COLORS.length], hatEmoji: null, accessoryEmoji: null },
+      avatar: p.avatar || { color: TOKEN_COLORS[i % TOKEN_COLORS.length], speciesEmoji: null, hatEmoji: null, accessoryEmoji: null },
       position: 0,
       money: START_MONEY,
       job: null,
@@ -28,7 +29,7 @@ function currentPlayer(state) {
 }
 
 function rollDice() {
-  return 1 + Math.floor(Math.random() * 6);
+  return 1 + Math.floor(Math.random() * 10);
 }
 
 function randInt(min, max) {
@@ -60,7 +61,7 @@ function applyRoll(state, roll) {
   player.position = toPos;
 
   const entries = [
-    { type: "move", text: `${player.name} はサイコロで${roll}を出し、${toPos}マス目まで進んだ` },
+    { type: "move", text: `${player.name} はルーレットで${roll}を出し、${toPos}マス目まで進んだ` },
   ];
 
   const square = BOARD_SQUARES[toPos];
@@ -150,6 +151,18 @@ function resolveJobChoice(state, playerId, offerIndex) {
   state.pendingChoice = null;
   finalizeTurn(state, player, entries);
   return { entries, pendingChoice: null, turnEnded: true };
+}
+
+// 消耗品アイテムの効果(所持金増減)を適用する。ターンは終了させない(ハブ画面に留まる)
+function applyItemEffect(state, playerId, delta, itemName) {
+  const player = state.players.find((p) => p.id === playerId);
+  if (!player) throw new Error("invalid player for item effect");
+  player.money += delta;
+  return {
+    type: "money",
+    text: `「${itemName}」を使った(${delta >= 0 ? "+" : ""}${delta}万円)`,
+    delta,
+  };
 }
 
 function finalizeTurn(state, player, entries) {

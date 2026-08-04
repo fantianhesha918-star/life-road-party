@@ -27,12 +27,31 @@ const SHOP_ITEMS = [
   { id: "acc-star", category: "accessory", name: "スターバッジ", price: 90, emoji: "⭐" },
 ];
 
-const ALL_ITEMS = [...FREE_COLOR_ITEMS, ...SHOP_ITEMS];
+// ターン中に「アイテムを使う」で消費する消耗品(所持数は複数持てる、使うと1つ減る)
+// effect.min === effect.max の場合は固定額、異なる場合はその範囲でランダムな金額を得る
+const CONSUMABLE_ITEMS = [
+  { id: "item-money-ticket", category: "consumable", name: "臨時収入チケット", price: 20, emoji: "🎫", effect: { min: 15, max: 15 } },
+  { id: "item-fortune-charm", category: "consumable", name: "幸運のお守り", price: 35, emoji: "🍀", effect: { min: 5, max: 25 } },
+  { id: "item-tax-shield", category: "consumable", name: "節税シール", price: 50, emoji: "🛡️", effect: { min: 30, max: 30 } },
+];
 
-const DEFAULT_EQUIPPED = { color: "color-red", hat: null, accessory: null };
+// キャラクターの動物種(全種すべて最初から無料所持)。イラスト未準備のため絵文字で代用中。
+// 実イラストが揃ったら`emoji`を画像パスに差し替える想定
+const SPECIES_ITEMS = [
+  { id: "species-chinchilla-gray", category: "species", name: "チンチラ(グレー)", price: 0, emoji: "🐹" },
+  { id: "species-chinchilla-white", category: "species", name: "チンチラ(白パイド)", price: 0, emoji: "🐹" },
+  { id: "species-dog-frenchie-white", category: "species", name: "いぬ(フレンチブルドッグ・白)", price: 0, emoji: "🐶" },
+  { id: "species-dog-frenchie-black", category: "species", name: "いぬ(フレンチブルドッグ・黒)", price: 0, emoji: "🐶" },
+  { id: "species-cat-calico", category: "species", name: "ねこ(三毛猫)", price: 0, emoji: "🐱" },
+  { id: "species-rabbit-white", category: "species", name: "うさぎ(白)", price: 0, emoji: "🐰" },
+];
 
-const FREE_ITEM_IDS = FREE_COLOR_ITEMS.map((it) => it.id);
+const ALL_ITEMS = [...FREE_COLOR_ITEMS, ...SHOP_ITEMS, ...CONSUMABLE_ITEMS, ...SPECIES_ITEMS];
+
+const DEFAULT_EQUIPPED = { color: "color-red", species: "species-chinchilla-gray", hat: null, accessory: null };
+
+const FREE_ITEM_IDS = [...FREE_COLOR_ITEMS.map((it) => it.id), ...SPECIES_ITEMS.map((it) => it.id)];
 
 const GAME_REWARD_MONEY_PER_COIN = 10; // ゲーム内所持金10万円につき1コイン
 
-window.LifeRoadShop = { ALL_ITEMS, FREE_ITEM_IDS, DEFAULT_EQUIPPED, GAME_REWARD_MONEY_PER_COIN };
+window.LifeRoadShop = { ALL_ITEMS, CONSUMABLE_ITEMS, SPECIES_ITEMS, FREE_ITEM_IDS, DEFAULT_EQUIPPED, GAME_REWARD_MONEY_PER_COIN };
