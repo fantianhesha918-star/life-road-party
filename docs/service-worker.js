@@ -1,4 +1,4 @@
-const CACHE_NAME = "liferoad-cache-v3";
+const CACHE_NAME = "liferoad-cache-v4";
 const ASSETS = [
   "./",
   "./index.html",
@@ -31,13 +31,19 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
+// キャッシュ優先だと更新のたびにCACHE_NAMEを上げない限り古い版を配信し続けてしまうため、
+// ネットワーク優先(取得できたら常に最新を使い、キャッシュに保存)・オフライン時のみキャッシュに
+// フォールバックする方式にする(2026-08-04変更)。
 self.addEventListener("fetch", (event) => {
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return (
-        cached ||
-        fetch(event.request).catch(() => caches.match("./index.html"))
-      );
-    })
+    fetch(event.request)
+      .then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        return response;
+      })
+      .catch(() =>
+        caches.match(event.request).then((cached) => cached || caches.match("./index.html"))
+      )
   );
 });
