@@ -9,13 +9,14 @@ import { GLTFLoader } from "https://unpkg.com/three@0.169.0/examples/jsm/loaders
 const SQUARE_COUNT = 10;
 const SQUARE_SPACING = 2.2;
 const HOP_HEIGHT = 0.6;
-const CAMERA_BACK = 3.5;
-const CAMERA_UP = 3.2;
+// 「その場に立っている感じ」を出すため、遠く見下ろす構図ではなく低め・近めの追従視点にする
+const CAMERA_BACK = 2.3;
+const CAMERA_UP = 1.6;
 const CAMERA_LERP = 0.08;
 const DOG_MODEL_URL = new URL("./models/animal-dog.glb", import.meta.url).href;
-// Kenney Cube Petsのモデルは実機確認前のため、見た目のスケール・接地位置は暫定値。
-// 実際に表示してみてから調整する前提の値。
-const CHARACTER_SCALE = 0.6;
+// モデルのボーンなし階層(body+脚4本)の実寸から逆算した値。脚の接地位置が
+// ちょうどy=0に来る作り(CHARACTER_Y_OFFSET=0)だったため、大きさのみ調整。
+const CHARACTER_SCALE = 0.8;
 const CHARACTER_Y_OFFSET = 0;
 
 let renderer = null;
@@ -24,6 +25,11 @@ let camera = null;
 let character = null;
 let squareMarkers = [];
 let animationFrameId = null;
+let lastFrameTime = null;
+let mixer = null;
+let idleAction = null;
+let walkAction = null;
+let currentAction = null;
 
 let hopState = null; // { fromIndex, toIndex, startTime, durationMs, onDone }
 let currentIndex = 0;
@@ -34,13 +40,41 @@ function squarePosition(index) {
   return new THREE.Vector3(index * SQUARE_SPACING, 0, 0);
 }
 
+function createGroundTexture() {
+  const size = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#4f9d6e";
+  ctx.fillRect(0, 0, size, size);
+  ctx.strokeStyle = "rgba(255,255,255,0.3)";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(0, 0, size, size);
+  ctx.fillStyle = "rgba(255,255,255,0.12)";
+  ctx.beginPath();
+  ctx.arc(size * 0.3, size * 0.65, size * 0.12, 0, Math.PI * 2);
+  ctx.arc(size * 0.7, size * 0.3, size * 0.08, 0, Math.PI * 2);
+  ctx.fill();
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set((SQUARE_COUNT * SQUARE_SPACING) / 2, 3);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
 function buildScene() {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x9fd8c0);
+  const skyColor = 0x9fd8c0;
+  scene.background = new THREE.Color(skyColor);
+  // 地面が無限の平面に見えて世界観が乏しいとの指摘への対応: 遠景をフォグでぼかし
+  // 「奥行きのある世界にいる」感覚を出す
+  scene.fog = new THREE.Fog(skyColor, 9, 22);
 
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(SQUARE_COUNT * SQUARE_SPACING + 4, 6),
-    new THREE.MeshStandardMaterial({ color: 0x4f9d6e })
+    new THREE.PlaneGeometry(SQUARE_COUNT * SQUARE_SPACING + 12, 16),
+    new THREE.MeshStandardMaterial({ map: createGroundTexture() })
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.set((SQUARE_COUNT - 1) * SQUARE_SPACING * 0.5, -0.5, 0);
@@ -88,6 +122,17 @@ function buildScene() {
   scene.add(new THREE.AmbientLight(0xffffff, 0.55));
 }
 
+function findClip(clips, name) {
+  return clips.find((c) => c.name.toLowerCase() === name) || null;
+}
+
+function playAction(action) {
+  if (!action || action === currentAction) return;
+  action.reset().fadeIn(0.2).play();
+  if (currentAction) currentAction.fadeOut(0.2);
+  currentAction = action;
+}
+
 function loadCharacterModel(owner, placeholder) {
   const loader = new GLTFLoader();
   loader.load(
@@ -103,6 +148,15 @@ function loadCharacterModel(owner, placeholder) {
         if (node.isMesh) node.castShadow = true;
       });
       owner.add(model);
+
+      // 「立っている感じ」を出すため、待機中はidle、移動中はwalkのアニメーションクリップを再生する
+      if (gltf.animations && gltf.animations.length) {
+        mixer = new THREE.AnimationMixer(model);
+        idleAction = mixer.clipAction(findClip(gltf.animations, "idle") || gltf.animations[0]);
+        walkAction = mixer.clipAction(findClip(gltf.animations, "walk") || gltf.animations[0]);
+        currentAction = null;
+        playAction(idleAction);
+      }
     },
     undefined,
     (err) => {
@@ -131,7 +185,7 @@ function updateHop(now) {
   const arc = Math.sin(t * Math.PI);
   character.position.y = arc * HOP_HEIGHT;
   // 空中でわずかに伸び、着地・離陸の瞬間はわずかに潰れる(スクワッシュ&ストレッチ)
-  const stretch = 1 + arc * 0.15;
+  const stretch = 1 + arc * 0.08;
   character.scale.set(1 / Math.sqrt(stretch), stretch, 1 / Math.sqrt(stretch));
   if (t >= 1) {
     currentIndex = hopState.toIndex;
@@ -147,12 +201,16 @@ function updateCamera() {
   const desired = new THREE.Vector3(character.position.x, CAMERA_UP, CAMERA_BACK);
   cameraCurrentPos.lerp(desired, CAMERA_LERP);
   camera.position.copy(cameraCurrentPos);
-  camera.lookAt(character.position.x, 0.3, 0);
+  camera.lookAt(character.position.x, 0.5, 0);
 }
 
 function animate() {
   animationFrameId = requestAnimationFrame(animate);
-  updateHop(performance.now());
+  const now = performance.now();
+  const delta = lastFrameTime ? Math.min((now - lastFrameTime) / 1000, 0.1) : 0;
+  lastFrameTime = now;
+  if (mixer) mixer.update(delta);
+  updateHop(now);
   updateCamera();
   renderer.render(scene, camera);
 }
@@ -175,6 +233,7 @@ function mount(canvasEl) {
 function dispose() {
   if (animationFrameId) cancelAnimationFrame(animationFrameId);
   animationFrameId = null;
+  lastFrameTime = null;
   window.removeEventListener("resize", resize);
   if (renderer) renderer.dispose();
   renderer = null;
@@ -184,6 +243,10 @@ function dispose() {
   squareMarkers = [];
   hopState = null;
   currentIndex = 0;
+  mixer = null;
+  idleAction = null;
+  walkAction = null;
+  currentAction = null;
 }
 
 function hopTo(fromIndex, toIndex, options) {
@@ -200,11 +263,13 @@ function hopTo(fromIndex, toIndex, options) {
 }
 
 async function hopSteps(fromIndex, toIndex, options) {
+  if (toIndex > fromIndex) playAction(walkAction);
   let pos = fromIndex;
   while (pos < toIndex) {
     await hopTo(pos, pos + 1, options);
     pos += 1;
   }
+  playAction(idleAction);
 }
 
 function focusOn(index) {
