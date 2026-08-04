@@ -3,6 +3,7 @@
 const SAVE_KEY = "liferoad_solo_save_v1";
 const ONLINE_ROOM_KEY = "liferoad_online_room_v1";
 const HEARTBEAT_INTERVAL_MS = 15000;
+const HOP_STEP_MS = 320; // マス移動アニメーション、1マスあたりの所要時間
 
 // Firestoreの部屋ドキュメント(playersがuidキーのマップ)を、game-engine.jsが
 // 扱えるゲーム状態(playersが配列)に変換する
@@ -126,7 +127,7 @@ const App = {
     this.loadBoard3DModules().then(() => {
       document.getElementById("board3d-overlay").classList.add("is-active");
       window.LifeRoadBoard3D.mount(document.getElementById("board3d-canvas"));
-      window.LifeRoadBoard3D.hopSteps(0, 6, { stepDurationMs: 150 });
+      window.LifeRoadBoard3D.hopSteps(0, 6, { stepDurationMs: HOP_STEP_MS });
     });
   },
 
@@ -231,12 +232,12 @@ const App = {
         setTimeout(() => {
           this.hopAnimation = null;
           onDone();
-        }, 150);
+        }, HOP_STEP_MS);
       } else {
-        setTimeout(step, 150);
+        setTimeout(step, HOP_STEP_MS);
       }
     };
-    setTimeout(step, 150);
+    setTimeout(step, HOP_STEP_MS);
   },
 
   // ---- ターンハブ(演出+選択肢メニュー) ----

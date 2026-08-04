@@ -331,7 +331,11 @@ function renderTurnHub(state, humanId, profile, hub) {
   if (view === "spinning") {
     body = `
       <div class="roulette-display">
-        <div class="roulette-number">${hub.spinNumber}</div>
+        <div class="roulette-wheel-wrap">
+          <div class="roulette-pointer">▼</div>
+          <div class="roulette-wheel"></div>
+          <div class="roulette-wheel-number">${hub.spinNumber}</div>
+        </div>
         <p class="lead">ルーレットが回転中…</p>
       </div>
     `;

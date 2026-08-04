@@ -44,6 +44,7 @@ function buildScene() {
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.set((SQUARE_COUNT - 1) * SQUARE_SPACING * 0.5, -0.5, 0);
+  ground.receiveShadow = true;
   scene.add(ground);
 
   squareMarkers = [];
@@ -54,6 +55,7 @@ function buildScene() {
     );
     const pos = squarePosition(i);
     marker.position.set(pos.x, -0.4, pos.z);
+    marker.receiveShadow = true;
     scene.add(marker);
     squareMarkers.push(marker);
   }
@@ -70,13 +72,20 @@ function buildScene() {
     new THREE.MeshStandardMaterial({ color: 0xe4572e })
   );
   placeholder.position.y = 0.55;
+  placeholder.castShadow = true;
   character.add(placeholder);
   loadCharacterModel(character, placeholder);
 
-  const light = new THREE.DirectionalLight(0xffffff, 1.6);
+  const light = new THREE.DirectionalLight(0xffffff, 1.8);
   light.position.set(3, 6, 4);
+  light.castShadow = true;
+  light.shadow.mapSize.set(1024, 1024);
+  light.shadow.camera.left = -2;
+  light.shadow.camera.right = SQUARE_COUNT * SQUARE_SPACING + 2;
+  light.shadow.camera.top = 4;
+  light.shadow.camera.bottom = -4;
   scene.add(light);
-  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
 }
 
 function loadCharacterModel(owner, placeholder) {
@@ -90,6 +99,9 @@ function loadCharacterModel(owner, placeholder) {
       const model = gltf.scene;
       model.scale.setScalar(CHARACTER_SCALE);
       model.position.y = CHARACTER_Y_OFFSET;
+      model.traverse((node) => {
+        if (node.isMesh) node.castShadow = true;
+      });
       owner.add(model);
     },
     undefined,
@@ -116,7 +128,11 @@ function updateHop(now) {
   const toPos = squarePosition(hopState.toIndex);
   character.position.x = fromPos.x + (toPos.x - fromPos.x) * t;
   character.position.z = fromPos.z + (toPos.z - fromPos.z) * t;
-  character.position.y = Math.sin(t * Math.PI) * HOP_HEIGHT;
+  const arc = Math.sin(t * Math.PI);
+  character.position.y = arc * HOP_HEIGHT;
+  // 空中でわずかに伸び、着地・離陸の瞬間はわずかに潰れる(スクワッシュ&ストレッチ)
+  const stretch = 1 + arc * 0.15;
+  character.scale.set(1 / Math.sqrt(stretch), stretch, 1 / Math.sqrt(stretch));
   if (t >= 1) {
     currentIndex = hopState.toIndex;
     const done = hopState.onDone;
@@ -145,6 +161,8 @@ function mount(canvasEl) {
   if (renderer) dispose();
   renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
   cameraCurrentPos.set(0, CAMERA_UP, CAMERA_BACK);
   camera.position.copy(cameraCurrentPos);
