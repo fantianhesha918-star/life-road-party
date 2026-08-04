@@ -124,11 +124,16 @@ const App = {
   },
 
   testBoard3D() {
-    this.loadBoard3DModules().then(() => {
-      document.getElementById("board3d-overlay").classList.add("is-active");
-      window.LifeRoadBoard3D.mount(document.getElementById("board3d-canvas"));
-      window.LifeRoadBoard3D.hopSteps(0, 6, { stepDurationMs: HOP_STEP_MS });
-    });
+    this.loadBoard3DModules()
+      .then(() => {
+        document.getElementById("board3d-overlay").classList.add("is-active");
+        window.LifeRoadBoard3D.mount(document.getElementById("board3d-canvas"));
+        window.LifeRoadBoard3D.hopSteps(0, 6, { stepDurationMs: HOP_STEP_MS });
+      })
+      .catch((err) => {
+        console.error("3D盤面テストの読み込みに失敗", err);
+        alert("3Dデモの読み込みに失敗しました(通信環境やブラウザの対応状況をご確認ください)");
+      });
   },
 
   closeBoard3DTest() {

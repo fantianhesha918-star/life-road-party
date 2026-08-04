@@ -3,7 +3,9 @@
 // 実現できるかを検証するための最小構成。
 // フェーズBの第一歩として、Kenney.nl(CC0、大手定番サイト)の「Cube Pets」パックの
 // 犬モデル(docs/models/animal-dog.glb、出典はdocs/models/CREDITS.md参照)を実際に読み込む。
-import * as THREE from "https://unpkg.com/three@0.169.0/build/three.module.js";
+// "three"はindex.htmlのimportmapで解決される(GLTFLoader.js内部が bare specifier "three" を
+// importしているため、importmapが無いとGLTFLoaderの読み込みごと失敗する)
+import * as THREE from "three";
 import { GLTFLoader } from "https://unpkg.com/three@0.169.0/examples/jsm/loaders/GLTFLoader.js";
 
 const SQUARE_COUNT = 10;
