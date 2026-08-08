@@ -1,12 +1,20 @@
 // アニマルライフ 盤面3D化・フェーズA/B検証
 // 目的: DOM UIとWebGL canvasの共存、滑らかなホップ移動、カメラのズーム追従が
 // 実現できるかを検証するための最小構成。
-// フェーズBの第一歩として、Kenney.nl(CC0、大手定番サイト)の「Cube Pets」パックの
-// 犬モデル(docs/models/animal-dog.glb、出典はdocs/models/CREDITS.md参照)を実際に読み込む。
+// キャラクターはMeshy AIで生成したチンチラモデル(docs/models/chinchilla-gray.glb、
+// 出典はdocs/models/CREDITS.md参照)を読み込む。ボーンアニメーションを持たない
+// 静止フィギュア形状のため、動きはすべて位置・拡縮の変形(updateHopの放物線+
+// スクワッシュ&ストレッチ)で表現している。
 // "three"はindex.htmlのimportmapで解決される(GLTFLoader.js内部が bare specifier "three" を
 // importしているため、importmapが無いとGLTFLoaderの読み込みごと失敗する)
 import * as THREE from "three";
 import { GLTFLoader } from "https://unpkg.com/three@0.169.0/examples/jsm/loaders/GLTFLoader.js";
+import { DRACOLoader } from "https://unpkg.com/three@0.169.0/examples/jsm/loaders/DRACOLoader.js";
+
+// chinchilla-gray.glbはBlenderでDraco圧縮して書き出しているため、GLTFLoaderに
+// DRACOLoaderを明示的に渡さないと読み込みに失敗する(失敗時は仮カプセル表示のまま無言で続行してしまう)。
+const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath("https://unpkg.com/three@0.169.0/examples/jsm/libs/draco/");
 
 const SQUARE_COUNT = 10;
 const SQUARE_SPACING = 2.2;
@@ -15,11 +23,11 @@ const HOP_HEIGHT = 0.6;
 const CAMERA_BACK = 2.3;
 const CAMERA_UP = 1.6;
 const CAMERA_LERP = 0.08;
-const DOG_MODEL_URL = new URL("./models/animal-dog.glb", import.meta.url).href;
-// モデルのボーンなし階層(body+脚4本)の実寸から逆算した値。脚の接地位置が
-// ちょうどy=0に来る作り(CHARACTER_Y_OFFSET=0)だったため、大きさのみ調整。
-const CHARACTER_SCALE = 0.8;
-const CHARACTER_Y_OFFSET = 0;
+const CHARACTER_MODEL_URL = new URL("./models/chinchilla-gray.glb", import.meta.url).href;
+// Meshy AI生成モデル(ボーンなし、原点が体の中心付近)の実測バウンディングボックスから逆算。
+// 縦幅(Y)実寸1.90 → 見た目の高さ約0.9になるよう縮小し、脚の接地位置がy=0に来るよう底上げする。
+const CHARACTER_SCALE = 0.47;
+const CHARACTER_Y_OFFSET = 0.445;
 
 let renderer = null;
 let scene = null;
@@ -136,8 +144,9 @@ function playAction(action) {
 
 function loadCharacterModel(owner, placeholder) {
   const loader = new GLTFLoader();
+  loader.setDRACOLoader(dracoLoader);
   loader.load(
-    DOG_MODEL_URL,
+    CHARACTER_MODEL_URL,
     (gltf) => {
       // dispose()や再mount()で別のcharacterグループに切り替わっていたら何もしない
       if (character !== owner) return;

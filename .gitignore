@@ -1,0 +1,9 @@
+# APIキー等の秘密情報(絶対にコミットしない)
+.secrets/
+.env
+.env.local
+*.key
+
+# OS/エディタ生成物
+.DS_Store
+Thumbs.db
