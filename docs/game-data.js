@@ -9,7 +9,7 @@ const BOARD_SQUARES = [
   { index: 4, type: "rest", label: "ひと休み" },
   { index: 5, type: "payday", label: "給料日" },
   { index: 6, type: "event", label: "できごと" },
-  { index: 7, type: "fortune", label: "運命の分かれ道" },
+  { index: 7, type: "choice", label: "選択のとき" },
   { index: 8, type: "job", label: "スキルアップ研修" },
   { index: 9, type: "event", label: "できごと" },
   { index: 10, type: "payday", label: "給料日" },
@@ -18,7 +18,7 @@ const BOARD_SQUARES = [
   { index: 13, type: "rest", label: "ひと休み" },
   { index: 14, type: "payday", label: "給料日" },
   { index: 15, type: "job", label: "スキルアップ研修" },
-  { index: 16, type: "fortune", label: "運命の分かれ道" },
+  { index: 16, type: "choice", label: "選択のとき" },
   { index: 17, type: "event", label: "できごと" },
   { index: 18, type: "payday", label: "給料日" },
   { index: 19, type: "event", label: "できごと" },
@@ -27,7 +27,7 @@ const BOARD_SQUARES = [
   { index: 22, type: "payday", label: "給料日" },
   { index: 23, type: "event", label: "できごと" },
   { index: 24, type: "job", label: "スキルアップ研修" },
-  { index: 25, type: "fortune", label: "運命の分かれ道" },
+  { index: 25, type: "choice", label: "選択のとき" },
   { index: 26, type: "event", label: "できごと" },
   { index: 27, type: "payday", label: "給料日" },
   { index: 28, type: "fortune", label: "運命の分かれ道" },
@@ -70,6 +70,144 @@ const EVENT_CARDS = [
 
 const FORTUNE_MIN = -10;
 const FORTUNE_MAX = 10;
+
+// 選択式イベント(汎用choiceシステム)。就職の関門もこの汎用フォーマットに包んで使う
+// (game-engine.jsのresolveSquareの"job"ケース参照)。outcomesは重み付きランダムで1つ選ばれる。
+const CHOICE_EVENTS = [
+  {
+    title: "同僚の投資話",
+    prompt: "同僚に投資話を持ちかけられた。10万円投資する？",
+    options: [
+      {
+        label: "投資する",
+        outcomes: [
+          { weight: 1, delta: 30, resultText: "投資が大成功！+30万円" },
+          { weight: 1, delta: -15, resultText: "投資に失敗した…-15万円" },
+        ],
+      },
+      {
+        label: "断る",
+        outcomes: [{ weight: 1, delta: 0, resultText: "きっぱり断った。特に変化はなかった" }],
+      },
+    ],
+  },
+  {
+    title: "資格取得のチャンス",
+    prompt: "資格スクールの案内が届いた。5万円払って受講する？",
+    options: [
+      {
+        label: "受講する",
+        outcomes: [
+          { weight: 2, delta: 18, resultText: "資格を取得し、手当がついた！+18万円" },
+          { weight: 1, delta: -5, resultText: "受講したが挫折してしまった…-5万円" },
+        ],
+      },
+      {
+        label: "見送る",
+        outcomes: [{ weight: 1, delta: 0, resultText: "今回は見送った。特に変化はなかった" }],
+      },
+    ],
+  },
+  {
+    title: "週末の副業",
+    prompt: "週末だけの副業に誘われた。挑戦する？",
+    options: [
+      {
+        label: "挑戦する",
+        outcomes: [
+          { weight: 1, delta: 14, resultText: "副業がうまくいった！+14万円" },
+          { weight: 1, delta: -4, resultText: "思ったより稼げず、交通費だけかさんだ…-4万円" },
+        ],
+      },
+      {
+        label: "やめておく",
+        outcomes: [{ weight: 1, delta: 0, resultText: "ゆっくり休むことにした。特に変化はなかった" }],
+      },
+    ],
+  },
+  {
+    title: "引っ越しの誘い",
+    prompt: "家賃の安い町への引っ越しを勧められた。引っ越す？",
+    options: [
+      {
+        label: "引っ越す",
+        outcomes: [
+          { weight: 1, delta: -8, resultText: "引っ越し費用がかかったが、身軽になった -8万円" },
+          { weight: 1, delta: 12, resultText: "家賃が下がり、浮いたお金で生活が楽になった +12万円" },
+        ],
+      },
+      {
+        label: "今のまま住む",
+        outcomes: [{ weight: 1, delta: 0, resultText: "住み慣れた町に残ることにした。特に変化はなかった" }],
+      },
+    ],
+  },
+  {
+    title: "ペットを飼うか迷う",
+    prompt: "動物保護施設で運命の出会いがあった。ペットを迎える？",
+    options: [
+      {
+        label: "迎える",
+        outcomes: [{ weight: 1, delta: -6, resultText: "新しい家族が増えた！(お迎え費用 -6万円)" }],
+      },
+      {
+        label: "今回は見送る",
+        outcomes: [{ weight: 1, delta: 0, resultText: "今回は見送った。特に変化はなかった" }],
+      },
+    ],
+  },
+  {
+    title: "フリマアプリで出品",
+    prompt: "不用品をフリマアプリに出品してみる？",
+    options: [
+      {
+        label: "出品する",
+        outcomes: [
+          { weight: 3, delta: 6, resultText: "そこそこ売れた！+6万円" },
+          { weight: 1, delta: -1, resultText: "梱包材代だけかかってしまった…-1万円" },
+        ],
+      },
+      {
+        label: "やめておく",
+        outcomes: [{ weight: 1, delta: 0, resultText: "面倒なので見送った。特に変化はなかった" }],
+      },
+    ],
+  },
+  {
+    title: "同窓会のお誘い",
+    prompt: "久しぶりの同窓会に誘われた。参加する？",
+    options: [
+      {
+        label: "参加する",
+        outcomes: [
+          { weight: 1, delta: -5, resultText: "楽しい時間を過ごせた(会費など -5万円)" },
+          { weight: 1, delta: 9, resultText: "旧友とのビジネス話がまとまった！+9万円" },
+        ],
+      },
+      {
+        label: "欠席する",
+        outcomes: [{ weight: 1, delta: 0, resultText: "自宅でゆっくり過ごした。特に変化はなかった" }],
+      },
+    ],
+  },
+  {
+    title: "健康診断の結果",
+    prompt: "健康診断でジム通いを勧められた。月会費を払って通う？",
+    options: [
+      {
+        label: "ジムに通う",
+        outcomes: [{ weight: 1, delta: -7, resultText: "体が引き締まった！(会費 -7万円)" }],
+      },
+      {
+        label: "自己流で頑張る",
+        outcomes: [
+          { weight: 1, delta: 0, resultText: "特に変化はなかった" },
+          { weight: 1, delta: 3, resultText: "無理せず続けられて健康グッズが当たった +3万円" },
+        ],
+      },
+    ],
+  },
+];
 
 const START_MONEY = 300; // 単位: 万円
 

@@ -68,6 +68,8 @@ const App = {
 
   // ---- ターンハブ(演出+選択肢メニュー)のUI状態。solo/online共通で使う ----
   hub: { view: "menu", spinNumber: null, itemMessage: null },
+  // ---- 選択イベントの結果演出カード。solo用(online用はthis.online.revealに持つ) ----
+  reveal: null, // { text, delta, job }
   // ---- マップ上のホップ移動アニメーション中の一時的な表示位置。solo/online共通で使う ----
   hopAnimation: null, // { playerId, position }
 
@@ -95,6 +97,7 @@ const App = {
     this.state = null;
     this.log = [];
     this.hub = { view: "menu", spinNumber: null, itemMessage: null };
+    this.reveal = null;
     this.hopAnimation = null;
     this.render();
   },
@@ -168,6 +171,7 @@ const App = {
     this.log = saved.log;
     this.humanId = saved.humanId;
     this.hub = { view: "menu", spinNumber: null, itemMessage: null };
+    this.reveal = null;
     this.hopAnimation = null;
     this.screen = "game";
     this.render();
@@ -196,6 +200,7 @@ const App = {
     this.state = createInitialState(configs);
     this.log = [{ type: "info", text: "ゲーム開始！" }];
     this.hub = { view: "menu", spinNumber: null, itemMessage: null };
+    this.reveal = null;
     this.hopAnimation = null;
     this.screen = "game";
     this.saveGame();
@@ -310,10 +315,17 @@ const App = {
     }
   },
 
-  chooseJob(offerIndex) {
+  chooseOption(optionIndex) {
     if (!this.state || !this.state.pendingChoice) return;
-    const result = resolveJobChoice(this.state, this.state.pendingChoice.playerId, offerIndex);
+    const result = resolveChoice(this.state, this.state.pendingChoice.playerId, optionIndex);
     this.pushLog(result.entries);
+    this.reveal = result.reveal;
+    this.render();
+  },
+
+  dismissReveal() {
+    if (!this.reveal) return;
+    this.reveal = null;
     this.afterTurnAction();
   },
 
@@ -348,8 +360,10 @@ const App = {
       if (choosingPlayer && choosingPlayer.isCPU) {
         setTimeout(() => {
           if (!this.state || !this.state.pendingChoice) return;
-          const idx = cpuDecideJobOffer(this.state.pendingChoice.offers, choosingPlayer.personality);
-          this.chooseJob(idx);
+          const idx = cpuDecideOption(this.state.pendingChoice, choosingPlayer.personality);
+          const result = resolveChoice(this.state, this.state.pendingChoice.playerId, idx);
+          this.pushLog(result.entries);
+          this.afterTurnAction();
         }, 700);
       }
       return;
@@ -504,6 +518,7 @@ const App = {
       unsubscribe: null,
       log: [{ type: "info", text: "部屋に接続しました" }],
       localTurnState: null,
+      reveal: null,
       rewardGranted: false,
       lastReward: null,
     };
@@ -592,14 +607,21 @@ const App = {
     });
   },
 
-  chooseOnlineJob(offerIndex) {
+  chooseOnlineOption(optionIndex) {
     if (!this.online || !this.online.localTurnState) return;
     const localState = this.online.localTurnState;
-    const result = resolveJobChoice(localState, localState.pendingChoice.playerId, offerIndex);
+    const result = resolveChoice(localState, localState.pendingChoice.playerId, optionIndex);
     this.pushOnlineLog(result.entries);
     // pendingChoiceが外れた状態を引き続き楽観表示し、確定はonSnapshotで後追いする
     this.online.localTurnState = localState;
+    this.online.reveal = result.reveal;
     this.commitOnlineTurn(localState);
+  },
+
+  dismissOnlineReveal() {
+    if (!this.online || !this.online.reveal) return;
+    this.online.reveal = null;
+    this.render();
   },
 
   commitOnlineTurn(localState) {
@@ -639,7 +661,7 @@ const App = {
     } else if (this.screen === "setup") {
       view.innerHTML = renderSetupScreen();
     } else if (this.screen === "game") {
-      view.innerHTML = renderGameScreen(this.state, this.log, this.humanId, "solo", LifeRoadProfile.loadProfile(), this.hub, this.hopAnimation);
+      view.innerHTML = renderGameScreen(this.state, this.log, this.humanId, "solo", LifeRoadProfile.loadProfile(), this.hub, this.hopAnimation, this.reveal);
     } else if (this.screen === "result") {
       view.innerHTML = renderResultScreen(this.state, "solo", this.lastReward);
     } else if (this.screen === "online-menu") {
@@ -649,7 +671,7 @@ const App = {
     } else if (this.screen === "online-game" && this.online && this.online.room) {
       const baseState = roomToEngineState(this.online.room);
       const displayState = this.online.localTurnState || baseState;
-      view.innerHTML = renderGameScreen(displayState, this.online.log, this.online.uid, "online", LifeRoadProfile.loadProfile(), this.hub, this.hopAnimation);
+      view.innerHTML = renderGameScreen(displayState, this.online.log, this.online.uid, "online", LifeRoadProfile.loadProfile(), this.hub, this.hopAnimation, this.online.reveal);
     } else if (this.screen === "online-result" && this.online && this.online.room) {
       const state = roomToEngineState(this.online.room);
       view.innerHTML = renderResultScreen(state, "online", this.online.lastReward);

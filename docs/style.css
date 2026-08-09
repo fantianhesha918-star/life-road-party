@@ -182,6 +182,10 @@ body {
   background: #f3e8fd;
 }
 
+.cell-choice {
+  background: #fff0e0;
+}
+
 .cell-index {
   font-size: 0.6rem;
   color: var(--muted);
@@ -435,6 +439,20 @@ body {
   100% {
     transform: scale(1);
   }
+}
+
+.reveal-delta {
+  font-size: 1.4rem;
+  font-weight: bold;
+  margin: 0;
+}
+
+.reveal-delta-positive {
+  color: var(--ok);
+}
+
+.reveal-delta-negative {
+  color: var(--danger);
 }
 
 .hub-menu-grid {

@@ -20,7 +20,7 @@ function createInitialState(playerConfigs) {
     currentTurnIndex: 0,
     turnNumber: 1,
     status: "playing", // playing | finished
-    pendingChoice: null, // { playerId, type: "job", offers: [...] }
+    pendingChoice: null, // { playerId, title, prompt, options: [{ label, job?, outcomes: [{weight,delta,resultText}] }] }
   };
 }
 
@@ -118,7 +118,18 @@ function resolveSquare(player, square, entries) {
       if (!player.job) {
         const offers = pickTwoJobOffers();
         entries.push({ type: "info", text: "就職の関門！仕事を選ぼう" });
-        return { pendingChoice: { playerId: player.id, type: "job", offers } };
+        return {
+          pendingChoice: {
+            playerId: player.id,
+            title: "就職の関門",
+            prompt: "どちらの仕事に就きますか？",
+            options: offers.map((o) => ({
+              label: `${o.name}(給料${o.salary}万円/回)`,
+              job: o,
+              outcomes: [{ weight: 1, delta: 0, resultText: `『${o.name}』になった！(給料${o.salary}万円/回)` }],
+            })),
+          },
+        };
       }
       const bonus = randInt(SKILLUP_BONUS_MIN, SKILLUP_BONUS_MAX);
       player.money += bonus;
@@ -129,6 +140,13 @@ function resolveSquare(player, square, entries) {
       });
       return {};
     }
+    case "choice": {
+      const ev = CHOICE_EVENTS[Math.floor(Math.random() * CHOICE_EVENTS.length)];
+      entries.push({ type: "info", text: ev.title });
+      return {
+        pendingChoice: { playerId: player.id, title: ev.title, prompt: ev.prompt, options: ev.options },
+      };
+    }
     case "goal":
       entries.push({ type: "info", text: `${player.name} はゴールに到達した！` });
       return {};
@@ -137,20 +155,32 @@ function resolveSquare(player, square, entries) {
   }
 }
 
-// job選択(pendingChoice)を確定させ、ターンを終了する
-function resolveJobChoice(state, playerId, offerIndex) {
+// outcomesから重み付きランダムで1つ選ぶ(weightの比率で抽選。1件しかなければそれを返す)
+function pickWeightedOutcome(outcomes) {
+  const total = outcomes.reduce((s, o) => s + o.weight, 0);
+  let r = Math.random() * total;
+  for (const o of outcomes) {
+    if (r < o.weight) return o;
+    r -= o.weight;
+  }
+  return outcomes[outcomes.length - 1];
+}
+
+// 選択(pendingChoice)を確定させ、ターンを終了する。就職・一般イベント共通の汎用処理
+function resolveChoice(state, playerId, optionIndex) {
   const player = state.players.find((p) => p.id === playerId);
   if (!player || !state.pendingChoice || state.pendingChoice.playerId !== playerId) {
-    throw new Error("invalid job choice resolution");
+    throw new Error("invalid choice resolution");
   }
-  const offer = state.pendingChoice.offers[offerIndex];
-  player.job = offer;
-  const entries = [
-    { type: "info", text: `${player.name} は「${offer.name}」に就職した(給料${offer.salary}万円)` },
-  ];
+  const option = state.pendingChoice.options[optionIndex];
+  const outcome = pickWeightedOutcome(option.outcomes);
+  if (option.job) player.job = option.job;
+  if (outcome.delta) player.money += outcome.delta;
+  const entries = [{ type: outcome.delta ? "money" : "info", text: outcome.resultText, delta: outcome.delta }];
+  const reveal = { text: outcome.resultText, delta: outcome.delta, job: option.job || null };
   state.pendingChoice = null;
   finalizeTurn(state, player, entries);
-  return { entries, pendingChoice: null, turnEnded: true };
+  return { entries, reveal, pendingChoice: null, turnEnded: true };
 }
 
 // 消耗品アイテムの効果(所持金増減)を適用する。ターンは終了させない(ハブ画面に留まる)

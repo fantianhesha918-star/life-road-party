@@ -5,6 +5,7 @@ const SQUARE_ICON = {
   event: "🎉",
   fortune: "🔮",
   job: "💼",
+  choice: "🤔",
   payday: "💰",
   rest: "☕",
   goal: "🏁",
@@ -293,18 +294,35 @@ function renderLog(entries) {
   return `<ul class="log-list">${items}</ul>`;
 }
 
-function renderJobModal(pendingChoice, mode) {
+function renderChoiceModal(pendingChoice, mode) {
   if (!pendingChoice) return "";
-  const chooseFn = mode === "online" ? "App.chooseOnlineJob" : "App.chooseJob";
-  const offerButtons = pendingChoice.offers
-    .map((o, i) => `<button class="btn btn-offer" onclick="${chooseFn}(${i})">${escapeHtml(o.name)}(給料${o.salary}万円/回)</button>`)
+  const chooseFn = mode === "online" ? "App.chooseOnlineOption" : "App.chooseOption";
+  const optionButtons = pendingChoice.options
+    .map((o, i) => `<button class="btn btn-offer" onclick="${chooseFn}(${i})">${escapeHtml(o.label)}</button>`)
     .join("");
   return `
     <div class="modal-backdrop">
       <div class="modal">
-        <h3>就職の関門</h3>
-        <p>どちらの仕事に就きますか？</p>
-        ${offerButtons}
+        <h3>${escapeHtml(pendingChoice.title)}</h3>
+        <p>${escapeHtml(pendingChoice.prompt)}</p>
+        ${optionButtons}
+      </div>
+    </div>
+  `;
+}
+
+// 選択イベントの結果を見せる一コマ演出。「つぎへ」を押すまでターンは進まない
+function renderRevealCard(reveal, visual, dismissFn) {
+  if (!reveal) return "";
+  const deltaClass = reveal.delta > 0 ? "reveal-delta-positive" : reveal.delta < 0 ? "reveal-delta-negative" : "";
+  const deltaText = reveal.delta ? `<p class="reveal-delta ${deltaClass}">${reveal.delta > 0 ? "+" : ""}${reveal.delta}万円</p>` : "";
+  return `
+    <div class="turn-hub-modal">
+      <div class="turn-hub-card">
+        <div class="turn-hub-avatar">${renderAvatarBadge(visual, 72)}</div>
+        <p class="lead">${escapeHtml(reveal.text)}</p>
+        ${deltaText}
+        <button class="btn btn-primary" onclick="${dismissFn}()">つぎへ</button>
       </div>
     </div>
   `;
@@ -395,9 +413,11 @@ function renderTurnHub(state, humanId, profile, hub) {
   `;
 }
 
-function renderGameScreen(state, log, humanId, mode, profile, hub, hopOverride) {
+function renderGameScreen(state, log, humanId, mode, profile, hub, hopOverride, reveal) {
   const turnPlayer = state.players[state.currentTurnIndex];
-  const isHumanTurn = state.status === "playing" && turnPlayer && turnPlayer.id === humanId && !state.pendingChoice;
+  const isHumanTurn = state.status === "playing" && turnPlayer && turnPlayer.id === humanId && !state.pendingChoice && !reveal;
+  const visual = turnPlayer && (turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null });
+  const dismissFn = mode === "online" ? "App.dismissOnlineReveal" : "App.dismissReveal";
   return `
     <section class="screen screen-game">
       ${renderTurnBanner(state)}
@@ -406,7 +426,8 @@ function renderGameScreen(state, log, humanId, mode, profile, hub, hopOverride) 
       <h3>できごとログ</h3>
       ${renderLog(log)}
       ${isHumanTurn ? renderTurnHub(state, humanId, profile, hub) : ""}
-      ${renderJobModal(state.pendingChoice && state.pendingChoice.playerId === humanId ? state.pendingChoice : null, mode)}
+      ${!reveal ? renderChoiceModal(state.pendingChoice && state.pendingChoice.playerId === humanId ? state.pendingChoice : null, mode) : ""}
+      ${renderRevealCard(reveal, visual, dismissFn)}
     </section>
   `;
 }
