@@ -10,14 +10,28 @@ function escapeHtml(str) {
   }[c]));
 }
 
+// speciesIdから実イラスト(docs/avatars/、shop-data.jsのSPECIES_ITEMS.avatarImage)を引く。
+// 絵文字より優先して使う(見つからない場合は従来通り絵文字にフォールバック)。
+function findAvatarImage(speciesId) {
+  if (!speciesId) return null;
+  const item = SPECIES_ITEMS.find((it) => it.id === speciesId);
+  return (item && item.avatarImage) || null;
+}
+
 function renderAvatarBadge(visual, size) {
   const px = size || 28;
   const speciesSize = Math.round(px * 0.7);
   const hatSize = Math.round(px * 0.55);
   const accSize = Math.round(px * 0.45);
+  const avatarImage = findAvatarImage(visual.speciesId);
+  const speciesVisual = avatarImage
+    ? `<img class="avatar-species-img" src="${avatarImage}" alt="" />`
+    : visual.speciesEmoji
+    ? `<span class="avatar-species" style="font-size:${speciesSize}px">${visual.speciesEmoji}</span>`
+    : "";
   return `
     <span class="avatar-badge" style="width:${px}px;height:${px}px;background:${visual.color}">
-      ${visual.speciesEmoji ? `<span class="avatar-species" style="font-size:${speciesSize}px">${visual.speciesEmoji}</span>` : ""}
+      ${speciesVisual}
       ${visual.hatEmoji ? `<span class="avatar-hat" style="font-size:${hatSize}px">${visual.hatEmoji}</span>` : ""}
       ${visual.accessoryEmoji ? `<span class="avatar-acc" style="font-size:${accSize}px">${visual.accessoryEmoji}</span>` : ""}
     </span>
@@ -303,15 +317,50 @@ function renderChoiceModal(pendingChoice, mode, cpuName) {
           <h3>${escapeHtml(pendingChoice.title)}</h3>
           <p>${escapeHtml(pendingChoice.prompt)}</p>
         </div>
+        <button class="btn" onclick="App.toggleStatusPeek()">📊 自分の状況を確認</button>
         ${optionButtons}
       </div>
     </div>
   `;
 }
 
-// 選択イベントの結果を見せる一コマ演出。人間自身の選択(dismissFn有り)は
-// 「つぎへ」を押すまでターンが進まない。CPUの選択(dismissFn無し)はApp側の
-// タイマーで自動的に閉じるので、押せないことが分かるよう「…」だけ表示する。
+// 選択画面(renderChoiceModal)の「状況を確認」ボタンから開く、所持金・アイテム等の
+// 読み取り専用の確認ウィンドウ。選択そのものには影響しない(閉じるだけ)。
+function renderStatusPeekModal(player, profile) {
+  if (!player) return "";
+  const houseTier = player.housePrice > 0 ? HOUSE_PRICE_TIERS.find((t) => t.price === player.housePrice) : null;
+  const consumables = Object.entries((profile && profile.consumables) || {}).filter(([, count]) => count > 0);
+  const itemRows = consumables.length
+    ? consumables
+        .map(([id, count]) => {
+          const item = findShopItem(id);
+          if (!item) return "";
+          return `<li class="player-row"><span>${item.emoji}</span><span class="p-name">${escapeHtml(item.name)}</span><span class="p-money">${count}個</span></li>`;
+        })
+        .join("")
+    : `<li class="player-row"><span class="p-name lead">アイテムは持っていません</span></li>`;
+  return `
+    <div class="modal-backdrop status-peek-modal">
+      <div class="modal">
+        <h3>${escapeHtml(player.name)} の状況</h3>
+        <p class="lead">💰 所持金: ${player.money}万円</p>
+        <p class="lead">${player.job ? `💼 ${escapeHtml(player.job.name)}(給料${player.job.salary}万円/回)` : "💼 まだ就職していません"}</p>
+        <p class="lead">💹 保有株: ${player.stockShares || 0}株</p>
+        <p class="lead">🏠 マイホーム: ${houseTier ? escapeHtml(houseTier.label) : "まだ持っていません"}</p>
+        <p class="lead">🛡️ 火災保険: ${player.insurance === "fire" ? "加入中" : "未加入"}</p>
+        <p class="lead">👶 こども: ${player.children || 0}人</p>
+        <ul class="player-list">${itemRows}</ul>
+        <button class="btn btn-primary" onclick="App.toggleStatusPeek()">閉じる</button>
+      </div>
+    </div>
+  `;
+}
+
+// 選択・できごと・運命の分かれ道・給料日・ひと休みなど、マスに止まった結果を見せる
+// 一コマ演出。人間自身の結果(dismissFn有り)は「つぎへ」を押すまでターンが進まない。
+// CPUの結果(dismissFn無し)はApp側のタイマーで自動的に閉じるので、押せないことが
+// 分かるよう「…」だけ表示する。テロップ枠(telop-frame.png)で本文を囲み、選択モーダルの
+// プロンプト表示と統一感を持たせる。
 function renderRevealCard(reveal, visual, dismissFn) {
   if (!reveal) return "";
   const deltaClass = reveal.delta > 0 ? "reveal-delta-positive" : reveal.delta < 0 ? "reveal-delta-negative" : "";
@@ -323,9 +372,24 @@ function renderRevealCard(reveal, visual, dismissFn) {
     <div class="turn-hub-modal">
       <div class="turn-hub-card">
         <div class="turn-hub-avatar">${renderAvatarBadge(visual, 72)}</div>
-        <p class="lead">${escapeHtml(reveal.text)}</p>
-        ${deltaText}
+        <div class="modal-telop">
+          <p class="lead">${escapeHtml(reveal.text)}</p>
+          ${deltaText}
+        </div>
         ${actionHtml}
+      </div>
+    </div>
+  `;
+}
+
+// 手番切り替え時に一瞬だけ中央に表示するポップアップ(アバター+名前、自動で消える)
+function renderTurnPopup(popup) {
+  if (!popup) return "";
+  return `
+    <div class="turn-popup">
+      <div class="turn-popup-card">
+        ${renderAvatarBadge(popup.visual, 56)}
+        <p>${escapeHtml(popup.name)} のターン</p>
       </div>
     </div>
   `;
@@ -379,10 +443,10 @@ function renderTurnHub(state, humanId, profile, hub) {
       <div class="roulette-display">
         <div class="roulette-wheel-wrap">
           <div class="roulette-pointer">▼</div>
-          <div class="roulette-wheel"></div>
+          <div class="roulette-wheel${hub.spinning ? " is-spinning" : ""}"></div>
           <div class="roulette-wheel-number">${hub.spinNumber}</div>
         </div>
-        <p class="lead">ルーレットが回転中…</p>
+        <p class="lead">${hub.spinning ? "ルーレットが回転中…" : "ルーレット、止まった！"}</p>
       </div>
     `;
   } else if (view === "status") {
@@ -390,6 +454,7 @@ function renderTurnHub(state, humanId, profile, hub) {
     body = `
       ${renderPlayerList(state)}
       <p class="lead">${me.job ? `給料: ${me.job.salary}万円/回` : "まだ就職していません(給料日はアルバイト収入)"}</p>
+      <p class="lead">💹 保有株: ${me.stockShares || 0}株</p>
       <button class="btn" onclick="App.showHubView('menu')">戻る</button>
     `;
   } else if (view === "items") {
@@ -427,7 +492,26 @@ function renderTurnHub(state, humanId, profile, hub) {
   `;
 }
 
-function renderGameScreen(state, log, humanId, mode, profile, hub, reveal, logOpen, hopping) {
+// 手番プレイヤー以外の所持金変動(結婚のお祝い金の徴収など)を、画面上部に一定時間だけ
+// 積み上げ表示するトースト。App.showMoneyToasts()がsetTimeoutで自動的に消す。
+function renderMoneyToasts(toasts) {
+  if (!toasts || !toasts.length) return "";
+  const items = toasts
+    .map((t) => {
+      const deltaClass = t.delta > 0 ? "reveal-delta-positive" : "reveal-delta-negative";
+      return `
+        <div class="money-toast">
+          ${t.visual ? renderAvatarBadge(t.visual, 28) : ""}
+          <span class="p-name">${escapeHtml(t.name)}</span>
+          <span class="money-toast-delta ${deltaClass}">${t.delta > 0 ? "+" : ""}${t.delta}万円</span>
+        </div>
+      `;
+    })
+    .join("");
+  return `<div class="money-toast-stack">${items}</div>`;
+}
+
+function renderGameScreen(state, log, humanId, mode, profile, hub, reveal, logOpen, hopping, turnPopup, statusPeekOpen, moneyToasts) {
   const turnPlayer = state.players[state.currentTurnIndex];
   const isCPUTurn = !!(turnPlayer && turnPlayer.id !== humanId);
   // state.currentTurnIndexはホップ移動が始まる前に次の手番へ進んでしまうため(applyRoll内で
@@ -447,11 +531,34 @@ function renderGameScreen(state, log, humanId, mode, profile, hub, reveal, logOp
   // (ただし押せない表示にして、人間の誤操作による二重確定を防ぐ)。
   return `
     <section class="screen screen-game">
+      ${renderTurnPopup(turnPopup)}
+      ${renderMoneyToasts(moneyToasts)}
       ${isHumanTurn || showCPUSpinning ? renderTurnHub(state, humanId, profile, hub) : ""}
       ${!reveal && !hopping ? renderChoiceModal(state.pendingChoice, mode, isCPUTurn ? turnPlayer.name : null) : ""}
       ${renderRevealCard(reveal, reveal && reveal.visual, dismissFn)}
       ${logOpen ? renderLogModal(log) : ""}
+      ${statusPeekOpen ? renderStatusPeekModal(state.players.find((p) => p.id === humanId), profile) : ""}
     </section>
+  `;
+}
+
+// 全員ゴール後の清算(runSettlement)の内訳を、結果画面で開閉式に確認できるようにする
+function renderSettlementBreakdown(settlement) {
+  if (!settlement || !settlement.total) return "";
+  const rows = [
+    settlement.child ? `<li>👶 こども清算 +${settlement.child}万円</li>` : "",
+    settlement.stock ? `<li>💹 株の清算 +${settlement.stock}万円</li>` : "",
+    settlement.house ? `<li>🏠 マイホーム清算 +${settlement.house}万円</li>` : "",
+    settlement.goalOrder ? `<li>🏁 ゴール到達順ボーナス +${settlement.goalOrder}万円</li>` : "",
+  ]
+    .filter(Boolean)
+    .join("");
+  if (!rows) return "";
+  return `
+    <details class="settlement-detail">
+      <summary>清算の内訳(合計 +${settlement.total}万円)</summary>
+      <ul class="settlement-list">${rows}</ul>
+    </details>
   `;
 }
 
@@ -466,6 +573,7 @@ function renderResultScreen(state, mode, rewardCoins) {
       <span class="p-name">${escapeHtml(p.name)}${p.isCPU ? `(CPU${LifeRoadCPU.personalityLabel(p.personality) ? "・" + LifeRoadCPU.personalityLabel(p.personality) : ""})` : ""}</span>
       <span class="p-job">${p.job ? escapeHtml(p.job.name) : "無職"}</span>
       <span class="p-money">${p.money}万円</span>
+      ${renderSettlementBreakdown(p.settlement)}
     </li>
   `;
   }).join("");

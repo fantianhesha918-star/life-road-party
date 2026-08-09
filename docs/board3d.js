@@ -20,6 +20,8 @@ dracoLoader.setDecoderPath("https://unpkg.com/three@0.169.0/examples/jsm/libs/dr
 let squareCount = 10;
 // マスの種類(BOARD_SQUARES[i].type)。マス土台の色分けに使う。mount()の都度app.js側から渡される。
 let squareTypes = [];
+// 株購入チャンスのマスindex一覧(game-data.jsのSTOCK_TRIGGER_INDEXES)。mount()の都度渡される。
+let stockTriggerIndexes = [];
 const SQUARE_SPACING = 2.2;
 const HOP_HEIGHT = 0.6;
 // 道をゆるやかに蛇行させるsin波のパラメータ。index*FREQUENCYが増えるほど
@@ -187,7 +189,16 @@ const SQUARE_TYPE_COLORS = {
   fortune: 0xf3e8fd,
   choice: 0xfff0e0,
   rest: 0xffffff,
+  marriage: 0xffc9de,
+  childbirth: 0xcfe8ff,
+  "house-market": 0xd9a066,
+  "house-fire": 0xff8a65,
+  "house-swap": 0x80cbc4,
 };
+// 株購入チャンスのマス(通過するだけで発生、game-data.jsのSTOCK_TRIGGER_INDEXES)は
+// 上記の種類別配色より優先して、目立つ金色で塗る(マスの意味自体は変わらないため
+// typeとは別の重ね掛けのプロパティとして扱う)
+const STOCK_TRIGGER_COLOR = 0xf6c343;
 // マス土台モデル(masu-base.glb)。無地のため上記の色をマテリアルに都度上書きして使う。
 // yOffsetは他モデルと違い「上面がy=0(キャラクターの足元)に来る」ように中心を沈める値
 // (= -(scale × 実測厚みの半分0.164))。
@@ -276,6 +287,23 @@ function squarePosition(index) {
     0,
     Math.sin(index * PATH_CURVE_FREQUENCY) * PATH_CURVE_AMPLITUDE
   );
+}
+
+// 同じマスに複数のプレイヤーが乗ったときに重ならないよう、プレイヤーごとに固定の
+// 小さな「持ち場」オフセットを常時つける(players配列内の並び順だけで決まるので、
+// 他のプレイヤーの位置に関わらず毎回同じ位置をキープできる)。全員がstart(index0)に
+// 集まるゲーム開始直後や、結婚マス等の強制停止マスで特に効果を発揮する。
+const PLAYER_SLOT_RADIUS = 0.32;
+function playerSlotOffset(playerIndex, totalPlayers) {
+  if (!totalPlayers || totalPlayers <= 1) return new THREE.Vector3(0, 0, 0);
+  const angle = (playerIndex / totalPlayers) * Math.PI * 2;
+  return new THREE.Vector3(Math.cos(angle) * PLAYER_SLOT_RADIUS, 0, Math.sin(angle) * PLAYER_SLOT_RADIUS);
+}
+
+// キャラクター用: マス中心にそのプレイヤーの持ち場オフセットを加えた位置
+function characterSlotPosition(index, offset) {
+  const p = squarePosition(index);
+  return new THREE.Vector3(p.x + offset.x, p.y, p.z + offset.z);
 }
 
 // パス上の連続位置t(例: gapIndex+0.5)における点と、その地点の進行方向に垂直な法線を求める。
@@ -642,10 +670,12 @@ function loadCharacterModel(entry, speciesId, generation) {
 }
 
 // プレイヤー1人分の3Dオブジェクト一式を生成し、現在の位置(player.position)に配置する。
-function createCharacterEntry(player) {
+// playerIndex/totalPlayersは、同じマスで重ならないための持ち場オフセット算出に使う。
+function createCharacterEntry(player, playerIndex, totalPlayers) {
   const group = new THREE.Group();
   const startIndex = typeof player.position === "number" ? player.position : 0;
-  const startPos = squarePosition(startIndex);
+  const slotOffset = playerSlotOffset(playerIndex || 0, totalPlayers || 1);
+  const startPos = characterSlotPosition(startIndex, slotOffset);
   group.position.set(startPos.x, 0, startPos.z);
   scene.add(group);
 
@@ -662,6 +692,7 @@ function createCharacterEntry(player) {
     currentAction: null,
     hop: null,
     currentIndex: startIndex,
+    slotOffset,
   };
   characters.set(player.id, entry);
   loadCharacterModel(entry, visual.speciesId, sceneGeneration);
@@ -669,6 +700,7 @@ function createCharacterEntry(player) {
 }
 
 function squareTypeColor(index) {
+  if (stockTriggerIndexes.includes(index)) return STOCK_TRIGGER_COLOR;
   const type = squareTypes[index];
   return type && SQUARE_TYPE_COLORS[type] !== undefined ? SQUARE_TYPE_COLORS[type] : 0xf9f1dc;
 }
@@ -748,7 +780,8 @@ function buildScene(players) {
   createClouds(scene);
 
   characters = new Map();
-  (players || []).forEach((p) => createCharacterEntry(p));
+  const playerList = players || [];
+  playerList.forEach((p, i) => createCharacterEntry(p, i, playerList.length));
 
   const light = new THREE.DirectionalLight(0xffffff, 1.8);
   light.position.set(3, 6, 4);
@@ -776,8 +809,9 @@ function updateHopForEntry(entry, now) {
   if (!entry.hop) return;
   const hop = entry.hop;
   const t = Math.min(1, (now - hop.startTime) / hop.durationMs);
-  const fromPos = squarePosition(hop.fromIndex);
-  const toPos = squarePosition(hop.toIndex);
+  const offset = entry.slotOffset || { x: 0, z: 0 };
+  const fromPos = characterSlotPosition(hop.fromIndex, offset);
+  const toPos = characterSlotPosition(hop.toIndex, offset);
   entry.group.position.x = fromPos.x + (toPos.x - fromPos.x) * t;
   entry.group.position.z = fromPos.z + (toPos.z - fromPos.z) * t;
   const arc = Math.sin(t * Math.PI);
@@ -841,6 +875,7 @@ function mount(canvasEl, options) {
   const opts = options || {};
   squareCount = opts.squareCount || 10;
   squareTypes = opts.squareTypes || [];
+  stockTriggerIndexes = opts.stockTriggerIndexes || [];
   renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.shadowMap.enabled = true;
@@ -916,18 +951,26 @@ async function hopSteps(playerId, fromIndex, toIndex, options) {
 // 新規プレイヤー(まだcharactersに無いid)がいれば生成する。
 function syncPlayers(players) {
   if (!scene) return;
-  (players || []).forEach((p) => {
-    const entry = characters.get(p.id);
+  const playerList = players || [];
+  playerList.forEach((p, i) => {
+    const slotOffset = playerSlotOffset(i, playerList.length);
+    let entry = characters.get(p.id);
     if (!entry) {
-      createCharacterEntry(p);
+      entry = createCharacterEntry(p, i, playerList.length);
       return;
     }
+    entry.slotOffset = slotOffset;
     if (entry.hop) return;
     if (entry.currentIndex !== p.position) {
-      const pos = squarePosition(p.position);
+      const pos = characterSlotPosition(p.position, slotOffset);
       entry.group.position.set(pos.x, 0, pos.z);
       entry.group.scale.set(1, 1, 1);
       entry.currentIndex = p.position;
+    } else {
+      // 位置は変わっていなくても、持ち場オフセット自体が変わった場合(プレイヤー人数変化等)は
+      // ホップ中でなければ現在地に反映しておく
+      const pos = characterSlotPosition(entry.currentIndex, slotOffset);
+      entry.group.position.set(pos.x, 0, pos.z);
     }
   });
 }

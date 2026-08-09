@@ -1,38 +1,93 @@
 // ライフロード オリジナルゲームデータ
 // 盤面・イベント・職業はすべてオリジナル(既存の市販ボードゲームの内容は使用しない)
 
+// 各マスは「踏むたびに毎回変わる抽選」ではなく、市販の人生ゲームのように
+// マスの位置ごとに固定のイベントを割り当てる(2026-08-09〜)。event/fortune/choiceの
+// 具体的な中身は下のEVENT_CARDS/FORTUNE_CARDS/CHOICE_EVENTS(このマス数より多く用意してある
+// 予備の内容ライブラリ)からeventCardIndex/fortuneCardIndex/choiceEventIndexで指定する。
+// 「ひと休み」マスは、そのプレイヤー自身の次の自分の番を1回休みにする(game-engine.js参照)。
 const BOARD_SQUARES = [
   { index: 0, type: "start", label: "人生スタート" },
-  { index: 1, type: "event", label: "できごと" },
-  { index: 2, type: "fortune", label: "運命の分かれ道" },
+  { index: 1, type: "event", label: "できごと", eventCardIndex: 0 },
+  { index: 2, type: "fortune", label: "運命の分かれ道", fortuneCardIndex: 0 },
   { index: 3, type: "job", label: "就職の関門" },
   { index: 4, type: "rest", label: "ひと休み" },
   { index: 5, type: "payday", label: "給料日" },
-  { index: 6, type: "event", label: "できごと" },
-  { index: 7, type: "choice", label: "選択のとき" },
+  { index: 6, type: "event", label: "できごと", eventCardIndex: 1 },
+  { index: 7, type: "choice", label: "選択のとき", choiceEventIndex: 4 },
   { index: 8, type: "job", label: "スキルアップ研修" },
-  { index: 9, type: "event", label: "できごと" },
+  { index: 9, type: "house-fire", label: "火事発生" },
   { index: 10, type: "payday", label: "給料日" },
-  { index: 11, type: "fortune", label: "運命の分かれ道" },
-  { index: 12, type: "event", label: "できごと" },
+  { index: 11, type: "fortune", label: "運命の分かれ道", fortuneCardIndex: 1 },
+  { index: 12, type: "house-swap", label: "家の交換" },
   { index: 13, type: "rest", label: "ひと休み" },
   { index: 14, type: "payday", label: "給料日" },
   { index: 15, type: "job", label: "スキルアップ研修" },
-  { index: 16, type: "choice", label: "選択のとき" },
-  { index: 17, type: "event", label: "できごと" },
+  { index: 16, type: "choice", label: "選択のとき", choiceEventIndex: 8 },
+  { index: 17, type: "marriage", label: "結婚" },
   { index: 18, type: "payday", label: "給料日" },
-  { index: 19, type: "event", label: "できごと" },
-  { index: 20, type: "fortune", label: "運命の分かれ道" },
+  { index: 19, type: "childbirth", label: "子どもが生まれる" },
+  { index: 20, type: "fortune", label: "運命の分かれ道", fortuneCardIndex: 2 },
   { index: 21, type: "rest", label: "ひと休み" },
   { index: 22, type: "payday", label: "給料日" },
-  { index: 23, type: "event", label: "できごと" },
+  { index: 23, type: "childbirth", label: "子どもが生まれる" },
   { index: 24, type: "job", label: "スキルアップ研修" },
-  { index: 25, type: "choice", label: "選択のとき" },
-  { index: 26, type: "event", label: "できごと" },
+  { index: 25, type: "house-market", label: "マイホーム購入" },
+  { index: 26, type: "childbirth", label: "子どもが生まれる" },
   { index: 27, type: "payday", label: "給料日" },
-  { index: 28, type: "fortune", label: "運命の分かれ道" },
+  { index: 28, type: "fortune", label: "運命の分かれ道", fortuneCardIndex: 3 },
   { index: 29, type: "goal", label: "ゴール" },
 ];
+
+// 「結婚」は、ロールの目がこのマスを通り過ぎる場合でも強制的にここで停止する
+// (市販の人生ゲームの「止まる」マスと同じ挙動)。game-engine.jsのapplyRollで、
+// この配列に含まれるtypeのマスが移動範囲内にあれば手前のものを優先して停止位置として採用する。
+// 「子どもが生まれる」は授かりものなので強制停止にはせず、ちょうど着地したときだけ発生する
+// (他のevent/fortuneマスと同じ扱い)。結婚マスより後ろに複数配置してある。
+const FORCED_STOP_TYPES = ["marriage"];
+
+// 結婚: 止まったプレイヤーは他の全プレイヤーからお祝い金をもらう(1人あたりの金額)。
+// 出産: こちらは変更なしで、生まれた本人がお祝い金を払う固定額のまま。
+const MARRIAGE_GIFT_PER_PLAYER = 10;
+const CHILDBIRTH_GIFT_COST = 20;
+
+// 株購入のチャンスは特定マスに「止まらなくても」「通り過ぎるだけ」で発生する
+// (game-engine.jsのapplyRollで、移動範囲にこのインデックスが含まれるか判定する)。
+// 対象は就職・選択マス以外(pendingChoiceの二重発生を避けるため)から選定している。
+const STOCK_TRIGGER_INDEXES = [5, 11, 20, 26];
+
+const STOCK_PRICE_PER_SHARE = 3; // 万円/株
+const STOCK_BUY_LOT = 10; // 1回の購入で買える株数(-30万円)
+
+// 保有株数に応じて所持金が増減する(株価変動)。株を保有していないプレイヤーには適用しない
+const STOCK_VALUE_EVENTS = [
+  { text: "📈 保有株が値上がりした", perShare: 2 },
+  { text: "📈 好決算のニュースで株価が急騰した", perShare: 3 },
+  { text: "📉 保有株が値下がりした", perShare: -2 },
+  { text: "📉 市場全体が下落し株価が下がった", perShare: -3 },
+  { text: "📈 配当金が入った", perShare: 1 },
+];
+
+// マイホームの価格帯(6段階)。exclusive:trueは早い者勝ち(誰か1人が所有している間は
+// 他のプレイヤーは選べない、game-engine.jsのhouse-market解決時に判定する)
+const HOUSE_PRICE_TIERS = [
+  { label: "中古アパート", price: 20, exclusive: false },
+  { label: "新築アパート", price: 35, exclusive: false },
+  { label: "中古一戸建て", price: 55, exclusive: false },
+  { label: "新築一戸建て", price: 80, exclusive: false },
+  { label: "デザイナーズ住宅", price: 120, exclusive: false },
+  { label: "タワーマンション最上階", price: 200, exclusive: true },
+];
+
+// 火災保険に入っていた場合、家の価格に対してこの割合を保険金として受け取る(家は失う)
+const FIRE_INSURANCE_PAYOUT_RATE = 0.7;
+
+// 全員ゴール後の清算(runSettlement)で使う報酬定数
+const CHILD_SETTLEMENT_REWARD = 15; // 万円/人
+const STOCK_SETTLEMENT_PER_SHARE = 4; // 万円/株
+const HOUSE_SETTLEMENT_MULTIPLIER = 1.5; // 家の購入価格に対する倍率(ゴール時点で所有している場合のみ)
+// ゴールに到達した順番(finishOrder、1着から)に応じたボーナス。6人プレイまで対応
+const GOAL_ORDER_REWARDS = [50, 35, 22, 12, 6, 0];
 
 const JOB_OFFERS = [
   { name: "ラーメン職人", salary: 14 },
@@ -66,10 +121,40 @@ const EVENT_CARDS = [
   { text: "台風で家の屋根を修理することになった", delta: -18 },
   { text: "懸賞に応募したら商品券が当たった", delta: 8 },
   { text: "飲み会つづきで出費がかさんだ", delta: -6 },
+  // 人生の節目イベント
+  { text: "会社から予想外のボーナスが支給された", delta: 20 },
+  { text: "うっかり怪我をして入院することになった", delta: -18 },
+  { text: "健康診断で再検査になり、通院費がかさんだ", delta: -6 },
+  { text: "在宅ワークの成果が評価されて臨時手当が出た", delta: 10 },
+  // 動物あるある(全プレイヤー共通、動物種を問わない)
+  { text: "換毛期で抜け毛がすごく、掃除グッズを買い足した", delta: -4 },
+  { text: "毛づやが良いとSNSで話題になり、企業案件の撮影依頼が来た", delta: 15 },
+  { text: "近所の動物病院で健康診断を受けた", delta: -6 },
+  { text: "しっぽを踏まれて痛い思いをしたが、お詫びに商品券をもらった", delta: 5 },
+  { text: "公園のかけっこ大会に飛び入り参加して優勝した", delta: 10 },
+  { text: "爪切りをサボっていたら家具を傷だらけにしてしまい、弁償することに", delta: -8 },
+  { text: "ペット可物件のオーナーに気に入られて、お祝いのおやつをもらった", delta: 4 },
+  { text: "耳掃除をサボっていたら耳を痛めてしまい、治療費がかかった", delta: -7 },
 ];
 
-const FORTUNE_MIN = -10;
-const FORTUNE_MAX = 10;
+// 運命の分かれ道マス専用のカード群。「できごと」は日常の出来事、
+// こちらは運・偶然・縁・ジンクスをテーマにして体験を分ける(2026-08-09)
+const FORTUNE_CARDS = [
+  { text: "神社で引いたおみくじが大吉だった", delta: 8 },
+  { text: "宝くじ売り場の前で足が止まり、つい1枚買ったら当たった", delta: 15 },
+  { text: "黒猫に道を横切られて、なんとなく縁起が悪い一日だった", delta: -6 },
+  { text: "友達とのじゃんけんに勝って、奢ってもらえた", delta: 5 },
+  { text: "ふらっと立ち寄ったゲームセンターで思わぬ大勝ちをした", delta: 10 },
+  { text: "調子に乗って賭け事をしすぎて負けが込んでしまった", delta: -12 },
+  { text: "四つ葉のクローバーを見つけて、いいことがありそうな予感がした", delta: 4 },
+  { text: "厄年が気になってお祓いを受けることにした", delta: -7 },
+  { text: "久しぶりに会った知人から思わぬ小遣いをもらった", delta: 6 },
+  { text: "占いで「浪費に注意」と言われた通り、財布を落としてしまった", delta: -10 },
+  { text: "ふらっと立ち寄った福引きで特賞が当たった", delta: 20 },
+  { text: "運試しにビンゴ大会へ参加したが、外れて会費だけかかった", delta: -3 },
+  { text: "流れ星に願い事をしたら、思いがけない臨時収入があった", delta: 9 },
+  { text: "縁起のいい方角へ引っ越したら、なぜか調子が上向いた", delta: 7 },
+];
 
 // 選択式イベント(汎用choiceシステム)。就職の関門もこの汎用フォーマットに包んで使う
 // (game-engine.jsのresolveSquareの"job"ケース参照)。outcomesは重み付きランダムで1つ選ばれる。
@@ -204,6 +289,21 @@ const CHOICE_EVENTS = [
           { weight: 1, delta: 0, resultText: "特に変化はなかった" },
           { weight: 1, delta: 3, resultText: "無理せず続けられて健康グッズが当たった +3万円" },
         ],
+      },
+    ],
+  },
+  {
+    title: "保険の窓口",
+    prompt: "保険の窓口で火災保険を勧められた。加入する？(家を買った後に火事に遭っても、保険金を受け取れるようになる)",
+    options: [
+      {
+        label: "火災保険に加入する(-8万円)",
+        insurance: "fire",
+        outcomes: [{ weight: 1, delta: -8, resultText: "火災保険に加入した(-8万円)" }],
+      },
+      {
+        label: "加入しない",
+        outcomes: [{ weight: 1, delta: 0, resultText: "今回は見送った" }],
       },
     ],
   },

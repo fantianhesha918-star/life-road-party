@@ -146,11 +146,33 @@ body {
 .result-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   background: var(--card);
   padding: 8px 10px;
   border-radius: 8px;
   font-size: 0.85rem;
+}
+
+.settlement-detail {
+  flex: 1 0 100%;
+  margin-top: 2px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.settlement-detail summary {
+  cursor: pointer;
+  color: var(--brand-dark);
+  font-weight: bold;
+}
+
+.settlement-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .player-row.is-turn {
@@ -233,12 +255,20 @@ body {
   z-index: 25;
 }
 
+/* 状況確認モーダルは選択モーダル(z-index:10)の上に開くため、それより手前に表示する */
+.modal-backdrop.status-peek-modal {
+  z-index: 22;
+}
+
 .modal {
   background: #fff;
   border-radius: 16px 16px 0 0;
   padding: 12px 14px calc(10px + env(safe-area-inset-bottom, 0px));
   width: 100%;
   max-width: 480px;
+  max-height: 88vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -275,6 +305,10 @@ body {
   margin: 0;
 }
 
+.modal-telop p {
+  white-space: pre-line;
+}
+
 .btn-offer {
   background: #e8f0fe;
   text-align: left;
@@ -300,6 +334,17 @@ body {
   left: 50%;
   transform: translate(-50%, -50%);
   line-height: 1;
+}
+
+.avatar-species-img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 82%;
+  height: 82%;
+  object-fit: contain;
+  pointer-events: none;
 }
 
 .avatar-hat {
@@ -357,6 +402,105 @@ body {
   background: #e6f4ea;
 }
 
+.turn-popup {
+  position: fixed;
+  top: 28%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 30;
+  pointer-events: none;
+  animation: turn-popup-fade 1.5s ease forwards;
+}
+
+.turn-popup-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  padding: 16px 28px;
+  border-radius: 16px;
+  font-weight: bold;
+  font-size: 1.05rem;
+  text-align: center;
+}
+
+.turn-popup-card p {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.money-toast-stack {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+  width: 100%;
+  max-width: 320px;
+  padding: 0 12px;
+}
+
+.money-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  animation: money-toast-fade 2.6s ease forwards;
+}
+
+.money-toast .p-name {
+  color: #fff;
+}
+
+.money-toast-delta {
+  font-weight: bold;
+  margin-left: auto;
+}
+
+@keyframes money-toast-fade {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  10% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes turn-popup-fade {
+  0% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  15% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 .turn-hub-modal {
   position: fixed;
   inset: 0;
@@ -374,6 +518,9 @@ body {
   padding: 20px 16px calc(20px + env(safe-area-inset-bottom, 0px));
   width: 100%;
   max-width: 480px;
+  max-height: 88vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -498,6 +645,9 @@ body {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
   background-image: url("images/roulette-dial.png");
   background-size: 100% 100%;
+}
+
+.roulette-wheel.is-spinning {
   animation: roulette-spin 0.6s linear infinite;
 }
 

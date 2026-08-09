@@ -35,15 +35,16 @@ const CONSUMABLE_ITEMS = [
   { id: "item-tax-shield", category: "consumable", name: "節税シール", price: 50, emoji: "🛡️", effect: { min: 30, max: 30 } },
 ];
 
-// キャラクターの動物種(全種すべて最初から無料所持)。イラスト未準備のため絵文字で代用中。
-// 実イラストが揃ったら`emoji`を画像パスに差し替える想定
+// キャラクターの動物種(全種すべて最初から無料所持)。avatarImageはdocs/avatars/配下の
+// 実イラスト(Codex作成、背景透過)へのパス。アバターバッジ(ui.jsのrenderAvatarBadge)は
+// このavatarImageがあれば絵文字より優先して表示する。
 const SPECIES_ITEMS = [
-  { id: "species-chinchilla-gray", category: "species", name: "チンチラ(グレー)", price: 0, emoji: "🐹" },
-  { id: "species-chinchilla-white", category: "species", name: "チンチラ(白パイド)", price: 0, emoji: "🐹" },
-  { id: "species-dog-frenchie-white", category: "species", name: "いぬ(フレンチブルドッグ・白)", price: 0, emoji: "🐶" },
-  { id: "species-dog-frenchie-black", category: "species", name: "いぬ(フレンチブルドッグ・黒)", price: 0, emoji: "🐶" },
-  { id: "species-cat-calico", category: "species", name: "ねこ(三毛猫)", price: 0, emoji: "🐱" },
-  { id: "species-rabbit-white", category: "species", name: "うさぎ(白)", price: 0, emoji: "🐰" },
+  { id: "species-chinchilla-gray", category: "species", name: "チンチラ(グレー)", price: 0, emoji: "🐹", avatarImage: "avatars/chinchilla-gray.png" },
+  { id: "species-chinchilla-white", category: "species", name: "チンチラ(白パイド)", price: 0, emoji: "🐹", avatarImage: "avatars/chinchilla-white-pied.png" },
+  { id: "species-dog-frenchie-white", category: "species", name: "いぬ(フレンチブルドッグ・白)", price: 0, emoji: "🐶", avatarImage: "avatars/dog-frenchie-white.png" },
+  { id: "species-dog-frenchie-black", category: "species", name: "いぬ(フレンチブルドッグ・黒)", price: 0, emoji: "🐶", avatarImage: "avatars/dog-frenchie-black.png" },
+  { id: "species-cat-calico", category: "species", name: "ねこ(三毛猫)", price: 0, emoji: "🐱", avatarImage: "avatars/cat-calico.png" },
+  { id: "species-rabbit-white", category: "species", name: "うさぎ(白)", price: 0, emoji: "🐰", avatarImage: "avatars/rabbit-white.png" },
 ];
 
 const ALL_ITEMS = [...FREE_COLOR_ITEMS, ...SHOP_ITEMS, ...CONSUMABLE_ITEMS, ...SPECIES_ITEMS];
