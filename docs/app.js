@@ -70,8 +70,15 @@ const App = {
   hub: { view: "menu", spinNumber: null, itemMessage: null },
   // ---- 選択イベントの結果演出カード。solo用(online用はthis.online.revealに持つ) ----
   reveal: null, // { text, delta, job }
-  // ---- マップ上のホップ移動アニメーション中の一時的な表示位置。solo/online共通で使う ----
-  hopAnimation: null, // { playerId, position }
+  // ---- ログモーダルの開閉状態。solo/online共通で使う ----
+  logOpen: false,
+  // ---- ホップ移動アニメーション中かどうか。true の間は選択モーダルを表示しない ----
+  hopping: false,
+  // ---- ホップ移動中に「今動いているプレイヤーid」を覚えておく。state.currentTurnIndexは
+  // 移動開始前に次の手番へ進んでしまうため、カメラ・ヘッダーはこちらを優先して参照する ----
+  hoppingPlayerId: null,
+  // ---- 3D盤面のマウント状態管理(sync3DBoard参照)。現在マウント中かどうかを覚えておく ----
+  board3dMounted: false,
 
   // ---- 通信モード用の状態 ----
   online: null, // { roomCode, uid, nickname, room, unsubscribe, log, localTurnState }
@@ -98,7 +105,9 @@ const App = {
     this.log = [];
     this.hub = { view: "menu", spinNumber: null, itemMessage: null };
     this.reveal = null;
-    this.hopAnimation = null;
+    this.logOpen = false;
+    this.hopping = false;
+    this.hoppingPlayerId = null;
     this.render();
   },
 
@@ -118,30 +127,11 @@ const App = {
     this.render();
   },
 
-  // ==================== 盤面3D化・フェーズA(技術検証) ====================
-  // 本番のプレイ導線には未接続。タイトル画面の検証ボタンからのみ呼ばれる。
+  // ==================== 盤面3D化(フェーズC・本番統合) ====================
 
   loadBoard3DModules() {
     if (window.LifeRoadBoard3D) return Promise.resolve();
     return import("./board3d.js");
-  },
-
-  testBoard3D() {
-    this.loadBoard3DModules()
-      .then(() => {
-        document.getElementById("board3d-overlay").classList.add("is-active");
-        window.LifeRoadBoard3D.mount(document.getElementById("board3d-canvas"));
-        window.LifeRoadBoard3D.hopSteps(0, 6, { stepDurationMs: HOP_STEP_MS });
-      })
-      .catch((err) => {
-        console.error("3D盤面テストの読み込みに失敗", err);
-        alert("3Dデモの読み込みに失敗しました(通信環境やブラウザの対応状況をご確認ください)");
-      });
-  },
-
-  closeBoard3DTest() {
-    document.getElementById("board3d-overlay").classList.remove("is-active");
-    if (window.LifeRoadBoard3D) window.LifeRoadBoard3D.dispose();
   },
 
   equipAvatarItem(category, itemId) {
@@ -172,7 +162,9 @@ const App = {
     this.humanId = saved.humanId;
     this.hub = { view: "menu", spinNumber: null, itemMessage: null };
     this.reveal = null;
-    this.hopAnimation = null;
+    this.logOpen = false;
+    this.hopping = false;
+    this.hoppingPlayerId = null;
     this.screen = "game";
     this.render();
     this.maybeRunCPUTurn();
@@ -188,12 +180,21 @@ const App = {
     const humanAvatar = LifeRoadProfile.getAvatarVisual(profile.equipped);
     const configs = [{ id: "human", name: nickname, isCPU: false, avatar: humanAvatar }];
     for (let i = 1; i <= cpuCount; i++) {
+      // speciesIdが無いと3Dモデルを一切読み込まず、色付きプレースホルダーのままになってしまうため
+      // 動物種をランダムに割り当てる(SPECIES_ITEMSはshop-data.js参照)
+      const species = SPECIES_ITEMS[Math.floor(Math.random() * SPECIES_ITEMS.length)];
       configs.push({
         id: `cpu${i}`,
         name: `CPU${i}`,
         isCPU: true,
         personality: LifeRoadCPU.pickRandomPersonality(),
-        avatar: { color: TOKEN_COLORS[i % TOKEN_COLORS.length], hatEmoji: null, accessoryEmoji: "🤖" },
+        avatar: {
+          color: TOKEN_COLORS[i % TOKEN_COLORS.length],
+          speciesId: species.id,
+          speciesEmoji: species.emoji,
+          hatEmoji: null,
+          accessoryEmoji: "🤖",
+        },
       });
     }
     this.humanId = "human";
@@ -201,7 +202,9 @@ const App = {
     this.log = [{ type: "info", text: "ゲーム開始！" }];
     this.hub = { view: "menu", spinNumber: null, itemMessage: null };
     this.reveal = null;
-    this.hopAnimation = null;
+    this.logOpen = false;
+    this.hopping = false;
+    this.hoppingPlayerId = null;
     this.screen = "game";
     this.saveGame();
     this.render();
@@ -223,37 +226,47 @@ const App = {
     });
   },
 
-  // ---- マップ上のホップ移動アニメーション(solo/online共通) ----
+  // ---- マップ上のホップ移動アニメーション(solo/online共通、3D盤面側に委譲) ----
 
   runHopSteps(playerId, fromPos, toPos, onDone) {
     if (toPos <= fromPos) {
-      this.hopAnimation = null;
       onDone();
       return;
     }
-    let pos = fromPos;
-    this.hopAnimation = { playerId, position: pos };
+    // ホップ開始時点でhub/pendingChoice/currentTurnIndexは既に次の状態に更新済みだが、
+    // 選択モーダルはキャラクターが動き終わるまでhoppingフラグで抑止する(render()自体は
+    // ここで一度呼び、ルーレット/ターンハブのモーダルは退かす。移動そのものは3D側が自前の
+    // rAFで進める)。hoppingPlayerIdは、currentTurnIndexが既に次のプレイヤーを指していても
+    // カメラ・ヘッダーが「今実際に動いているプレイヤー」を映し続けるための参照用。
+    this.hopping = true;
+    this.hoppingPlayerId = playerId;
     this.render();
-    const step = () => {
-      pos += 1;
-      this.hopAnimation = { playerId, position: pos };
-      this.render();
-      if (pos >= toPos) {
-        setTimeout(() => {
-          this.hopAnimation = null;
-          onDone();
-        }, HOP_STEP_MS);
-      } else {
-        setTimeout(step, HOP_STEP_MS);
-      }
-    };
-    setTimeout(step, HOP_STEP_MS);
+    // ゲーム開始直後の1ターン目など、3D盤面(board3d.js、CDN経由のThree.js含む)の初回読み込みが
+    // 終わっていない状態で即座にルーレットを押すと、旧実装では window.LifeRoadBoard3D が
+    // まだ無いためホップ演出を丸ごとスキップして即終了させてしまい、「1ターン目だけキャラクターが
+    // 追えない(そもそも動くところが描画されない)」不具合になっていた。読み込みを待ってから
+    // ホップを実行するよう修正する(render()内のsync3DBoard()が既にmount()側のloadを
+    // 呼んでいるため、同じPromiseにthenするだけでmount完了後の実行順が保証される)。
+    this.loadBoard3DModules().then(() => {
+      window.LifeRoadBoard3D.hopSteps(playerId, fromPos, toPos, { stepDurationMs: HOP_STEP_MS }).then(() => {
+        this.hopping = false;
+        this.hoppingPlayerId = null;
+        onDone();
+      });
+    });
   },
 
   // ---- ターンハブ(演出+選択肢メニュー) ----
 
   showHubView(view) {
     this.hub = { view, spinNumber: null, itemMessage: null };
+    this.render();
+  },
+
+  // ---- ログモーダル(solo/online共通) ----
+
+  toggleLog() {
+    this.logOpen = !this.logOpen;
     this.render();
   },
 
@@ -285,6 +298,12 @@ const App = {
 
   spinRoulette() {
     if (this.hub.view === "spinning") return;
+    this.runRouletteAnimation((finalRoll) => this.commitRoulette(finalRoll));
+  },
+
+  // ルーレットの回転演出そのもの(hub.view="spinning")。onFinishに最終的な目を渡して呼ぶ。
+  // 人間の手動ロール(spinRoulette)・CPUの自動ロール(maybeRunCPUTurn)の両方から使う共通処理。
+  runRouletteAnimation(onFinish) {
     const finalRoll = rollDice();
     this.hub = { view: "spinning", spinNumber: rollDice(), itemMessage: null };
     this.render();
@@ -297,7 +316,7 @@ const App = {
         clearInterval(timer);
         this.hub.spinNumber = finalRoll;
         this.render();
-        setTimeout(() => this.commitRoulette(finalRoll), 400);
+        setTimeout(() => onFinish(finalRoll), 400);
         return;
       }
       this.hub.spinNumber = rollDice();
@@ -307,7 +326,6 @@ const App = {
 
   commitRoulette(roll) {
     this.hub = { view: "menu", spinNumber: null, itemMessage: null };
-    this.hopAnimation = null;
     if (this.mode === "online") {
       this.handleOnlineRoll(roll);
     } else {
@@ -317,9 +335,12 @@ const App = {
 
   chooseOption(optionIndex) {
     if (!this.state || !this.state.pendingChoice) return;
+    // resolveChoice後はcurrentTurnIndexが次の手番へ進んでしまうため、
+    // 演出に使うアバターはここで(選んだ本人のものを)先に確保しておく
+    const player = this.state.players.find((p) => p.id === this.state.pendingChoice.playerId);
     const result = resolveChoice(this.state, this.state.pendingChoice.playerId, optionIndex);
     this.pushLog(result.entries);
-    this.reveal = result.reveal;
+    this.reveal = { ...result.reveal, visual: player.avatar || { color: player.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null } };
     this.render();
   },
 
@@ -358,13 +379,7 @@ const App = {
     if (this.state.pendingChoice) {
       const choosingPlayer = this.state.players.find((p) => p.id === this.state.pendingChoice.playerId);
       if (choosingPlayer && choosingPlayer.isCPU) {
-        setTimeout(() => {
-          if (!this.state || !this.state.pendingChoice) return;
-          const idx = cpuDecideOption(this.state.pendingChoice, choosingPlayer.personality);
-          const result = resolveChoice(this.state, this.state.pendingChoice.playerId, idx);
-          this.pushLog(result.entries);
-          this.afterTurnAction();
-        }, 700);
+        this.runCPUChoice(choosingPlayer);
       }
       return;
     }
@@ -373,17 +388,46 @@ const App = {
     if (!turnPlayer.isCPU) return;
     setTimeout(() => {
       if (!this.state || this.state.status !== "playing") return;
-      const player = currentPlayer(this.state);
-      const playerId = player.id;
-      const fromPos = player.position;
-      const roll = rollDice();
-      const result = applyRoll(this.state, roll);
-      const toPos = player.position;
-      this.runHopSteps(playerId, fromPos, toPos, () => {
-        this.pushLog(result.entries);
-        this.afterTurnAction();
-      });
+      // 人間の手番と同じルーレット演出を見せてからロールを確定する(CPUだけ演出無しで
+      // 即座に進むと、何が起きたか分かりづらいため)
+      this.runRouletteAnimation((roll) => this.commitCPURoll(roll));
     }, 900);
+  },
+
+  commitCPURoll(roll) {
+    if (!this.state || this.state.status !== "playing") return;
+    this.hub = { view: "menu", spinNumber: null, itemMessage: null };
+    const player = currentPlayer(this.state);
+    const playerId = player.id;
+    const fromPos = player.position;
+    const result = applyRoll(this.state, roll);
+    const toPos = player.position;
+    this.runHopSteps(playerId, fromPos, toPos, () => {
+      this.pushLog(result.entries);
+      this.afterTurnAction();
+    });
+  },
+
+  // CPUが就職・イベント等の選択マスに止まったときの演出。人間と同じ選択モーダルを
+  // (押せない状態で)一定時間見せてから、CPUの決定と結果を演出付きで表示する。
+  runCPUChoice(choosingPlayer) {
+    setTimeout(() => {
+      if (!this.state || !this.state.pendingChoice) return;
+      const idx = cpuDecideOption(this.state.pendingChoice, choosingPlayer.personality);
+      const result = resolveChoice(this.state, this.state.pendingChoice.playerId, idx);
+      this.pushLog(result.entries);
+      this.reveal = {
+        ...result.reveal,
+        visual: choosingPlayer.avatar || { color: choosingPlayer.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null },
+        interactive: false,
+      };
+      this.render();
+      setTimeout(() => {
+        if (!this.reveal) return;
+        this.reveal = null;
+        this.afterTurnAction();
+      }, 1800);
+    }, 1200);
   },
 
   pushLog(entries) {
@@ -523,7 +567,6 @@ const App = {
       lastReward: null,
     };
     this.hub = { view: "menu", spinNumber: null, itemMessage: null };
-    this.hopAnimation = null;
     this.saveOnlineRoomRef();
     this.screen = "online-lobby";
     this.render();
@@ -610,11 +653,12 @@ const App = {
   chooseOnlineOption(optionIndex) {
     if (!this.online || !this.online.localTurnState) return;
     const localState = this.online.localTurnState;
+    const player = localState.players.find((p) => p.id === localState.pendingChoice.playerId);
     const result = resolveChoice(localState, localState.pendingChoice.playerId, optionIndex);
     this.pushOnlineLog(result.entries);
     // pendingChoiceが外れた状態を引き続き楽観表示し、確定はonSnapshotで後追いする
     this.online.localTurnState = localState;
-    this.online.reveal = result.reveal;
+    this.online.reveal = { ...result.reveal, visual: player.avatar || { color: player.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null } };
     this.commitOnlineTurn(localState);
   },
 
@@ -661,7 +705,7 @@ const App = {
     } else if (this.screen === "setup") {
       view.innerHTML = renderSetupScreen();
     } else if (this.screen === "game") {
-      view.innerHTML = renderGameScreen(this.state, this.log, this.humanId, "solo", LifeRoadProfile.loadProfile(), this.hub, this.hopAnimation, this.reveal);
+      view.innerHTML = renderGameScreen(this.state, this.log, this.humanId, "solo", LifeRoadProfile.loadProfile(), this.hub, this.reveal, this.logOpen, this.hopping);
     } else if (this.screen === "result") {
       view.innerHTML = renderResultScreen(this.state, "solo", this.lastReward);
     } else if (this.screen === "online-menu") {
@@ -671,17 +715,44 @@ const App = {
     } else if (this.screen === "online-game" && this.online && this.online.room) {
       const baseState = roomToEngineState(this.online.room);
       const displayState = this.online.localTurnState || baseState;
-      view.innerHTML = renderGameScreen(displayState, this.online.log, this.online.uid, "online", LifeRoadProfile.loadProfile(), this.hub, this.hopAnimation, this.online.reveal);
+      view.innerHTML = renderGameScreen(displayState, this.online.log, this.online.uid, "online", LifeRoadProfile.loadProfile(), this.hub, this.online.reveal, this.logOpen, this.hopping);
     } else if (this.screen === "online-result" && this.online && this.online.room) {
       const state = roomToEngineState(this.online.room);
       view.innerHTML = renderResultScreen(state, "online", this.online.lastReward);
     }
-    this.scrollBoardIfNeeded();
+    this.sync3DBoard();
+    this.syncHeader();
   },
 
-  // 手番プレイヤーの位置(ホップ移動中はその一時的な位置)に盤面のスクロール位置を追従させる
-  scrollBoardIfNeeded() {
-    if (this.screen !== "game" && this.screen !== "online-game") return;
+  // ヘッダーの「アニマルライフ」文字を、ゲーム画面の間だけ手番表示に差し替える
+  // (headerは#viewの外にある常設要素のため、render()のinnerHTML置き換えとは別に直接更新する)。
+  syncHeader() {
+    const titleEl = document.getElementById("app-header-title");
+    if (!titleEl) return;
+    let state = null;
+    if (this.screen === "game") {
+      state = this.state;
+    } else if (this.screen === "online-game" && this.online && this.online.room) {
+      state = this.online.localTurnState || roomToEngineState(this.online.room);
+    }
+    titleEl.innerHTML = state ? renderHeaderTurnContent(state, this.hoppingPlayerId) : "アニマルライフ";
+  },
+
+  // 3D盤面(board3d.js)を、現在の画面がgame/online-gameかどうかに応じてマウント/破棄し、
+  // マウント中は現在のプレイヤー位置・手番へ同期する(renderのたびに呼ばれる軽量な処理)。
+  sync3DBoard() {
+    const isGameScreen = this.screen === "game" || this.screen === "online-game";
+    const dock = document.getElementById("board3d-overlay");
+    if (!isGameScreen) {
+      if (dock) dock.classList.remove("is-active");
+      if (this.board3dMounted && window.LifeRoadBoard3D) {
+        window.LifeRoadBoard3D.dispose();
+        this.board3dMounted = false;
+      }
+      return;
+    }
+    if (dock) dock.classList.add("is-active");
+
     let state = null;
     if (this.mode === "online") {
       if (!this.online || !this.online.room) return;
@@ -690,9 +761,32 @@ const App = {
       state = this.state;
     }
     if (!state || !state.players[state.currentTurnIndex]) return;
-    const pos = this.hopAnimation ? this.hopAnimation.position : state.players[state.currentTurnIndex].position;
-    const el = document.getElementById(`board-cell-${pos}`);
-    if (el) el.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+
+    // 初回mount()自体が(動的import待ちで)非同期のため、1ターン目に素早くルーレットを押すと
+    // 「mountがまだ済んでいない間にホップが始まる」競合が起こりうる。mount()内部の初期フォーカスは
+    // 呼び出し時点のcurrentTurnIndexしか見ないため、mount直後にも下のfocusCameraで
+    // hoppingPlayerId優先の対象へ必ず合わせ直す(2ターン目以降は既にmount済みなのでこの経路は通らない)。
+    const focusId = this.hoppingPlayerId || state.players[state.currentTurnIndex].id;
+    this.loadBoard3DModules()
+      .then(() => {
+        // 非同期読み込み完了までの間に画面遷移していたら何もしない
+        if (this.screen !== "game" && this.screen !== "online-game") return;
+        if (!this.board3dMounted) {
+          window.LifeRoadBoard3D.mount(document.getElementById("board3d-canvas"), {
+            squareCount: BOARD_SQUARES.length,
+            squareTypes: BOARD_SQUARES.map((s) => s.type),
+            players: state.players,
+            currentTurnIndex: state.currentTurnIndex,
+          });
+          this.board3dMounted = true;
+        } else {
+          window.LifeRoadBoard3D.syncPlayers(state.players);
+        }
+        window.LifeRoadBoard3D.focusCamera(focusId);
+      })
+      .catch((err) => {
+        console.error("3D盤面の読み込みに失敗", err);
+      });
   },
 };
 

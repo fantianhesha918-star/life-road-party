@@ -22,6 +22,8 @@ body {
 }
 
 .app-header {
+  position: relative;
+  z-index: 5;
   background: var(--brand);
   color: #fff;
   padding: 14px 16px;
@@ -31,6 +33,10 @@ body {
 .app-header h1 {
   margin: 0;
   font-size: 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 #view {
@@ -43,6 +49,12 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* ゲーム画面だけ、下敷きになる全画面3D盤面(#board3d-overlay)より手前に表示する */
+.screen-game {
+  position: relative;
+  z-index: 2;
 }
 
 .lead {
@@ -77,13 +89,6 @@ body {
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.btn-test {
-  border: 1px dashed #999;
-  background: transparent;
-  color: #777;
-  font-size: 0.85rem;
 }
 
 .field {
@@ -125,88 +130,6 @@ body {
   border-radius: 10px;
   padding: 12px;
   color: var(--brand-dark);
-}
-
-.turn-banner {
-  background: var(--brand-dark);
-  color: #fff;
-  padding: 10px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  font-weight: bold;
-}
-
-.board {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding: 4px 4px 10px;
-  scroll-behavior: smooth;
-  -webkit-overflow-scrolling: touch;
-}
-
-.cell {
-  flex: 0 0 78px;
-  background: var(--card);
-  border-radius: 8px;
-  padding: 6px 4px;
-  min-height: 90px;
-  font-size: 0.7rem;
-  text-align: center;
-  position: relative;
-  border: 1px solid #e1e8e5;
-}
-
-.cell-start,
-.cell-goal {
-  background: #fff3cd;
-  border-color: #e9c46a;
-}
-
-.cell-job {
-  background: #e8f0fe;
-}
-
-.cell-payday {
-  background: #e6f4ea;
-}
-
-.cell-event {
-  background: #fdeaea;
-}
-
-.cell-fortune {
-  background: #f3e8fd;
-}
-
-.cell-choice {
-  background: #fff0e0;
-}
-
-.cell-index {
-  font-size: 0.6rem;
-  color: var(--muted);
-}
-
-.cell-icon {
-  font-size: 1.1rem;
-  line-height: 1.2;
-}
-
-.cell-label {
-  font-size: 0.6rem;
-  line-height: 1.1;
-}
-
-.cell-tokens {
-  display: flex;
-  justify-content: center;
-  gap: 2px;
-  flex-wrap: wrap;
-  min-height: 22px;
 }
 
 .player-list,
@@ -292,31 +215,70 @@ body {
   border-bottom: none;
 }
 
+/* ターン中の選択画面は下部シート形式にし、背後の3D盤面(街並み・キャラクター)が
+   見えるようにする(全画面を覆う中央モーダルにしない)。 */
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.25);
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
-  padding: 20px;
+  padding: 0;
   z-index: 10;
+}
+
+/* ログモーダルはターンハブ(z-index:20)の中からも開けるため、それより手前に表示する */
+.modal-backdrop.log-modal {
+  z-index: 25;
 }
 
 .modal {
   background: #fff;
-  border-radius: 12px;
-  padding: 16px;
+  border-radius: 16px 16px 0 0;
+  padding: 12px 14px calc(10px + env(safe-area-inset-bottom, 0px));
   width: 100%;
-  max-width: 360px;
+  max-width: 480px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
+}
+
+.modal h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.modal p {
+  margin: 0 0 2px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* マスに止まった際の「テロップ」演出。木製フレーム画像(telop-frame.png)を背景にし、
+   タイトル・説明文を中央に重ねる。フレーム自体が余白込みの正方形画像のため、
+   contentBoxを広めのpaddingで囲んでフレームの縁と文字が重ならないようにする。 */
+.modal-telop {
+  background-image: url("images/telop-frame.png");
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  padding: 26px 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+}
+
+.modal-telop h3,
+.modal-telop p {
+  margin: 0;
 }
 
 .btn-offer {
   background: #e8f0fe;
   text-align: left;
+  padding: 10px 14px;
 }
 
 .result-rank {
@@ -398,20 +360,20 @@ body {
 .turn-hub-modal {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0.25);
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: center;
-  padding: 20px;
+  padding: 0;
   z-index: 20;
 }
 
 .turn-hub-card {
   background: #fff;
-  border-radius: 16px;
-  padding: 20px 16px;
+  border-radius: 16px 16px 0 0;
+  padding: 20px 16px calc(20px + env(safe-area-inset-bottom, 0px));
   width: 100%;
-  max-width: 360px;
+  max-width: 480px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -455,11 +417,51 @@ body {
   color: var(--danger);
 }
 
-.hub-menu-grid {
+/* 通常時のターンハブ(menu)は、毎ターン表示されるためマップを隠さない
+   細い横並びバーとして画面最下部に常設する(サブ画面はturn-hub-modalの大きいカードのまま)。 */
+.hub-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.15);
+}
+
+.hub-bar-btn {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  width: 100%;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 2px;
+  border: none;
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.hub-bar-btn-primary {
+  background: var(--brand);
+  color: #fff;
+}
+
+.hub-bar-icon {
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.hub-bar-label {
+  font-size: 0.62rem;
+  line-height: 1;
 }
 
 .roulette-display {
@@ -493,9 +495,9 @@ body {
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  border: 5px solid #fff;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
-  background: repeating-conic-gradient(#f4a300 0deg 36deg, #e4572e 36deg 72deg);
+  background-image: url("images/roulette-dial.png");
+  background-size: 100% 100%;
   animation: roulette-spin 0.6s linear infinite;
 }
 
@@ -526,32 +528,24 @@ body {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
 }
 
-/* 盤面3D化・フェーズA(技術検証用、開発用の隠しオーバーレイ) */
+/* 盤面3D化(フェーズC・本番プレイ画面いっぱいに表示する背景レイヤー) */
+/* #viewの外に常設し、render()のinnerHTML再構築でWebGLコンテキストが破棄されないようにする。
+   game/online-game画面のときだけApp.sync3DBoard()がis-activeを付けて表示する。
+   ヘッダー(z-index:5)や.screen-game(z-index:2)より奥に固定表示し、画面いっぱいに敷く。 */
 #board3d-overlay {
   display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 500;
   background: #000;
 }
 
 #board3d-overlay.is-active {
   display: block;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
 }
 
 #board3d-canvas {
   width: 100%;
   height: 100%;
   display: block;
-}
-
-#board3d-close {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  padding: 8px 14px;
-  border: none;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.9);
-  font-weight: bold;
 }

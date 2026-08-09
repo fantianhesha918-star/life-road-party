@@ -52,3 +52,50 @@
 - 最終仕上げ(テクスチャ1024縮小・Draco圧縮・JPEG変換)は第一弾と同じ手順
 - `docs/board3d.js`の`STAGE_PROP_LAYOUT`に配置済み(9つの隙間×南北2方向=18枠に、建物8種・施設5種(公園/遊園地/水族館/動物園/牧場)・木5本を配置)
 - `facility-bridge.glb`のみ**未配置**。将来「パスが折れ曲がり、橋の上にすごろくマスを置く」機能を実装する際に使う想定(上面を平らに保つよう依頼済み)
+
+## dog-frenchie-white.glb
+
+- 2026-08-09、残り4種(フレンチブルドッグ2色・三毛猫・うさぎ)の第一弾として作成(`species-dog-frenchie-white`に対応)
+- 参考イラスト: Gemini生成の正面・側面・背面ターンアラウンド(`クロコ確認フォルダ\アプリ素材\Gemini_Generated_Image_ (3).png`)をPythonで自動トリミングし`docs/models/reference/dog-frenchie-white/`に保存
+- 生成: Meshy AI API Multi-Image to 3D(`ai_model: meshy-6`、`enable_pbr: true`、`texture_resolution: 4k`、`should_remesh: true`、`target_polycount: 15000`)。チンチラ2種と同じマルチビュー方式
+- 最終仕上げ: Blenderでテクスチャ解像度を1024に縮小(4096/2048→1024)・Draco圧縮・JPEG変換
+- 最終仕様: 15,634ポリゴン(11,182頂点)・268KB
+- バウンディングボックス(原点中心、Blender座標): X幅0.81 / Y幅1.90 / Z幅1.40(board3d.js組み込み時のCHARACTER_SCALE/Y_OFFSET算出に使用)
+- **このモデルはCodex連携チャット側で並行生成した**([[heikou-chat-renkei]]運用下、`life-road-party/作業状況.md`参照)。
+- **2026-08-09、進行用チャット側で`docs/board3d.js`のSPECIES_MODEL_MAPに組み込み済み**(scale 0.635/yOffset 0.445、Three.jsのBox3で実測)。
+- **既知の不具合**: 表示するとmetallicRoughnessテクスチャ(GLB内のImage_1)が本来グレー系の技術用マップであるべきところ色付き画像になっており、体が単色の塊に見えてしまう問題を確認(chinchilla-grayも含め全6体で共通、詳細は`life-road-party/作業状況.md`のCodex連携チャットへの申し送りを参照)。修正・再書き出し待ち
+
+## dog-frenchie-black.glb / cat-calico.glb / rabbit-white.glb
+
+- 2026-08-09、残り4種の第二弾としてCodex連携チャット側で3体同時に作成(`species-dog-frenchie-black`/`species-cat-calico`/`species-rabbit-white`に対応)。これで6種全モデルが揃った
+- 参考イラスト: Gemini生成の正面・側面・背面ターンアラウンド(`クロコ確認フォルダ\アプリ素材\Gemini_Generated_Image_ (2).png`=黒フレンチブルドッグ、`(4).png`=三毛猫、`(1).png`=うさぎ)をPythonで自動トリミングし`docs/models/reference/<種名>/`に保存
+- 生成: dog-frenchie-white.glbと同じMeshy AI API Multi-Image to 3D(`ai_model: meshy-6`、`enable_pbr: true`、`texture_resolution: 4k`、`should_remesh: true`、`target_polycount: 15000`)、3体を並行リクエストして時間短縮
+- 最終仕上げ: Blenderでテクスチャ解像度を1024に縮小・Draco圧縮・JPEG変換(同一パイプライン)
+- 最終仕様: dog-frenchie-black 15,611ポリゴン・344KB / cat-calico 15,618ポリゴン・292KB / rabbit-white 15,652ポリゴン・326KB
+- バウンディングボックス(CHARACTER_SCALE/Y_OFFSET算出用)はこの時点では未計測だったが、**2026-08-09に進行用チャット側でThree.js(Box3)実測の上、`docs/board3d.js`のSPECIES_MODEL_MAPに組み込み済み**(dog-frenchie-black: scale 0.624、cat-calico: scale 0.635、rabbit-white: scale 0.469、いずれもyOffset 0.445)。あわせてchinchilla-white-piedのyOffsetも近似値から実測値(scale 0.598)に更新した。
+- **既知の不具合**: dog-frenchie-white.glbと同じmetallicRoughnessテクスチャの不具合を確認(体が単色の塊に見える)。修正・再書き出し待ち(詳細は`life-road-party/作業状況.md`参照)
+
+## masu-base.glb / prop-streetlamp.glb / prop-bench.glb / prop-signboard.glb / gate-start.glb / gate-goal.glb / cloud-puffy.glb
+
+- 2026-08-09、Codex連携チャット側でマップ装飾素材7点を3Dモデル化。参考イラストはCodex作成(`クロコとcodex受け渡し\素材受け渡し\02_Codex作成素材\`直下および`アニマルライフ_道沿い小物とゲート雲_2026-08-09\`配下)
+- 生成: 建物・施設と同じ簡易パイプライン(Meshy AI API Image-to-3D、`ai_model: meshy-5`、単一画像、`should_remesh: true`、`enable_pbr: false`)。7点を並行リクエストして時間短縮
+- `target_polycount`: masu-base 5,000/prop-streetlamp 6,000/prop-bench 8,000/prop-signboard 6,000/gate-start 10,000/gate-goal 12,000/cloud-puffy 6,000(サイズ・複雑さに応じて個別設定)
+- 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)
+- 最終ファイルサイズ: masu-base 58KB/prop-streetlamp 116KB/prop-bench 176KB/prop-signboard 134KB/gate-start 148KB/gate-goal 172KB/cloud-puffy 50KB
+- **masu-base.glbは無地(白〜クリーム色)のまま**。マスの種類(8種)ごとの色分けは`board3d.js`組み込み時にマテリアル色を上書きする実装が必要(2D版`style.css`の配色を参照)
+- **2026-08-09、進行用チャット側で`docs/board3d.js`に組み込み済み**:
+  - masu-base: 1回だけ読み込みマス数分クローンし、`app.js`から渡るBOARD_SQUARESの種類ごとにマテリアル色を上書き(旧`.cell-*`の配色を流用)
+  - prop-streetlamp/prop-bench/prop-signboard: `buildStagePropLayout`の各隙間に、建物より道に近い位置へ巡回配置
+  - gate-start/gate-goal: 盤面の最初/最後のマスに、道を横切る向きで設置
+  - cloud-puffy: 盤面の長さに応じた数を空に散りばめて配置(接地なし)
+
+## sky-backdrop.jpg / ground-grass.jpg / road-path.jpg(背景・地面・道)
+
+- 2026-08-09、Codex連携チャット側で作成した背景イラスト3点(`sky-backdrop.png`1920×1080・`ground-grass.png`/`road-path.png`各1024×1024のタイル可能テクスチャ)を、進行用チャット側でモバイル配信用に軽量化(sky-backdropは1280×720のJPEGに、ground-grass/road-pathは512×512のJPEGに変換)して`docs/images/`へ配置
+- `docs/board3d.js`に組み込み済み: sky-backdropは`scene.background`、ground-grassは地面平面のタイル敷きテクスチャ、road-pathはマス中心を結ぶリボン状メッシュ(`createRoadRibbon`)のテクスチャとして使用
+
+## telop-frame.png / roulette-dial.png(UI装飾)
+
+- 2026-08-09、Codex連携チャット側で作成(`アニマルライフ_UI装飾素材_2026-08-09\`)。進行用チャット側で軽量化して`docs/images/`へ配置し、`docs/style.css`/`docs/ui.js`に組み込み済み
+- roulette-dial.pngは`.roulette-wheel`の背景画像として使用(旧CSSグラデーションから差し替え)
+- telop-frame.pngは選択モーダル(`renderChoiceModal`)のタイトル+説明文を囲む`.modal-telop`の背景として使用

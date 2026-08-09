@@ -1,16 +1,5 @@
 // ライフロード 画面描画
 
-const SQUARE_ICON = {
-  start: "🚩",
-  event: "🎉",
-  fortune: "🔮",
-  job: "💼",
-  choice: "🤔",
-  payday: "💰",
-  rest: "☕",
-  goal: "🏁",
-};
-
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;",
@@ -49,7 +38,6 @@ function renderTitleScreen(hasSave, profile) {
       <button class="btn" onclick="App.goOnlineMenu()">友達と通信して遊ぶ</button>
       <button class="btn" onclick="App.goProfile()">キャラクターを編集</button>
       <button class="btn" onclick="App.goShop()">ショップ</button>
-      <button class="btn btn-test" onclick="App.testBoard3D()">🧪3D盤面テスト(開発用)</button>
     </section>
   `;
 }
@@ -247,31 +235,6 @@ function renderSetupScreen() {
   `;
 }
 
-function renderBoard(state, hopOverride) {
-  const positions = state.players.map((p) => {
-    if (hopOverride && hopOverride.playerId === p.id) return hopOverride.position;
-    return p.position;
-  });
-  const cells = BOARD_SQUARES.map((sq) => {
-    const tokens = state.players
-      .filter((p, i) => positions[i] === sq.index)
-      .map((p) => {
-        const visual = p.avatar || { color: p.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null };
-        return renderAvatarBadge(visual, 20);
-      })
-      .join("");
-    return `
-      <div class="cell cell-${sq.type}" id="board-cell-${sq.index}">
-        <div class="cell-index">${sq.index}</div>
-        <div class="cell-icon">${SQUARE_ICON[sq.type] || ""}</div>
-        <div class="cell-label">${sq.label}</div>
-        <div class="cell-tokens">${tokens}</div>
-      </div>
-    `;
-  }).join("");
-  return `<div class="board" id="board-scroll">${cells}</div>`;
-}
-
 function renderPlayerList(state) {
   const rows = state.players.map((p, i) => {
     const isTurn = i === state.currentTurnIndex && state.status === "playing";
@@ -294,8 +257,41 @@ function renderLog(entries) {
   return `<ul class="log-list">${items}</ul>`;
 }
 
-function renderChoiceModal(pendingChoice, mode) {
+// 進行画面には常時表示せず、ログボタンから開くモーダルとして表示する。
+// 自分の手番中はターンハブ(.turn-hub-modal、z-index20)からも開けるため、
+// それより手前に表示されるよう専用クラス(log-modal、z-index25)を付ける。
+function renderLogModal(entries) {
+  return `
+    <div class="modal-backdrop log-modal">
+      <div class="modal">
+        <h3>できごとログ</h3>
+        ${renderLog(entries)}
+        <button class="btn" onclick="App.toggleLog()">閉じる</button>
+      </div>
+    </div>
+  `;
+}
+
+// cpuName有り=CPUが選択中の画面。人間が誤って押して二重確定させないよう、
+// 選択肢はdisabledのまま見せるだけにする(押せる選択肢は人間自身の番のときのみ)。
+function renderChoiceModal(pendingChoice, mode, cpuName) {
   if (!pendingChoice) return "";
+  if (cpuName) {
+    const optionItems = pendingChoice.options
+      .map((o) => `<button class="btn btn-offer btn-disabled" disabled>${escapeHtml(o.label)}</button>`)
+      .join("");
+    return `
+      <div class="modal-backdrop">
+        <div class="modal">
+          <div class="modal-telop">
+            <h3>${escapeHtml(pendingChoice.title)}</h3>
+            <p>${escapeHtml(cpuName)}が考え中…</p>
+          </div>
+          ${optionItems}
+        </div>
+      </div>
+    `;
+  }
   const chooseFn = mode === "online" ? "App.chooseOnlineOption" : "App.chooseOption";
   const optionButtons = pendingChoice.options
     .map((o, i) => `<button class="btn btn-offer" onclick="${chooseFn}(${i})">${escapeHtml(o.label)}</button>`)
@@ -303,47 +299,79 @@ function renderChoiceModal(pendingChoice, mode) {
   return `
     <div class="modal-backdrop">
       <div class="modal">
-        <h3>${escapeHtml(pendingChoice.title)}</h3>
-        <p>${escapeHtml(pendingChoice.prompt)}</p>
+        <div class="modal-telop">
+          <h3>${escapeHtml(pendingChoice.title)}</h3>
+          <p>${escapeHtml(pendingChoice.prompt)}</p>
+        </div>
         ${optionButtons}
       </div>
     </div>
   `;
 }
 
-// 選択イベントの結果を見せる一コマ演出。「つぎへ」を押すまでターンは進まない
+// 選択イベントの結果を見せる一コマ演出。人間自身の選択(dismissFn有り)は
+// 「つぎへ」を押すまでターンが進まない。CPUの選択(dismissFn無し)はApp側の
+// タイマーで自動的に閉じるので、押せないことが分かるよう「…」だけ表示する。
 function renderRevealCard(reveal, visual, dismissFn) {
   if (!reveal) return "";
   const deltaClass = reveal.delta > 0 ? "reveal-delta-positive" : reveal.delta < 0 ? "reveal-delta-negative" : "";
   const deltaText = reveal.delta ? `<p class="reveal-delta ${deltaClass}">${reveal.delta > 0 ? "+" : ""}${reveal.delta}万円</p>` : "";
+  const actionHtml = dismissFn
+    ? `<button class="btn btn-primary" onclick="${dismissFn}()">つぎへ</button>`
+    : `<p class="lead">…</p>`;
   return `
     <div class="turn-hub-modal">
       <div class="turn-hub-card">
         <div class="turn-hub-avatar">${renderAvatarBadge(visual, 72)}</div>
         <p class="lead">${escapeHtml(reveal.text)}</p>
         ${deltaText}
-        <button class="btn btn-primary" onclick="${dismissFn}()">つぎへ</button>
+        ${actionHtml}
       </div>
     </div>
   `;
 }
 
-function renderTurnBanner(state) {
-  if (state.status !== "playing") return `<div class="turn-banner">ゲーム終了</div>`;
-  const turnPlayer = state.players[state.currentTurnIndex];
+// ゲーム画面ではヘッダーの「アニマルライフ」文字の代わりに手番表示を差し込む
+// (App.syncHeader()がgame/online-game画面のときだけこれをヘッダーへ反映する)。
+// overridePlayerIdは、ホップ移動アニメーション中に「まだ移動を演出しているプレイヤー」を
+// 表示させ続けるための指定(state.currentTurnIndexは移動開始前に次の手番へ進んでしまうため)。
+function renderHeaderTurnContent(state, overridePlayerId) {
+  if (!state) return "アニマルライフ";
+  if (state.status !== "playing") return "ゲーム終了";
+  const turnPlayer = overridePlayerId
+    ? state.players.find((p) => p.id === overridePlayerId)
+    : state.players[state.currentTurnIndex];
+  if (!turnPlayer) return "アニマルライフ";
   const visual = turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null };
-  return `
-    <div class="turn-banner">
-      ${renderAvatarBadge(visual, 30)}
-      <span>${escapeHtml(turnPlayer.name)} の番です</span>
-    </div>
-  `;
+  return `${renderAvatarBadge(visual, 28)}<span>${escapeHtml(turnPlayer.name)} の番です</span>`;
 }
 
 function renderTurnHub(state, humanId, profile, hub) {
   const turnPlayer = state.players[state.currentTurnIndex];
   const visual = turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null };
   const view = (hub && hub.view) || "menu";
+
+  // 通常時(menu)は毎ターン表示される最も頻度の高い画面のため、マップを隠さない
+  // 細い横並びバーにする(ルーレット操作等はサブ画面に遷移したときだけ大きいカードを使う)。
+  if (view === "menu") {
+    return `
+      <div class="hub-bar">
+        ${renderAvatarBadge(visual, 32)}
+        <button class="hub-bar-btn hub-bar-btn-primary" onclick="App.spinRoulette()">
+          <span class="hub-bar-icon">🎡</span><span class="hub-bar-label">ルーレット</span>
+        </button>
+        <button class="hub-bar-btn" onclick="App.showHubView('items')">
+          <span class="hub-bar-icon">🎒</span><span class="hub-bar-label">アイテム</span>
+        </button>
+        <button class="hub-bar-btn" onclick="App.showHubView('status')">
+          <span class="hub-bar-icon">📊</span><span class="hub-bar-label">ステータス</span>
+        </button>
+        <button class="hub-bar-btn" onclick="App.toggleLog()">
+          <span class="hub-bar-icon">📜</span><span class="hub-bar-label">ログ</span>
+        </button>
+      </div>
+    `;
+  }
 
   let body;
   if (view === "spinning") {
@@ -360,13 +388,7 @@ function renderTurnHub(state, humanId, profile, hub) {
   } else if (view === "status") {
     const me = state.players.find((p) => p.id === humanId);
     body = `
-      <ul class="player-list">
-        <li class="player-row">
-          <span class="p-name">${escapeHtml(me.name)}</span>
-          <span class="p-job">${me.job ? escapeHtml(me.job.name) : "無職"}</span>
-          <span class="p-money">${me.money}万円</span>
-        </li>
-      </ul>
+      ${renderPlayerList(state)}
       <p class="lead">${me.job ? `給料: ${me.job.salary}万円/回` : "まだ就職していません(給料日はアルバイト収入)"}</p>
       <button class="btn" onclick="App.showHubView('menu')">戻る</button>
     `;
@@ -392,14 +414,6 @@ function renderTurnHub(state, humanId, profile, hub) {
       ${hub.itemMessage ? `<p class="coin-display">${escapeHtml(hub.itemMessage)}</p>` : ""}
       <button class="btn" onclick="App.showHubView('menu')">戻る</button>
     `;
-  } else {
-    body = `
-      <div class="hub-menu-grid">
-        <button class="btn btn-primary" onclick="App.spinRoulette()">🎡 ルーレットを回す</button>
-        <button class="btn" onclick="App.showHubView('items')">🎒 アイテムを使う</button>
-        <button class="btn" onclick="App.showHubView('status')">📊 ステータスを見る</button>
-      </div>
-    `;
   }
 
   return `
@@ -413,21 +427,30 @@ function renderTurnHub(state, humanId, profile, hub) {
   `;
 }
 
-function renderGameScreen(state, log, humanId, mode, profile, hub, hopOverride, reveal) {
+function renderGameScreen(state, log, humanId, mode, profile, hub, reveal, logOpen, hopping) {
   const turnPlayer = state.players[state.currentTurnIndex];
-  const isHumanTurn = state.status === "playing" && turnPlayer && turnPlayer.id === humanId && !state.pendingChoice && !reveal;
-  const visual = turnPlayer && (turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null });
-  const dismissFn = mode === "online" ? "App.dismissOnlineReveal" : "App.dismissReveal";
+  const isCPUTurn = !!(turnPlayer && turnPlayer.id !== humanId);
+  // state.currentTurnIndexはホップ移動が始まる前に次の手番へ進んでしまうため(applyRoll内で
+  // 同期的に advanceTurn される)、hopping中は「まだ移動アニメーションを見せている最中」として
+  // 操作バーを出さない(出さないと、CPUの移動中に人間側の手番が来たと誤認して操作できてしまう)。
+  const isHumanTurn = state.status === "playing" && turnPlayer && !isCPUTurn && !state.pendingChoice && !reveal && !hopping;
+  // CPUの手番中も「今何をしているか」が見えるよう、ルーレット演出(hub.view==="spinning")は
+  // 主体を問わず表示する(アイテム/ステータス等の操作サブ画面は人間専用のまま)。
+  const showCPUSpinning = isCPUTurn && !hopping && hub && hub.view === "spinning";
+  // revealは選択確定(resolveChoice)後に作られるが、その時点でstate.currentTurnIndexは
+  // 既に次の手番へ進んでいるため、誰の演出かはturnPlayerからではなくreveal.visual
+  // (作成時に埋め込み済み)から判断する。reveal.interactiveがfalseのCPU分は
+  // 「つぎへ」ボタンを出さず、App側のタイマーで自動的に閉じる。
+  const dismissFn = !reveal || reveal.interactive === false ? null : mode === "online" ? "App.dismissOnlineReveal" : "App.dismissReveal";
+  // 選択モーダルはキャラクターがマスに到着してから表示する(ホップ移動中は出さない)。
+  // pendingChoiceは常に「今の手番のプレイヤー」のものなので、CPUの選択中も見せる
+  // (ただし押せない表示にして、人間の誤操作による二重確定を防ぐ)。
   return `
     <section class="screen screen-game">
-      ${renderTurnBanner(state)}
-      ${renderBoard(state, hopOverride)}
-      ${renderPlayerList(state)}
-      <h3>できごとログ</h3>
-      ${renderLog(log)}
-      ${isHumanTurn ? renderTurnHub(state, humanId, profile, hub) : ""}
-      ${!reveal ? renderChoiceModal(state.pendingChoice && state.pendingChoice.playerId === humanId ? state.pendingChoice : null, mode) : ""}
-      ${renderRevealCard(reveal, visual, dismissFn)}
+      ${isHumanTurn || showCPUSpinning ? renderTurnHub(state, humanId, profile, hub) : ""}
+      ${!reveal && !hopping ? renderChoiceModal(state.pendingChoice, mode, isCPUTurn ? turnPlayer.name : null) : ""}
+      ${renderRevealCard(reveal, reveal && reveal.visual, dismissFn)}
+      ${logOpen ? renderLogModal(log) : ""}
     </section>
   `;
 }

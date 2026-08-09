@@ -118,6 +118,7 @@ function getAvatarVisual(equipped) {
   const accItem = equipped.accessory ? findShopItem(equipped.accessory) : null;
   return {
     color: colorItem ? colorItem.value : "#999999",
+    speciesId: speciesItem ? speciesItem.id : null,
     speciesEmoji: speciesItem ? speciesItem.emoji : null,
     hatEmoji: hatItem ? hatItem.emoji : null,
     accessoryEmoji: accItem ? accItem.emoji : null,
