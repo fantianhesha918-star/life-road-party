@@ -600,7 +600,13 @@ function playAction(entry, action) {
 // (SPECIES_MODEL_MAPに無い動物種は、残り4種の3Dモデル化が完了するまでこの状態が続く想定)。
 function loadCharacterModel(entry, speciesId, generation) {
   const config = SPECIES_MODEL_MAP[speciesId];
-  if (!config) return;
+  if (!config) {
+    // ここに来るのはspeciesIdがSPECIES_MODEL_MAPに無い(=旧セーブ等でspeciesId自体が
+    // 欠落している、または未対応の値)場合。無言のままだと「プレースホルダーのまま
+    // 動かない」不具合の原因特定が難しいため、必ず警告を出す。
+    console.warn(`動物モデル: speciesId="${speciesId}"に対応するモデルが見つからないため、プレースホルダー表示のまま続行します`);
+    return;
+  }
   const loader = new GLTFLoader();
   loader.setDRACOLoader(dracoLoader);
   loader.load(
@@ -627,7 +633,10 @@ function loadCharacterModel(entry, speciesId, generation) {
     },
     undefined,
     (err) => {
-      console.warn(`動物モデル(${speciesId})の読み込みに失敗、プレースホルダー表示のまま続行します`, err);
+      console.warn(
+        `動物モデル(speciesId="${speciesId}", url=${config.url})の読み込みに失敗、プレースホルダー表示のまま続行します`,
+        err
+      );
     }
   );
 }

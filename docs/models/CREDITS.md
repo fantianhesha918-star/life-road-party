@@ -63,7 +63,7 @@
 - バウンディングボックス(原点中心、Blender座標): X幅0.81 / Y幅1.90 / Z幅1.40(board3d.js組み込み時のCHARACTER_SCALE/Y_OFFSET算出に使用)
 - **このモデルはCodex連携チャット側で並行生成した**([[heikou-chat-renkei]]運用下、`life-road-party/作業状況.md`参照)。
 - **2026-08-09、進行用チャット側で`docs/board3d.js`のSPECIES_MODEL_MAPに組み込み済み**(scale 0.635/yOffset 0.445、Three.jsのBox3で実測)。
-- **既知の不具合**: 表示するとmetallicRoughnessテクスチャ(GLB内のImage_1)が本来グレー系の技術用マップであるべきところ色付き画像になっており、体が単色の塊に見えてしまう問題を確認(chinchilla-grayも含め全6体で共通、詳細は`life-road-party/作業状況.md`のCodex連携チャットへの申し送りを参照)。修正・再書き出し待ち
+- **表示が単色の塊に見える件は解決済み**: GLB自体は正常(metallicRoughnessが赤橙に見えるのはglTF仕様上問題なし)。原因は`docs/app.js`側でspeciesId欠落時のプレースホルダー固定化だったため、モデル側の修正は不要だった(詳細は`life-road-party/作業状況.md`参照)
 
 ## dog-frenchie-black.glb / cat-calico.glb / rabbit-white.glb
 
@@ -73,7 +73,7 @@
 - 最終仕上げ: Blenderでテクスチャ解像度を1024に縮小・Draco圧縮・JPEG変換(同一パイプライン)
 - 最終仕様: dog-frenchie-black 15,611ポリゴン・344KB / cat-calico 15,618ポリゴン・292KB / rabbit-white 15,652ポリゴン・326KB
 - バウンディングボックス(CHARACTER_SCALE/Y_OFFSET算出用)はこの時点では未計測だったが、**2026-08-09に進行用チャット側でThree.js(Box3)実測の上、`docs/board3d.js`のSPECIES_MODEL_MAPに組み込み済み**(dog-frenchie-black: scale 0.624、cat-calico: scale 0.635、rabbit-white: scale 0.469、いずれもyOffset 0.445)。あわせてchinchilla-white-piedのyOffsetも近似値から実測値(scale 0.598)に更新した。
-- **既知の不具合**: dog-frenchie-white.glbと同じmetallicRoughnessテクスチャの不具合を確認(体が単色の塊に見える)。修正・再書き出し待ち(詳細は`life-road-party/作業状況.md`参照)
+- **表示が単色の塊に見える件は解決済み**(dog-frenchie-whiteと同じ原因・同じ修正、詳細は`life-road-party/作業状況.md`参照)
 
 ## masu-base.glb / prop-streetlamp.glb / prop-bench.glb / prop-signboard.glb / gate-start.glb / gate-goal.glb / cloud-puffy.glb
 

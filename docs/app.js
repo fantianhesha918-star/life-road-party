@@ -5,18 +5,32 @@ const ONLINE_ROOM_KEY = "liferoad_online_room_v1";
 const HEARTBEAT_INTERVAL_MS = 15000;
 const HOP_STEP_MS = 320; // マス移動アニメーション、1マスあたりの所要時間
 
+// 3D種選択(speciesId)の実装より前に保存されたセーブ・オンライン部屋データにはavatarに
+// speciesIdが無い場合がある。無いままだと board3d.js が3Dモデルを一切読み込まず、
+// createCharacterPlaceholder()の色付きカプセル(プレイヤー色そのまま)で止まってしまうため、
+// 読み込み・復元のたびにこの関数で補う。
+function ensureSpeciesId(avatar, fallbackColor) {
+  const a = avatar || { color: fallbackColor };
+  if (!a.speciesId) {
+    a.speciesId = "species-chinchilla-gray";
+    if (!a.speciesEmoji) a.speciesEmoji = "🐹";
+  }
+  return a;
+}
+
 // Firestoreの部屋ドキュメント(playersがuidキーのマップ)を、game-engine.jsが
 // 扱えるゲーム状態(playersが配列)に変換する
 function roomToEngineState(room) {
   const order = room.turnOrder && room.turnOrder.length ? room.turnOrder : Object.keys(room.players);
   const players = order.map((uid, i) => {
     const p = room.players[uid] || {};
+    const color = TOKEN_COLORS[i % TOKEN_COLORS.length];
     return {
       id: uid,
       name: p.nickname || `プレイヤー${i + 1}`,
       isCPU: !!p.isCPU,
-      color: TOKEN_COLORS[i % TOKEN_COLORS.length],
-      avatar: p.avatar || { color: TOKEN_COLORS[i % TOKEN_COLORS.length], speciesEmoji: null, hatEmoji: null, accessoryEmoji: null },
+      color,
+      avatar: ensureSpeciesId(p.avatar || { color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null }, color),
       position: typeof p.position === "number" ? p.position : 0,
       money: typeof p.money === "number" ? p.money : window.LifeRoadData.START_MONEY,
       job: p.job || null,
@@ -160,6 +174,18 @@ const App = {
     this.state = saved.state;
     this.log = saved.log;
     this.humanId = saved.humanId;
+    // 旧セーブにはavatar.speciesIdが無い場合がある。人間は現在の装備種、CPU等は既定種で補う
+    // (ensureSpeciesIdは既定種のみのため、人間だけ先に現在の装備種を明示的に当てる)
+    const profile = LifeRoadProfile.loadProfile();
+    const humanVisual = LifeRoadProfile.getAvatarVisual(profile.equipped);
+    this.state.players.forEach((p) => {
+      if (p.id === this.humanId && p.avatar && !p.avatar.speciesId) {
+        p.avatar.speciesId = humanVisual.speciesId;
+        p.avatar.speciesEmoji = humanVisual.speciesEmoji;
+      } else {
+        ensureSpeciesId(p.avatar, p.color);
+      }
+    });
     this.hub = { view: "menu", spinNumber: null, itemMessage: null };
     this.reveal = null;
     this.logOpen = false;
