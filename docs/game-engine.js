@@ -291,9 +291,14 @@ function resolveSquare(state, player, square, entries, roll) {
       return { reveal: { text, delta: -CHILDBIRTH_GIFT_COST } };
     }
     case "goal": {
-      const text = `${player.name} はゴールに到達した！`;
+      // finishOrderの確定(finished=true化含む)はfinalizeTurnで行うため、ここではまだ
+      // state.finishCounterがインクリメントされていない。表示用に「今回ゴールしたら
+      // 何着になるか」を同じ計算式で先読みする(値の重複計算だが、状態は変更しない)。
+      const order = (state.finishCounter || 0) + 1;
+      const medal = order === 1 ? "🥇" : order === 2 ? "🥈" : order === 3 ? "🥉" : "🏁";
+      const text = `${medal} ${player.name} は${order}着でゴールに到達した！`;
       entries.push({ type: "info", text });
-      return { reveal: { text } };
+      return { reveal: { text, finishOrder: order } };
     }
     default:
       return { reveal: null };

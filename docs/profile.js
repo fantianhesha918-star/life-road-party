@@ -10,6 +10,9 @@ function defaultProfile() {
     equipped: { ...DEFAULT_EQUIPPED },
     consumables: {},
     gamesPlayed: 0,
+    totalCoinsEarned: 0,
+    firstPlaceCount: 0,
+    bestMoney: 0,
   };
 }
 
@@ -32,6 +35,9 @@ function loadProfile() {
       equipped: { ...DEFAULT_EQUIPPED, ...(parsed.equipped || {}) },
       consumables,
       gamesPlayed: typeof parsed.gamesPlayed === "number" ? parsed.gamesPlayed : 0,
+      totalCoinsEarned: typeof parsed.totalCoinsEarned === "number" ? parsed.totalCoinsEarned : 0,
+      firstPlaceCount: typeof parsed.firstPlaceCount === "number" ? parsed.firstPlaceCount : 0,
+      bestMoney: typeof parsed.bestMoney === "number" ? parsed.bestMoney : 0,
     };
   } catch (e) {
     return defaultProfile();
@@ -104,10 +110,13 @@ function computeGameReward(finalMoney) {
   return Math.max(0, Math.floor(finalMoney / GAME_REWARD_MONEY_PER_COIN));
 }
 
-function applyGameReward(profile, finalMoney) {
+function applyGameReward(profile, finalMoney, isFirstPlace) {
   const reward = computeGameReward(finalMoney);
   profile.coins += reward;
   profile.gamesPlayed += 1;
+  profile.totalCoinsEarned += reward;
+  profile.bestMoney = Math.max(profile.bestMoney, finalMoney);
+  if (isFirstPlace) profile.firstPlaceCount += 1;
   return reward;
 }
 

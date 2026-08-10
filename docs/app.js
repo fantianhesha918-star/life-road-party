@@ -126,6 +126,9 @@ const App = {
   turnPopupTimer: null,
   // ---- 3D盤面のマウント状態管理(sync3DBoard参照)。現在マウント中かどうかを覚えておく ----
   board3dMounted: false,
+  // ---- ショップで購入成功時に一瞬表示する「入手しました」トースト。solo/online共通で使う ----
+  shopToast: null, // { name, image, emoji }
+  shopToastTimer: null,
 
   // ---- 通信モード用の状態 ----
   online: null, // { roomCode, uid, nickname, room, unsubscribe, log, localTurnState }
@@ -179,6 +182,32 @@ const App = {
     this.render();
   },
 
+  goSettings() {
+    this.screen = "settings";
+    this.render();
+  },
+
+  goHelp() {
+    this.screen = "help";
+    this.render();
+  },
+
+  goStats() {
+    this.screen = "stats";
+    this.render();
+  },
+
+  setAudioSetting(key, value) {
+    const settings = LifeRoadAudio.loadAudioSettings();
+    settings[key] = value;
+    LifeRoadAudio.saveAudioSettings(settings);
+    this.render();
+  },
+
+  testPlaySe() {
+    LifeRoadAudio.playSe("confirm");
+  },
+
   // ==================== 盤面3D化(フェーズC・本番統合) ====================
 
   loadBoard3DModules() {
@@ -198,6 +227,16 @@ const App = {
     const result = LifeRoadProfile.purchaseItem(profile, itemId);
     if (result.ok) {
       LifeRoadProfile.saveProfile(profile);
+      LifeRoadAudio.playSe("confirm");
+      const item = LifeRoadProfile.findShopItem(itemId);
+      this.shopToast = item ? { name: item.name, image: item.image, emoji: item.emoji } : null;
+      clearTimeout(this.shopToastTimer);
+      this.shopToastTimer = setTimeout(() => {
+        this.shopToast = null;
+        this.render();
+      }, 1800);
+    } else {
+      LifeRoadAudio.playSe("error");
     }
     this.render();
   },
@@ -347,6 +386,7 @@ const App = {
 
   toggleLog() {
     this.logOpen = !this.logOpen;
+    LifeRoadAudio.playSe(this.logOpen ? "modalOpen" : "modalClose");
     this.render();
   },
 
@@ -354,6 +394,7 @@ const App = {
 
   toggleStatusPeek() {
     this.statusPeekOpen = !this.statusPeekOpen;
+    LifeRoadAudio.playSe(this.statusPeekOpen ? "modalOpen" : "modalClose");
     this.render();
   },
 
@@ -361,6 +402,7 @@ const App = {
 
   togglePauseMenu() {
     this.pauseMenuOpen = !this.pauseMenuOpen;
+    LifeRoadAudio.playSe(this.pauseMenuOpen ? "modalOpen" : "modalClose");
     this.render();
   },
 
@@ -392,6 +434,7 @@ const App = {
       };
     });
     this.moneyToasts = this.moneyToasts.concat(newToasts);
+    LifeRoadAudio.playSe(newToasts[0].delta > 0 ? "moneyGain" : "moneySpend");
     this.render();
     newToasts.forEach((toast) => {
       setTimeout(() => {
@@ -404,7 +447,11 @@ const App = {
   useConsumable(itemId) {
     const profile = LifeRoadProfile.loadProfile();
     const result = LifeRoadProfile.useConsumableItem(profile, itemId);
-    if (!result.ok) return;
+    if (!result.ok) {
+      LifeRoadAudio.playSe("error");
+      return;
+    }
+    LifeRoadAudio.playSe("confirm");
     LifeRoadProfile.saveProfile(profile);
 
     if (this.mode === "online") {
@@ -435,6 +482,7 @@ const App = {
   // ルーレットの回転演出そのもの(hub.view="spinning")。onFinishに最終的な目を渡して呼ぶ。
   // 人間の手動ロール(spinRoulette)・CPUの自動ロール(maybeRunCPUTurn)の両方から使う共通処理。
   runRouletteAnimation(onFinish) {
+    LifeRoadAudio.playSe("diceRoll");
     const finalRoll = rollDice();
     this.hub = { view: "spinning", spinNumber: rollDice(), spinning: true, itemMessage: null };
     this.render();
@@ -467,6 +515,7 @@ const App = {
 
   chooseOption(optionIndex) {
     if (!this.state || !this.state.pendingChoice) return;
+    LifeRoadAudio.playSe("confirm");
     // resolveChoice後はcurrentTurnIndexが次の手番へ進んでしまうため、
     // 演出に使うアバターはここで(選んだ本人のものを)先に確保しておく
     const player = this.state.players.find((p) => p.id === this.state.pendingChoice.playerId);
@@ -487,7 +536,10 @@ const App = {
     this.render();
     if (this.state.status === "finished") {
       const human = this.state.players.find((p) => p.id === this.humanId);
-      this.lastReward = this.grantGameReward(human ? human.money : 0);
+      const ranking = getRanking(this.state);
+      const isFirstPlace = !!(ranking[0] && ranking[0].id === this.humanId);
+      this.lastReward = this.grantGameReward(human ? human.money : 0, isFirstPlace);
+      LifeRoadAudio.playBgmJingle("goal");
       setTimeout(() => {
         this.screen = "result";
         this.clearSave();
@@ -507,6 +559,7 @@ const App = {
     const turnPlayer = currentPlayer(this.state);
     if (!turnPlayer) return;
     this.turnPopup = { name: turnPlayer.name, visual: turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null } };
+    LifeRoadAudio.playSe("notify");
     this.render();
     clearTimeout(this.turnPopupTimer);
     this.turnPopupTimer = setTimeout(() => {
@@ -519,6 +572,7 @@ const App = {
   showOnlineTurnPopup(turnPlayer) {
     if (!this.online) return;
     this.online.turnPopup = { name: turnPlayer.name, visual: turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null } };
+    LifeRoadAudio.playSe("notify");
     clearTimeout(this.turnPopupTimer);
     this.turnPopupTimer = setTimeout(() => {
       if (this.online) this.online.turnPopup = null;
@@ -526,9 +580,9 @@ const App = {
     }, TURN_POPUP_MS);
   },
 
-  grantGameReward(finalMoney) {
+  grantGameReward(finalMoney, isFirstPlace) {
     const profile = LifeRoadProfile.loadProfile();
-    const reward = LifeRoadProfile.applyGameReward(profile, finalMoney);
+    const reward = LifeRoadProfile.applyGameReward(profile, finalMoney, isFirstPlace);
     LifeRoadProfile.saveProfile(profile);
     return reward;
   },
@@ -801,7 +855,10 @@ const App = {
         this.online.rewardGranted = true;
         const state = roomToEngineState(this.online.room);
         const me = state.players.find((p) => p.id === this.online.uid);
-        this.online.lastReward = this.grantGameReward(me ? me.money : 0);
+        const ranking = getRanking(state);
+        const isFirstPlace = !!(ranking[0] && ranking[0].id === this.online.uid);
+        this.online.lastReward = this.grantGameReward(me ? me.money : 0, isFirstPlace);
+        LifeRoadAudio.playBgmJingle("goal");
       }
     }
     this.render();
@@ -844,6 +901,7 @@ const App = {
 
   chooseOnlineOption(optionIndex) {
     if (!this.online || !this.online.localTurnState) return;
+    LifeRoadAudio.playSe("confirm");
     const localState = this.online.localTurnState;
     const player = localState.players.find((p) => p.id === localState.pendingChoice.playerId);
     const result = resolveChoice(localState, localState.pendingChoice.playerId, optionIndex);
@@ -893,7 +951,13 @@ const App = {
     } else if (this.screen === "profile") {
       view.innerHTML = renderProfileScreen(LifeRoadProfile.loadProfile());
     } else if (this.screen === "shop") {
-      view.innerHTML = renderShopScreen(LifeRoadProfile.loadProfile());
+      view.innerHTML = renderShopScreen(LifeRoadProfile.loadProfile(), this.shopToast);
+    } else if (this.screen === "settings") {
+      view.innerHTML = renderSettingsScreen(LifeRoadAudio.loadAudioSettings());
+    } else if (this.screen === "help") {
+      view.innerHTML = renderHelpScreen();
+    } else if (this.screen === "stats") {
+      view.innerHTML = renderStatsScreen(LifeRoadProfile.loadProfile());
     } else if (this.screen === "setup") {
       view.innerHTML = renderSetupScreen();
     } else if (this.screen === "game") {

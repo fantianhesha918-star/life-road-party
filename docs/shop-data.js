@@ -29,11 +29,15 @@ const SHOP_ITEMS = [
 
 // ターン中に「アイテムを使う」で消費する消耗品(所持数は複数持てる、使うと1つ減る)
 // effect.min === effect.max の場合は固定額、異なる場合はその範囲でランダムな金額を得る
+// imageはdocs/images/items/配下の実イラスト(Codex作成、背景透過)へのパス。絵文字より優先して表示する。
 const CONSUMABLE_ITEMS = [
-  { id: "item-money-ticket", category: "consumable", name: "臨時収入チケット", price: 20, emoji: "🎫", effect: { min: 15, max: 15 } },
-  { id: "item-fortune-charm", category: "consumable", name: "幸運のお守り", price: 35, emoji: "🍀", effect: { min: 5, max: 25 } },
-  { id: "item-tax-shield", category: "consumable", name: "節税シール", price: 50, emoji: "🛡️", effect: { min: 30, max: 30 } },
+  { id: "item-money-ticket", category: "consumable", name: "臨時収入チケット", price: 20, emoji: "🎫", image: "images/items/item-money-ticket.png", effect: { min: 15, max: 15 } },
+  { id: "item-fortune-charm", category: "consumable", name: "幸運のお守り", price: 35, emoji: "🍀", image: "images/items/item-fortune-charm.png", effect: { min: 5, max: 25 } },
+  { id: "item-tax-shield", category: "consumable", name: "節税シール", price: 50, emoji: "🛡️", image: "images/items/item-tax-shield.png", effect: { min: 30, max: 30 } },
 ];
+
+// 株券アイコン(購入可能な消耗品ではなく、保有株数の表示に使う実イラスト)
+const STOCK_CERTIFICATE_IMAGE = "images/items/item-stock-certificate.png";
 
 // キャラクターの動物種(全種すべて最初から無料所持)。avatarImageはdocs/avatars/配下の
 // 実イラスト(Codex作成、背景透過)へのパス。アバターバッジ(ui.jsのrenderAvatarBadge)は
@@ -55,4 +59,4 @@ const FREE_ITEM_IDS = [...FREE_COLOR_ITEMS.map((it) => it.id), ...SPECIES_ITEMS.
 
 const GAME_REWARD_MONEY_PER_COIN = 10; // ゲーム内所持金10万円につき1コイン
 
-window.LifeRoadShop = { ALL_ITEMS, CONSUMABLE_ITEMS, SPECIES_ITEMS, FREE_ITEM_IDS, DEFAULT_EQUIPPED, GAME_REWARD_MONEY_PER_COIN };
+window.LifeRoadShop = { ALL_ITEMS, CONSUMABLE_ITEMS, SPECIES_ITEMS, FREE_ITEM_IDS, DEFAULT_EQUIPPED, GAME_REWARD_MONEY_PER_COIN, STOCK_CERTIFICATE_IMAGE };

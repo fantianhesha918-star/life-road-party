@@ -38,6 +38,15 @@ function renderAvatarBadge(visual, size) {
   `;
 }
 
+// 消耗品アイテムのアイコン表示。item.image(Codex作成の実イラスト)があれば絵文字より優先する。
+function renderItemIcon(item, size) {
+  const px = size || 26;
+  if (item && item.image) {
+    return `<img class="item-icon-img" src="${item.image}" alt="" style="width:${px}px;height:${px}px;" />`;
+  }
+  return `<span style="font-size:${Math.round(px * 0.85)}px">${(item && item.emoji) || ""}</span>`;
+}
+
 function renderTitleScreen(hasSave, profile) {
   const visual = LifeRoadProfile.getAvatarVisual(profile.equipped);
   return `
@@ -52,6 +61,81 @@ function renderTitleScreen(hasSave, profile) {
       <button class="btn" onclick="App.goOnlineMenu()">友達と通信して遊ぶ</button>
       <button class="btn" onclick="App.goProfile()">キャラクターを編集</button>
       <button class="btn" onclick="App.goShop()">ショップ</button>
+      <button class="btn" onclick="App.goHelp()">📖 遊び方</button>
+      <button class="btn" onclick="App.goStats()">📊 記録</button>
+      <button class="btn" onclick="App.goSettings()">⚙️ 設定</button>
+    </section>
+  `;
+}
+
+function renderSettingsScreen(audioSettings) {
+  return `
+    <section class="screen screen-settings">
+      <h2>設定</h2>
+      <div class="field">
+        <h3>BGM</h3>
+        <label class="settings-toggle-row">
+          <span>BGMを再生する</span>
+          <input type="checkbox" ${audioSettings.bgmOn ? "checked" : ""} onchange="App.setAudioSetting('bgmOn', this.checked)" />
+        </label>
+        <label class="field">
+          <span>BGM音量(${Math.round(audioSettings.bgmVolume * 100)}%)</span>
+          <input type="range" min="0" max="100" value="${Math.round(audioSettings.bgmVolume * 100)}" ${audioSettings.bgmOn ? "" : "disabled"} oninput="App.setAudioSetting('bgmVolume', this.value / 100)" />
+        </label>
+      </div>
+      <div class="field">
+        <h3>効果音</h3>
+        <label class="settings-toggle-row">
+          <span>効果音を再生する</span>
+          <input type="checkbox" ${audioSettings.seOn ? "checked" : ""} onchange="App.setAudioSetting('seOn', this.checked)" />
+        </label>
+        <label class="field">
+          <span>効果音音量(${Math.round(audioSettings.seVolume * 100)}%)</span>
+          <input type="range" min="0" max="100" value="${Math.round(audioSettings.seVolume * 100)}" ${audioSettings.seOn ? "" : "disabled"} oninput="App.setAudioSetting('seVolume', this.value / 100)" />
+        </label>
+        <button class="btn" onclick="App.testPlaySe()">🔊 効果音をテスト再生</button>
+      </div>
+      <button class="btn" onclick="App.goTitle()">タイトルへ戻る</button>
+    </section>
+  `;
+}
+
+function renderHelpScreen() {
+  return `
+    <section class="screen screen-help">
+      <h2>遊び方</h2>
+      <div class="field">
+        <h3>基本ルール</h3>
+        <p class="lead">ルーレット(1〜10)を回してマスを進み、ゴールを目指す人生ゲーム風すごろくです。就職・結婚・出産・マイホーム購入・株の売買など、人生の出来事を体験しながらお金を増やしていきます。全員がゴールしたあと、こども・株・マイホームなどの清算を経て最終的な所持金の多い順に順位が決まります。</p>
+      </div>
+      <div class="field">
+        <h3>遊び方の流れ</h3>
+        <p class="lead">1. 自分の番になったら「🎡ルーレット」を回してマスを進みます。<br>2. 止まったマスの内容(できごと・給料日・選択肢など)がテロップで表示されます。選べるマスでは選択肢から1つ選んでください。<br>3. 「🎒アイテム」で購入済みの消耗品を、「📊ステータス」で自分の状況を確認できます。</p>
+      </div>
+      <div class="field">
+        <h3>主なマスの種類</h3>
+        <p class="lead">💼 就職・できごと・運命の分かれ道(選択あり)・給料日・ひと休み(1回休み)・💍結婚(お祝い金を受け取る)・👶 こども誕生・🏠 マイホーム購入・🔥 火災・🔁 家の交換・💹 株の売買、などがあります。</p>
+      </div>
+      <div class="field">
+        <h3>キャラクター・ショップ</h3>
+        <p class="lead">タイトル画面の「キャラクターを編集」で見た目(動物の種類・色・帽子・アクセサリー)を変更できます。「ショップ」では対戦後にもらえるコイン🪙で色・帽子・アクセサリー・消耗品アイテムを購入できます。</p>
+      </div>
+      <button class="btn" onclick="App.goTitle()">タイトルへ戻る</button>
+    </section>
+  `;
+}
+
+function renderStatsScreen(stats) {
+  return `
+    <section class="screen screen-stats">
+      <h2>記録</h2>
+      <ul class="player-list">
+        <li class="player-row"><span class="p-name">プレイ回数</span><span class="p-money">${stats.gamesPlayed}回</span></li>
+        <li class="player-row"><span class="p-name">獲得コイン累計</span><span class="p-money">🪙${stats.totalCoinsEarned}</span></li>
+        <li class="player-row"><span class="p-name">ゴール1位の回数</span><span class="p-money">${stats.firstPlaceCount}回</span></li>
+        <li class="player-row"><span class="p-name">最高所持金</span><span class="p-money">${stats.bestMoney}万円</span></li>
+      </ul>
+      <button class="btn" onclick="App.goTitle()">タイトルへ戻る</button>
     </section>
   `;
 }
@@ -97,11 +181,21 @@ function renderProfileScreen(profile) {
   `;
 }
 
-function renderShopScreen(profile) {
+function renderShopToast(toast) {
+  if (!toast) return "";
+  return `
+    <div class="shop-toast">
+      ${renderItemIcon(toast, 32)}
+      <span>「${escapeHtml(toast.name)}」を手に入れた！</span>
+    </div>
+  `;
+}
+
+function renderShopScreen(profile, shopToast) {
   const categories = [
-    { key: "color", label: "色" },
-    { key: "hat", label: "帽子" },
-    { key: "accessory", label: "アクセサリー" },
+    { key: "color", label: "色", icon: "🎨" },
+    { key: "hat", label: "帽子", icon: "🧢" },
+    { key: "accessory", label: "アクセサリー", icon: "✨" },
   ];
   const sections = categories
     .map((cat) => {
@@ -109,19 +203,21 @@ function renderShopScreen(profile) {
       const rows = items
         .map((it) => {
           const owned = profile.ownedItems.includes(it.id);
+          const equipped = profile.equipped[cat.key] === it.id;
           const canBuy = !owned && profile.coins >= it.price;
-          const preview = it.category === "color" ? `<span class="swatch" style="background:${it.value}"></span>` : it.emoji;
+          const preview = it.category === "color" ? `<span class="swatch" style="background:${it.value}"></span>` : `<span class="shop-item-emoji">${it.emoji}</span>`;
+          const statusBadge = equipped ? `<span class="badge badge-equipped">装着中</span>` : owned ? `<span class="badge">所持済み</span>` : "";
           const actionLabel = owned ? "所持済み" : `🪙${it.price} で購入`;
           return `
-            <li class="player-row">
-              <span>${preview}</span>
-              <span class="p-name">${escapeHtml(it.name)}</span>
+            <li class="player-row shop-row ${!owned && !canBuy ? "shop-row-cant-afford" : ""}">
+              ${preview}
+              <span class="p-name">${escapeHtml(it.name)}${statusBadge}</span>
               <button class="btn btn-offer" ${owned || !canBuy ? "disabled" : ""} onclick="App.buyShopItem('${it.id}')">${actionLabel}</button>
             </li>
           `;
         })
         .join("");
-      return `<div class="field"><h3>${cat.label}</h3><ul class="player-list">${rows}</ul></div>`;
+      return `<div class="field"><h3>${cat.icon} ${cat.label}</h3><ul class="player-list">${rows}</ul></div>`;
     })
     .join("");
   const consumableRows = CONSUMABLE_ITEMS
@@ -129,19 +225,20 @@ function renderShopScreen(profile) {
       const count = (profile.consumables && profile.consumables[it.id]) || 0;
       const canBuy = profile.coins >= it.price;
       return `
-        <li class="player-row">
-          <span>${it.emoji}</span>
-          <span class="p-name">${escapeHtml(it.name)}${count > 0 ? `(所持${count}個)` : ""}</span>
+        <li class="player-row shop-row ${!canBuy ? "shop-row-cant-afford" : ""}">
+          ${renderItemIcon(it, 32)}
+          <span class="p-name">${escapeHtml(it.name)}${count > 0 ? `<span class="badge">所持${count}個</span>` : ""}</span>
           <button class="btn btn-offer" ${canBuy ? "" : "disabled"} onclick="App.buyShopItem('${it.id}')">🪙${it.price} で購入</button>
         </li>
       `;
     })
     .join("");
-  const consumableSection = `<div class="field"><h3>消耗品(対戦中に使える)</h3><ul class="player-list">${consumableRows}</ul></div>`;
+  const consumableSection = `<div class="field"><h3>🎒 消耗品(対戦中に使える)</h3><ul class="player-list">${consumableRows}</ul></div>`;
   return `
     <section class="screen screen-shop">
+      ${renderShopToast(shopToast)}
       <h2>ショップ</h2>
-      <p class="coin-display">🪙 ${profile.coins}</p>
+      <p class="coin-display coin-display-lg">🪙 ${profile.coins}</p>
       ${sections}
       ${consumableSection}
       <button class="btn" onclick="App.goProfile()">キャラクター編集へ</button>
@@ -288,7 +385,7 @@ function renderLogModal(entries) {
 
 // cpuName有り=CPUが選択中の画面。人間が誤って押して二重確定させないよう、
 // 選択肢はdisabledのまま見せるだけにする(押せる選択肢は人間自身の番のときのみ)。
-function renderChoiceModal(pendingChoice, mode, cpuName) {
+function renderChoiceModal(pendingChoice, mode, cpuName, coins) {
   if (!pendingChoice) return "";
   if (cpuName) {
     const optionItems = pendingChoice.options
@@ -317,6 +414,7 @@ function renderChoiceModal(pendingChoice, mode, cpuName) {
           <h3>${escapeHtml(pendingChoice.title)}</h3>
           <p>${escapeHtml(pendingChoice.prompt)}</p>
         </div>
+        ${typeof coins === "number" ? `<p class="coin-display">🪙 所持コイン: ${coins}</p>` : ""}
         <button class="btn" onclick="App.toggleStatusPeek()">📊 自分の状況を確認</button>
         ${optionButtons}
       </div>
@@ -335,7 +433,7 @@ function renderStatusPeekModal(player, profile) {
         .map(([id, count]) => {
           const item = findShopItem(id);
           if (!item) return "";
-          return `<li class="player-row"><span>${item.emoji}</span><span class="p-name">${escapeHtml(item.name)}</span><span class="p-money">${count}個</span></li>`;
+          return `<li class="player-row">${renderItemIcon(item, 26)}<span class="p-name">${escapeHtml(item.name)}</span><span class="p-money">${count}個</span></li>`;
         })
         .join("")
     : `<li class="player-row"><span class="p-name lead">アイテムは持っていません</span></li>`;
@@ -345,7 +443,7 @@ function renderStatusPeekModal(player, profile) {
         <h3>${escapeHtml(player.name)} の状況</h3>
         <p class="lead">💰 所持金: ${player.money}万円</p>
         <p class="lead">${player.job ? `💼 ${escapeHtml(player.job.name)}(給料${player.job.salary}万円/回)` : "💼 まだ就職していません"}</p>
-        <p class="lead">💹 保有株: ${player.stockShares || 0}株</p>
+        <p class="lead"><img class="inline-icon" src="${STOCK_CERTIFICATE_IMAGE}" alt="" /> 保有株: ${player.stockShares || 0}株</p>
         <p class="lead">🏠 マイホーム: ${houseTier ? escapeHtml(houseTier.label) : "まだ持っていません"}</p>
         <p class="lead">🛡️ 火災保険: ${player.insurance === "fire" ? "加入中" : "未加入"}</p>
         <p class="lead">👶 こども: ${player.children || 0}人</p>
@@ -361,6 +459,18 @@ function renderStatusPeekModal(player, profile) {
 // CPUの結果(dismissFn無し)はApp側のタイマーで自動的に閉じるので、押せないことが
 // 分かるよう「…」だけ表示する。テロップ枠(telop-frame.png)で本文を囲み、選択モーダルの
 // プロンプト表示と統一感を持たせる。
+// ゴール到達時、finishOrder(何着か)に応じた大きめのメダルバッジ演出
+function renderFinishRankBadge(order) {
+  const medal = order === 1 ? "🥇" : order === 2 ? "🥈" : order === 3 ? "🥉" : "🏁";
+  const rankClass = order === 1 ? "finish-rank-gold" : order === 2 ? "finish-rank-silver" : order === 3 ? "finish-rank-bronze" : "finish-rank-other";
+  return `
+    <div class="finish-rank-badge ${rankClass}">
+      <span class="finish-rank-medal">${medal}</span>
+      <span class="finish-rank-num">${order}着</span>
+    </div>
+  `;
+}
+
 function renderRevealCard(reveal, visual, dismissFn) {
   if (!reveal) return "";
   const deltaClass = reveal.delta > 0 ? "reveal-delta-positive" : reveal.delta < 0 ? "reveal-delta-negative" : "";
@@ -371,6 +481,7 @@ function renderRevealCard(reveal, visual, dismissFn) {
   return `
     <div class="turn-hub-modal">
       <div class="turn-hub-card">
+        ${reveal.finishOrder ? renderFinishRankBadge(reveal.finishOrder) : ""}
         <div class="turn-hub-avatar">${renderAvatarBadge(visual, 72)}</div>
         <div class="modal-telop">
           <p class="lead">${escapeHtml(reveal.text)}</p>
@@ -454,7 +565,7 @@ function renderTurnHub(state, humanId, profile, hub) {
     body = `
       ${renderPlayerList(state)}
       <p class="lead">${me.job ? `給料: ${me.job.salary}万円/回` : "まだ就職していません(給料日はアルバイト収入)"}</p>
-      <p class="lead">💹 保有株: ${me.stockShares || 0}株</p>
+      <p class="lead"><img class="inline-icon" src="${STOCK_CERTIFICATE_IMAGE}" alt="" /> 保有株: ${me.stockShares || 0}株</p>
       <button class="btn" onclick="App.showHubView('menu')">戻る</button>
     `;
   } else if (view === "items") {
@@ -466,7 +577,7 @@ function renderTurnHub(state, humanId, profile, hub) {
             if (!item) return "";
             return `
               <li class="player-row">
-                <span>${item.emoji}</span>
+                ${renderItemIcon(item, 28)}
                 <span class="p-name">${escapeHtml(item.name)}(所持${count}個)</span>
                 <button class="btn btn-offer" onclick="App.useConsumable('${id}')">使う</button>
               </li>
@@ -552,7 +663,7 @@ function renderGameScreen(state, log, humanId, mode, profile, hub, reveal, logOp
       ${renderTurnPopup(turnPopup)}
       ${renderMoneyToasts(moneyToasts)}
       ${isHumanTurn || showCPUSpinning ? renderTurnHub(state, humanId, profile, hub) : ""}
-      ${!reveal && !hopping ? renderChoiceModal(state.pendingChoice, mode, isCPUTurn ? turnPlayer.name : null) : ""}
+      ${!reveal && !hopping ? renderChoiceModal(state.pendingChoice, mode, isCPUTurn ? turnPlayer.name : null, profile.coins) : ""}
       ${renderRevealCard(reveal, reveal && reveal.visual, dismissFn)}
       ${logOpen ? renderLogModal(log) : ""}
       ${statusPeekOpen ? renderStatusPeekModal(state.players.find((p) => p.id === humanId), profile) : ""}

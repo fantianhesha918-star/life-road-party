@@ -131,6 +131,36 @@ body {
   font-size: 0.95rem;
 }
 
+.item-icon-img {
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.inline-icon {
+  width: 1.1em;
+  height: 1.1em;
+  object-fit: contain;
+  vertical-align: -0.2em;
+}
+
+.settings-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 1rem;
+}
+
+.settings-toggle-row input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+}
+
+.field input[type="range"] {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
 .error-text {
   color: var(--danger);
   background: #fdeaea;
@@ -229,6 +259,55 @@ body {
   font-size: 0.65rem;
   padding: 2px 6px;
   border-radius: 6px;
+  margin-left: 6px;
+}
+
+.badge-equipped {
+  background: var(--accent, #f4a300);
+}
+
+.shop-row {
+  transition: opacity 0.15s;
+}
+
+.shop-row-cant-afford {
+  opacity: 0.55;
+}
+
+.shop-item-emoji {
+  font-size: 1.4rem;
+  width: 28px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.coin-display-lg {
+  font-size: 1.3rem;
+}
+
+.shop-toast {
+  position: fixed;
+  top: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--brand-dark, #1f4d40);
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  z-index: 30;
+  animation: shop-toast-pop 1.8s ease forwards;
+}
+
+@keyframes shop-toast-pop {
+  0% { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  12% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  82% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 .log-list {
@@ -571,6 +650,50 @@ body {
   100% {
     transform: scale(1);
   }
+}
+
+.finish-rank-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin-top: -8px;
+  animation: finish-rank-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.finish-rank-medal {
+  font-size: 2.6rem;
+  line-height: 1;
+}
+
+.finish-rank-num {
+  font-weight: bold;
+  font-size: 1rem;
+  border-radius: 999px;
+  padding: 2px 12px;
+  color: #fff;
+}
+
+.finish-rank-gold .finish-rank-num {
+  background: #d4af37;
+}
+
+.finish-rank-silver .finish-rank-num {
+  background: #9aa4ad;
+}
+
+.finish-rank-bronze .finish-rank-num {
+  background: #b0722f;
+}
+
+.finish-rank-other .finish-rank-num {
+  background: var(--brand);
+}
+
+@keyframes finish-rank-pop {
+  0% { opacity: 0; transform: scale(0.3) translateY(10px); }
+  70% { opacity: 1; transform: scale(1.15); }
+  100% { opacity: 1; transform: scale(1); }
 }
 
 .reveal-delta {
