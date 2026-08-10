@@ -24,11 +24,22 @@ let squareTypes = [];
 let stockTriggerIndexes = [];
 const SQUARE_SPACING = 2.2;
 const HOP_HEIGHT = 0.6;
-// 道をゆるやかに蛇行させるsin波のパラメータ。index*FREQUENCYが増えるほど
-// 周期的にS字カーブを繰り返す(マス数が増減してもそのまま追従する)。
-const PATH_CURVE_AMPLITUDE = 1.8;
-const PATH_CURVE_FREQUENCY = 0.35;
-const STAGE_PROP_SIDE_OFFSET = 2.8;
+// 道は「壁で囲まない箱っぽいコース」にする(2026-08-09、直線+sin波の一本道から変更)。
+// ROW_LENGTHマスごとに折り返し、折り返すたびにROW_SPACING分だけ奥(Z方向)へ進む
+// 蛇行(ボウストロフェドン)レイアウト。各行の中では緩やかなS字カーブを付け、
+// 折り返し地点(行の両端)は半径ROW_SPACING/2の半円アーチでなめらかに繋ぐ
+// (2026-08-10: 直角コーナーだと急カーブに見えるとの指摘を受け、U字カーブに変更)。
+// マス数が変わっても自動追従する。
+const ROW_LENGTH = 10;
+const ROW_SPACING = 8.0;
+const PATH_CURVE_AMPLITUDE = 1.2;
+// 折り返し地点の前後、何マス分をなだらかな半円カーブにするか
+const TURN_EASE_SQUARES = 1.6;
+// 隣の行が存在する「内側」の奥行き(狭め、行同士の装飾が近づきすぎないよう控えめに)と、
+// 隣の行がない「外側」の奥行き(広め)。buildStagePropLayoutでside(north/south)ごとに
+// 使い分ける(2026-08-10、行をまたいだ建物・木の衝突の根本対応)。
+const STAGE_PROP_OFFSET_INNER = 2.2;
+const STAGE_PROP_OFFSET_OUTER = 3.2;
 // 木は「丸い葉(round)」「とんがり葉(conifer)」の2種をランダムに混ぜて配置する
 const TREE_VARIANTS = ["round", "conifer"];
 // STAGE_PROP_MODELSのうちtree-*を除いた建物・施設キー一覧(表示順に巡回して配置する)。
@@ -50,21 +61,77 @@ const BUILDING_MODEL_KEYS = [
 // マスの間の隙間(gapIndex)ごとに建物・木を1組ずつ配置するレイアウトを動的に組み立てる。
 // 手作業の固定配列(旧STAGE_PROP_LAYOUT)だと将来のマス数拡張(100〜300マス)に
 // 追従できないため、建物モデルを順番に巡回させるアルゴリズム方式にした。
+// 装飾1個の実際のワールド座標(x,z)を計算する(衝突判定用)。createStagePropsの配置式と
+// 揃える必要がある(側・オフセット・道沿い方向のずらしをそこと同じ式で反映する)。
+function propWorldPos(prop) {
+  const side = prop.side === "north" ? 1 : -1;
+  const offset = prop.kind === "streetprop" ? STREET_PROP_SIDE_OFFSET : prop.offset;
+  const along = prop.kind === "streetprop" ? STREET_PROP_ALONG_OFFSET : 0;
+  const { point, normal } = pathPointAndNormal(prop.gapIndex + 0.5 + along);
+  return point.clone().addScaledVector(normal, side * offset);
+}
+
+// 建物・木・道沿いの小物の候補をマスの隙間(gapIndex)ごとに1組ずつ作り、実際の
+// ワールド座標が近すぎる組み合わせだけを間引いて最終レイアウトにする。
+// U字カーブの折り返し区間は法線の向きが短い距離で大きく変わるため、手作業のカーブ判定
+// margin調整ではなく実座標の距離で判定することで、直線・カーブを問わず自動的に
+// ちょうどよい密度になる(2026-08-10、カーブ付近の重なり・殺風景さ両方への対応)。
+const STAGE_PROP_MIN_CROSS_GAP_DIST = 1.7;
+
 function buildStagePropLayout(count) {
-  const layout = [];
+  const candidates = [];
   const gapCount = Math.max(0, count - 1);
+  const lastRow = Math.floor(Math.max(0, count - 1) / ROW_LENGTH);
   for (let i = 0; i < gapCount; i++) {
     const buildingModel = BUILDING_MODEL_KEYS[i % BUILDING_MODEL_KEYS.length];
-    const buildingSide = i % 2 === 0 ? "north" : "south";
+    // 行(row)は1行ごとに進行方向が左右反転するため、法線ベクトルの向きも1行ごとに
+    // 反転する。worldSide(i%2による従来通りのジグザグ配置の意図)をそのままside名に
+    // していると、偶数行と奇数行とで実際に押し出される座標(ワールド座標のZ方向)が
+    // 逆になり、隣接する行の建物同士がお互いの間の隙間に寄って重なってしまっていた
+    // (2026-08-10発覚)。行の進行方向がgoingRight=falseのときはside名を反転させて、
+    // ワールド座標上で常に同じ側(north=+Z方向、south=-Z方向)へ押し出されるように補正する。
+    const row = Math.floor(i / ROW_LENGTH);
+    const rowGoingRight = row % 2 === 0;
+    const worldSideIsNorth = i % 2 === 0;
+    const buildingSide = worldSideIsNorth === rowGoingRight ? "north" : "south";
     const treeSide = buildingSide === "north" ? "south" : "north";
-    layout.push({ id: `building-${i}`, kind: "building", model: buildingModel, gapIndex: i, side: buildingSide });
-    layout.push({ id: `tree-${i}`, kind: "tree", gapIndex: i, side: treeSide });
+    // north(+Z)は次の行が、south(-Z)は前の行が存在する側=隣の行との隙間に面した「内側」。
+    // 内側は隣の行の装飾と近づきすぎないよう控えめな奥行きに、隣の行がない「外側」は
+    // 奥行きをしっかり取る(2026-08-10、行をまたいだ建物同士の衝突の根本対応)。
+    const northIsInner = row < lastRow;
+    const southIsInner = row > 0;
+    const offsetFor = (side) => {
+      const isInner = side === "north" ? northIsInner : southIsInner;
+      return isInner ? STAGE_PROP_OFFSET_INNER : STAGE_PROP_OFFSET_OUTER;
+    };
+    candidates.push({ id: `building-${i}`, kind: "building", model: buildingModel, gapIndex: i, side: buildingSide, offset: offsetFor(buildingSide) });
+    candidates.push({ id: `tree-${i}`, kind: "tree", gapIndex: i, side: treeSide, offset: offsetFor(treeSide) });
     // 街灯・ベンチ・看板は建物と同じ側の、道により近い位置に巡回配置する(奥に建物、手前に小物)
     const streetPropModel = STREET_PROP_MODEL_KEYS[i % STREET_PROP_MODEL_KEYS.length];
-    layout.push({ id: `streetprop-${i}`, kind: "streetprop", model: streetPropModel, gapIndex: i, side: buildingSide });
+    candidates.push({ id: `streetprop-${i}`, kind: "streetprop", model: streetPropModel, gapIndex: i, side: buildingSide });
+  }
+
+  // 同じgap内のペア(建物と自分の街灯など)はオフセット差で意図的に近づけているので対象外にし、
+  // 別々のgap同士だけ、先に確定した装飾との距離が近すぎる場合に間引く。
+  // スタート/ゴールのゲート(index 0とcount-1、道を横切って立つ)も障害物として先に登録しておき、
+  // ゲートのすぐ脇にベンチ等が配置されてしまうのを防ぐ(2026-08-10発覚)。
+  const layout = [];
+  const keptPositions = [
+    { gapIndex: -1, pos: squarePosition(0) },
+    { gapIndex: -1, pos: squarePosition(count - 1) },
+  ];
+  for (const cand of candidates) {
+    const pos = propWorldPos(cand);
+    const conflict = keptPositions.some(
+      (k) => k.gapIndex !== cand.gapIndex && k.pos.distanceTo(pos) < STAGE_PROP_MIN_CROSS_GAP_DIST
+    );
+    if (conflict) continue;
+    layout.push(cand);
+    keptPositions.push({ gapIndex: cand.gapIndex, pos });
   }
   return layout;
 }
+
 // Codex参考イラスト→Meshy 5(単一画像・should_remesh)→Blender軽量化(1024/Draco/JPEG)で
 // 作成した実モデル。scale/yOffsetはBlenderで実測したバウンディングボックス(原点が中心)から、
 // characterと同じ考え方(半径×scale=地面に接地させるための底上げ量)で逆算した値。
@@ -179,6 +246,9 @@ const STAGE_PROP_MODELS = {
 const STREET_PROP_MODEL_KEYS = ["prop-streetlamp", "prop-bench", "prop-signboard"];
 // 建物・木より道に近い位置に配置する(奥に建物、手前に小物という奥行きを出す)
 const STREET_PROP_SIDE_OFFSET = 1.5;
+// 街灯・ベンチ・看板は、建物と同じgapIndex+同じ側でも建物の真正面に重ならないよう、
+// パスに沿った方向(接線方向)にも少しずらして配置する(2026-08-10、建物と被る指摘への対応)。
+const STREET_PROP_ALONG_OFFSET = 0.55;
 // マスの種類(game-data.js参照)ごとの色。2D版style.cssの.cell-*配色をそのまま流用する
 const SQUARE_TYPE_COLORS = {
   start: 0xfff3cd,
@@ -249,7 +319,7 @@ const SPECIES_MODEL_MAP = {
   },
   "species-cat-calico": {
     url: new URL("./models/cat-calico.glb", import.meta.url).href,
-    scale: 0.635,
+    scale: 0.469,
     yOffset: 0.445,
   },
   "species-rabbit-white": {
@@ -281,12 +351,68 @@ let isMoving = false;
 // disposeで再mountされた後に古いロードが完了してもシーンを誤って触らないようにする。
 let sceneGeneration = 0;
 
+function lastColOf(row) {
+  return Math.max(0, Math.min(ROW_LENGTH, squareCount - row * ROW_LENGTH) - 1);
+}
+
+// 行rowの直線上の連続位置s(マス単位。行の範囲外への仮想延長も可)における{x,z}
+// (ふらつき・折り返しカーブ抜きの素の直線位置)。
+function rawRowPoint(row, s) {
+  const goingRight = row % 2 === 0;
+  const lastCol = lastColOf(row);
+  const colX = goingRight ? s : lastCol - s;
+  return new THREE.Vector3(colX * SQUARE_SPACING, 0, row * ROW_SPACING);
+}
+
+// 行rowAの末尾〜行rowA+1の先頭を、半径ROW_SPACING/2の半円でつなぐ(U字カーブ)。
+// rowA側の直線がTURN_EASE_SQUARES分手前で終わる地点と、rowA+1側の直線がTURN_EASE_SQUARES分
+// 進んだ地点がちょうど同じX座標になる(蛇行レイアウトの対称性)ことを利用し、その2点を
+// 直径2R=ROW_SPACINGの半円で結ぶ。両端で直線側の接線と向きが一致するためなめらかに繋がる。
+function turnArcPoint(rowA, index) {
+  const goingRightA = rowA % 2 === 0;
+  const lastColA = lastColOf(rowA);
+  const edgeS = lastColA - TURN_EASE_SQUARES;
+  const x0 = rawRowPoint(rowA, edgeS).x;
+  const midZ = (rowA + 0.5) * ROW_SPACING;
+  const radius = ROW_SPACING / 2;
+  const bulgeSign = goingRightA ? 1 : -1;
+  const zoneStart = rowA * ROW_LENGTH + edgeS;
+  // 弧の始点(rowAの終端よりTURN_EASE_SQUARES手前)から終点(rowA+1の先頭よりTURN_EASE_SQUARES先)
+  // までの実際のインデックス幅。rowAの最後のマスとrowA+1の最初のマスはindexが1違うだけなので、
+  // 単純な2*TURN_EASE_SQUARESではなく、その間の1マス分もここに含める必要がある
+  // (2026-08-10発覚: これが抜けていたためカーブの終盤でthetaが90°を超えて折り返し、
+  // マス同士が重なって見えるバグの原因だった)。
+  const zoneSpan = ROW_LENGTH - lastColA + 2 * TURN_EASE_SQUARES;
+  const theta = -Math.PI / 2 + Math.PI * ((index - zoneStart) / zoneSpan);
+  return new THREE.Vector3(x0 + bulgeSign * radius * Math.cos(theta), 0, midZ + radius * Math.sin(theta));
+}
+
+// indexは非整数(gapIndex+0.5等)も許容する。折り返し地点付近(TURN_EASE_SQUARES以内)は
+// turnArcPointの半円カーブ、それ以外は直線+S字ふらつきで位置を求める。
 function squarePosition(index) {
-  return new THREE.Vector3(
-    index * SQUARE_SPACING,
-    0,
-    Math.sin(index * PATH_CURVE_FREQUENCY) * PATH_CURVE_AMPLITUDE
-  );
+  const row = Math.floor(index / ROW_LENGTH);
+  const posInRow = index - row * ROW_LENGTH;
+  const lastCol = lastColOf(row);
+  const isFirstRow = row === 0;
+  const isLastRow = row >= Math.floor(Math.max(0, squareCount - 1) / ROW_LENGTH);
+
+  if (!isLastRow && posInRow > lastCol - TURN_EASE_SQUARES) {
+    return turnArcPoint(row, index);
+  }
+  if (!isFirstRow && posInRow < TURN_EASE_SQUARES) {
+    return turnArcPoint(row - 1, index);
+  }
+
+  const wobbleLo = isFirstRow ? 0 : TURN_EASE_SQUARES;
+  const wobbleHi = isLastRow ? lastCol : lastCol - TURN_EASE_SQUARES;
+  const wobbleSpan = Math.max(wobbleHi - wobbleLo, 1);
+  const goingRight = row % 2 === 0;
+  const wobble = wobbleHi > wobbleLo
+    ? Math.sin(((posInRow - wobbleLo) / wobbleSpan) * Math.PI) * PATH_CURVE_AMPLITUDE * (goingRight ? 1 : -1)
+    : 0;
+  const point = rawRowPoint(row, posInRow);
+  point.z += wobble;
+  return point;
 }
 
 // 同じマスに複数のプレイヤーが乗ったときに重ならないよう、プレイヤーごとに固定の
@@ -319,50 +445,74 @@ function pathPointAndNormal(t) {
   return { point, normal };
 }
 
+// 全マスの座標からコース全体の外接矩形(XZ平面)を求める。地面プレーン・シャドウカメラの
+// サイズを、蛇行レイアウトの行数・折り返しに合わせて自動算出するために使う。
+function computePathBounds() {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (let i = 0; i < squareCount; i++) {
+    const p = squarePosition(i);
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.z < minZ) minZ = p.z;
+    if (p.z > maxZ) maxZ = p.z;
+  }
+  return { minX, maxX, minZ, maxZ };
+}
+
 const textureLoader = new THREE.TextureLoader();
 
-function loadGroundTexture() {
+function loadGroundTexture(width, depth) {
   const texture = textureLoader.load(GROUND_TEXTURE_URL);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set((squareCount * SQUARE_SPACING) / 3, 6);
+  texture.repeat.set(width / 3, depth / 3);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
 }
 
+// マスの中心だけを直線でつなぐと、U字カーブの折り返し区間では1区間あたりの折れ角が
+// 大きくなり、外側にすき間が・内側に重なりができてしまう(2026-08-10発覚)。
+// 1マスにつき下記サンプル数だけsquarePosition()から中間点も取り、細かい折れ線で
+// 曲線を近似することで見た目のすき間を消す(マス位置・ホップ移動自体は従来通り整数indexのまま)。
+const ROAD_SAMPLES_PER_SQUARE = 6;
+
 // パス(squarePosition)に沿って道テクスチャを貼ったリボン状のメッシュを作る。
-// 各マス中心を結ぶ直線区間の連なりとして構築する(実際のホップ移動もマス間を直線で結ぶため、
-// このリボンは常にキャラクターの通り道と正確に一致する)。
 function createRoadRibbon(count) {
   const texture = textureLoader.load(ROAD_TEXTURE_URL);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.colorSpace = THREE.SRGBColorSpace;
 
+  const sampleCount = Math.max(1, count - 1) * ROAD_SAMPLES_PER_SQUARE + 1;
+  const points = [];
+  for (let s = 0; s < sampleCount; s++) {
+    points.push(squarePosition((s / ROAD_SAMPLES_PER_SQUARE)));
+  }
+
   const positions = [];
   const uvs = [];
   const indices = [];
   let uAccum = 0;
-  for (let i = 0; i < count; i++) {
-    const p = squarePosition(i);
-    let tangent;
-    if (i === 0) {
-      const p1 = squarePosition(Math.min(1, count - 1));
-      tangent = new THREE.Vector3(p1.x - p.x, 0, p1.z - p.z);
-    } else {
-      const p0 = squarePosition(i - 1);
-      tangent = new THREE.Vector3(p.x - p0.x, 0, p.z - p0.z);
-    }
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    // 前後両方のサンプル点(中心差分)から接線を求めることで、折れ角の二等分方向になり
+    // カーブの外側にすき間・内側に重なりができるのを防ぐ。
+    const prev = points[Math.max(0, i - 1)];
+    const next = points[Math.min(points.length - 1, i + 1)];
+    const tangent = new THREE.Vector3(next.x - prev.x, 0, next.z - prev.z);
     if (tangent.lengthSq() < 1e-6) tangent.set(1, 0, 0);
     tangent.normalize();
     const normal = new THREE.Vector3(-tangent.z, 0, tangent.x);
     const left = p.clone().addScaledVector(normal, ROAD_HALF_WIDTH);
     const right = p.clone().addScaledVector(normal, -ROAD_HALF_WIDTH);
     positions.push(left.x, -0.45, left.z, right.x, -0.45, right.z);
-    if (i > 0) uAccum += SQUARE_SPACING / (ROAD_HALF_WIDTH * 2);
+    if (i > 0) uAccum += p.distanceTo(points[i - 1]) / (ROAD_HALF_WIDTH * 2);
     uvs.push(uAccum, 0, uAccum, 1);
   }
-  for (let i = 0; i < count - 1; i++) {
+  for (let i = 0; i < points.length - 1; i++) {
     const a = i * 2;
     const b = i * 2 + 1;
     const c = (i + 1) * 2;
@@ -487,8 +637,9 @@ function createSmallPropPlaceholder() {
 
 // buildStagePropLayoutに従い、マスの間の隙間(gapIndex)ごとに建物・木・道沿いの小物を配置する。
 // 各propはcharacterと同じくy=0(徒歩の接地基準)に立たせ、パスの向き(接線)に垂直な
-// 法線方向にオフセットして、マスの移動そのものは妨げない。建物・木は奥(STAGE_PROP_SIDE_OFFSET)、
-// 街灯・ベンチ・看板は道により近い手前(STREET_PROP_SIDE_OFFSET)に配置し奥行きを出す。
+// 法線方向にオフセットして、マスの移動そのものは妨げない。建物・木は奥(prop.offset、
+// buildStagePropLayoutが内側/外側で使い分け済み)、街灯・ベンチ・看板は道により近い
+// 手前(STREET_PROP_SIDE_OFFSET)に配置し奥行きを出す。
 // まずプレースホルダーを即座に表示し、対応する実GLBを非同期で差し替える。
 function createStageProps(scene) {
   const generation = sceneGeneration;
@@ -500,12 +651,12 @@ function createStageProps(scene) {
     if (prop.kind === "building") {
       modelKey = prop.model;
       placeholder = createBuildingPlaceholder(prop.model);
-      sideOffset = STAGE_PROP_SIDE_OFFSET;
+      sideOffset = prop.offset;
     } else if (prop.kind === "tree") {
       const treeVariant = TREE_VARIANTS[Math.floor(Math.random() * TREE_VARIANTS.length)];
       modelKey = `tree-${treeVariant}`;
       placeholder = createTreePlaceholder(treeVariant);
-      sideOffset = STAGE_PROP_SIDE_OFFSET;
+      sideOffset = prop.offset;
     } else {
       modelKey = prop.model;
       placeholder = createSmallPropPlaceholder();
@@ -513,12 +664,16 @@ function createStageProps(scene) {
     }
 
     const side = prop.side === "north" ? 1 : -1;
-    const { point, normal } = pathPointAndNormal(prop.gapIndex + 0.5);
+    const alongOffset = prop.kind === "streetprop" ? STREET_PROP_ALONG_OFFSET : 0;
+    const { point, normal } = pathPointAndNormal(prop.gapIndex + 0.5 + alongOffset);
     const owner = new THREE.Group();
     owner.position.copy(point).addScaledVector(normal, side * sideOffset);
-    // 建物の正面(ドア・看板)は既定でワールド+Zを向く想定なので、パス側=内側
-    // (自分のオフセット方向と逆向き)を向くよう回転させる(木・小物は前後の区別が薄いので対象外)。
-    if (prop.kind === "building") {
+    // 建物・街灯/ベンチ/看板の正面(ドア・座面等)は既定でワールド+Zを向く想定なので、
+    // パス側=内側(自分のオフセット方向と逆向き)を向くよう回転させる。
+    // (2026-08-09修正: 従来はbuildingのみ回転させておりstreetprop=街灯/ベンチ/看板は
+    // 常に既定の向きのまま、道が蛇行しても追従せずベンチが外向きになる不具合があった。
+    // 木は前後の区別が薄いので引き続き回転対象外のまま)。
+    if (prop.kind === "building" || prop.kind === "streetprop") {
       owner.rotation.y = Math.atan2(-side * normal.x, -side * normal.z);
     }
     owner.add(placeholder);
@@ -543,8 +698,13 @@ function placeGate(scene, modelKey, index, generation) {
   // 内側にわずかにずらしたtで法線を求める(位置そのものはsquarePosition(index)を使う)。
   const t = Math.max(0.001, Math.min(squareCount - 1.001, index));
   const { normal } = pathPointAndNormal(t);
+  // ゲートは「道を横切って立ち、その下を通り抜ける」構造物なので、通り抜け軸(既定+Z)は
+  // 法線(道を横切る向き)ではなく接線(進行方向)に合わせる必要がある
+  // (2026-08-09修正: 以前は法線に合わせていたため、アーチの間口が進行方向と90°ズレていた)。
+  // normal=(-tangent.z, 0, tangent.x)の関係から、接線はnormalを90°回転させて逆算する。
+  const tangent = new THREE.Vector3(normal.z, 0, -normal.x);
   owner.position.copy(pos);
-  owner.rotation.y = Math.atan2(normal.x, normal.z);
+  owner.rotation.y = Math.atan2(tangent.x, tangent.z);
   owner.add(placeholder);
   scene.add(owner);
   loadStagePropModel(owner, placeholder, modelKey, generation);
@@ -750,12 +910,16 @@ function buildScene(players) {
   bgTexture.colorSpace = THREE.SRGBColorSpace;
   scene.background = bgTexture;
 
+  const bounds = computePathBounds();
+  const groundMargin = STAGE_PROP_OFFSET_OUTER + 4;
+  const groundWidth = bounds.maxX - bounds.minX + groundMargin * 2;
+  const groundDepth = bounds.maxZ - bounds.minZ + groundMargin * 2;
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(squareCount * SQUARE_SPACING + 12, 16),
-    new THREE.MeshStandardMaterial({ map: loadGroundTexture() })
+    new THREE.PlaneGeometry(groundWidth, groundDepth),
+    new THREE.MeshStandardMaterial({ map: loadGroundTexture(groundWidth, groundDepth) })
   );
   ground.rotation.x = -Math.PI / 2;
-  ground.position.set((squareCount - 1) * SQUARE_SPACING * 0.5, -0.5, 0);
+  ground.position.set((bounds.minX + bounds.maxX) / 2, -0.5, (bounds.minZ + bounds.maxZ) / 2);
   ground.receiveShadow = true;
   scene.add(ground);
 
@@ -787,10 +951,13 @@ function buildScene(players) {
   light.position.set(3, 6, 4);
   light.castShadow = true;
   light.shadow.mapSize.set(1024, 1024);
-  light.shadow.camera.left = -2;
-  light.shadow.camera.right = squareCount * SQUARE_SPACING + 2;
-  light.shadow.camera.top = 6;
-  light.shadow.camera.bottom = -6;
+  // シャドウカメラの範囲もコース全体の外接矩形(対角の大きさ)に合わせて自動算出する
+  // (蛇行レイアウトになりXZ両方向に広がるため、旧来のX方向のみのスケーリングでは足りない)。
+  const shadowExtent = Math.max(groundWidth, groundDepth);
+  light.shadow.camera.left = -shadowExtent * 0.15;
+  light.shadow.camera.right = shadowExtent * 1.05;
+  light.shadow.camera.top = shadowExtent * 0.5;
+  light.shadow.camera.bottom = -shadowExtent * 0.5;
   scene.add(light);
   scene.add(new THREE.AmbientLight(0xffffff, 0.55));
 }

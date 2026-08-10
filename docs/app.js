@@ -109,6 +109,8 @@ const App = {
   logOpen: false,
   // ---- 選択画面から開く「自分の状況を確認」モーダルの開閉状態。solo/online共通で使う ----
   statusPeekOpen: false,
+  // ---- ヘッダーの中断ボタンから開く「メニューに戻りますか？」確認モーダルの開閉状態 ----
+  pauseMenuOpen: false,
   // ---- 所持金が変動したプレイヤーを一定時間だけ画面上部に知らせるトースト表示。
   // 結婚のお祝い金のように「今の手番プレイヤー以外」の所持金も動くイベント向け
   // (手番プレイヤー自身の増減は演出カード側のreveal-deltaで既に見えているため対象外)----
@@ -152,6 +154,7 @@ const App = {
     this.reveal = null;
     this.logOpen = false;
     this.statusPeekOpen = false;
+    this.pauseMenuOpen = false;
     this.moneyToasts = [];
     this.hopping = false;
     this.hoppingPlayerId = null;
@@ -225,6 +228,7 @@ const App = {
     this.reveal = null;
     this.logOpen = false;
     this.statusPeekOpen = false;
+    this.pauseMenuOpen = false;
     this.moneyToasts = [];
     this.hopping = false;
     this.hoppingPlayerId = null;
@@ -268,6 +272,7 @@ const App = {
     this.reveal = null;
     this.logOpen = false;
     this.statusPeekOpen = false;
+    this.pauseMenuOpen = false;
     this.moneyToasts = [];
     this.hopping = false;
     this.hoppingPlayerId = null;
@@ -350,6 +355,24 @@ const App = {
   toggleStatusPeek() {
     this.statusPeekOpen = !this.statusPeekOpen;
     this.render();
+  },
+
+  // ---- ヘッダーの中断ボタン(ゲーム画面からメニューへ戻る、solo/online共通) ----
+
+  togglePauseMenu() {
+    this.pauseMenuOpen = !this.pauseMenuOpen;
+    this.render();
+  },
+
+  // 「タイトルに戻る」確定。soloは進行状況を保存してから戻る(continueGameで再開できる)。
+  // onlineは自分のルーム参照を消して退室する(他プレイヤーの対戦はそのまま続く)。
+  confirmPauseToTitle() {
+    if (this.mode === "online") {
+      this.leaveOnlineRoom();
+      return;
+    }
+    this.saveGame();
+    this.goTitle();
   },
 
   // ---- 所持金変動トースト(結婚のお祝い金のように手番プレイヤー以外の所持金も動くイベント用) ----
@@ -874,7 +897,7 @@ const App = {
     } else if (this.screen === "setup") {
       view.innerHTML = renderSetupScreen();
     } else if (this.screen === "game") {
-      view.innerHTML = renderGameScreen(this.state, this.log, this.humanId, "solo", LifeRoadProfile.loadProfile(), this.hub, this.reveal, this.logOpen, this.hopping, this.turnPopup, this.statusPeekOpen, this.moneyToasts);
+      view.innerHTML = renderGameScreen(this.state, this.log, this.humanId, "solo", LifeRoadProfile.loadProfile(), this.hub, this.reveal, this.logOpen, this.hopping, this.turnPopup, this.statusPeekOpen, this.moneyToasts, this.pauseMenuOpen);
     } else if (this.screen === "result") {
       view.innerHTML = renderResultScreen(this.state, "solo", this.lastReward);
     } else if (this.screen === "online-menu") {
@@ -884,7 +907,7 @@ const App = {
     } else if (this.screen === "online-game" && this.online && this.online.room) {
       const baseState = roomToEngineState(this.online.room);
       const displayState = this.online.localTurnState || baseState;
-      view.innerHTML = renderGameScreen(displayState, this.online.log, this.online.uid, "online", LifeRoadProfile.loadProfile(), this.hub, this.online.reveal, this.logOpen, this.hopping, this.online.turnPopup, this.statusPeekOpen, this.moneyToasts);
+      view.innerHTML = renderGameScreen(displayState, this.online.log, this.online.uid, "online", LifeRoadProfile.loadProfile(), this.hub, this.online.reveal, this.logOpen, this.hopping, this.online.turnPopup, this.statusPeekOpen, this.moneyToasts, this.pauseMenuOpen);
     } else if (this.screen === "online-result" && this.online && this.online.room) {
       const state = roomToEngineState(this.online.room);
       view.innerHTML = renderResultScreen(state, "online", this.online.lastReward);
@@ -905,6 +928,8 @@ const App = {
       state = this.online.localTurnState || roomToEngineState(this.online.room);
     }
     titleEl.innerHTML = state ? renderHeaderTurnContent(state, this.hoppingPlayerId) : "アニマルライフ";
+    const pauseBtn = document.getElementById("app-header-pause");
+    if (pauseBtn) pauseBtn.style.display = state ? "" : "none";
   },
 
   // 3D盤面(board3d.js)を、現在の画面がgame/online-gameかどうかに応じてマウント/破棄し、

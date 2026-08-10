@@ -39,6 +39,24 @@ body {
   gap: 8px;
 }
 
+/* ゲーム画面中だけ表示する、タイトルに戻る(中断・セーブ)ボタン。ヘッダー左端に固定配置 */
+.header-pause-btn {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 6;
+}
+
 #view {
   padding: 12px;
   max-width: 480px;
@@ -258,6 +276,11 @@ body {
 /* 状況確認モーダルは選択モーダル(z-index:10)の上に開くため、それより手前に表示する */
 .modal-backdrop.status-peek-modal {
   z-index: 22;
+}
+
+/* 中断メニューはヘッダーのボタンからいつでも開けるため、他のどのモーダルよりも手前に表示する */
+.modal-backdrop.pause-menu-modal {
+  z-index: 40;
 }
 
 .modal {

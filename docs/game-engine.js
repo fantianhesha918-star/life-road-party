@@ -54,8 +54,9 @@ function pickTwoJobOffers() {
   return offers;
 }
 
-// 移動範囲(fromPosの次のマス〜rawToPos)の中に強制停止マス(結婚・子どもが生まれる等)が
-// あれば、手前側のものを停止位置として返す(ロールの目を余らせて止まる)。無ければnull
+// 移動範囲(fromPosの次のマス〜rawToPos)の中に強制停止マス(現状は結婚のみ、
+// FORCED_STOP_TYPES参照)があれば、手前側のものを停止位置として返す
+// (ロールの目を余らせて止まる)。無ければnull
 function findForcedStop(fromPos, rawToPos) {
   for (let i = fromPos + 1; i <= rawToPos; i++) {
     if (FORCED_STOP_TYPES.includes(BOARD_SQUARES[i].type)) return i;
@@ -108,7 +109,8 @@ function applyRoll(state, roll) {
 
   const fromPos = player.position;
   const rawToPos = Math.min(fromPos + roll, GOAL_INDEX);
-  // 結婚・子どもが生まれる等は、通り過ぎる場合でも強制的にそこで止まる
+  // 結婚は、通り過ぎる場合でも強制的にそこで止まる(子どもが生まれるマスは
+  // 「授かりもの」のため強制停止にはしていない。FORCED_STOP_TYPES参照)
   const forcedStop = findForcedStop(fromPos, rawToPos);
   const toPos = forcedStop !== null ? forcedStop : rawToPos;
   player.position = toPos;

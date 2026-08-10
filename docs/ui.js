@@ -511,7 +511,25 @@ function renderMoneyToasts(toasts) {
   return `<div class="money-toast-stack">${items}</div>`;
 }
 
-function renderGameScreen(state, log, humanId, mode, profile, hub, reveal, logOpen, hopping, turnPopup, statusPeekOpen, moneyToasts) {
+// ヘッダーの中断ボタンから開く「メニューに戻りますか？」確認モーダル。soloは自動保存される旨、
+// onlineは自分だけ退室し他プレイヤーの対戦は続く旨を、それぞれ違う文言で伝える。
+function renderPauseMenuModal(mode) {
+  const desc = mode === "online"
+    ? "ルームから退室します。他のプレイヤーの対戦はそのまま続きます。"
+    : "進行状況を保存してタイトルに戻ります。続きは「続きから再開する」で再開できます。";
+  return `
+    <div class="modal-backdrop pause-menu-modal">
+      <div class="modal">
+        <h3>メニューに戻りますか？</h3>
+        <p class="lead">${desc}</p>
+        <button class="btn btn-primary" onclick="App.confirmPauseToTitle()">タイトルに戻る</button>
+        <button class="btn" onclick="App.togglePauseMenu()">プレイに戻る</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderGameScreen(state, log, humanId, mode, profile, hub, reveal, logOpen, hopping, turnPopup, statusPeekOpen, moneyToasts, pauseMenuOpen) {
   const turnPlayer = state.players[state.currentTurnIndex];
   const isCPUTurn = !!(turnPlayer && turnPlayer.id !== humanId);
   // state.currentTurnIndexはホップ移動が始まる前に次の手番へ進んでしまうため(applyRoll内で
@@ -538,6 +556,7 @@ function renderGameScreen(state, log, humanId, mode, profile, hub, reveal, logOp
       ${renderRevealCard(reveal, reveal && reveal.visual, dismissFn)}
       ${logOpen ? renderLogModal(log) : ""}
       ${statusPeekOpen ? renderStatusPeekModal(state.players.find((p) => p.id === humanId), profile) : ""}
+      ${pauseMenuOpen ? renderPauseMenuModal(mode) : ""}
     </section>
   `;
 }
