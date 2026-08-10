@@ -115,11 +115,20 @@ function buildStagePropLayout(count) {
   // 別々のgap同士だけ、先に確定した装飾との距離が近すぎる場合に間引く。
   // スタート/ゴールのゲート(index 0とcount-1、道を横切って立つ)も障害物として先に登録しておき、
   // ゲートのすぐ脇にベンチ等が配置されてしまうのを防ぐ(2026-08-10発覚)。
+  // 結婚マス(MARRIAGE_SQUARE_INDEX)の新郎新婦も同様に障害物として登録し、ベンチ等と重ならないようにする。
   const layout = [];
   const keptPositions = [
     { gapIndex: -1, pos: squarePosition(0) },
     { gapIndex: -1, pos: squarePosition(count - 1) },
   ];
+  if (MARRIAGE_SQUARE_INDEX < count) {
+    const marriagePos = squarePosition(MARRIAGE_SQUARE_INDEX);
+    const marriageT = Math.max(0.001, Math.min(count - 1.001, MARRIAGE_SQUARE_INDEX));
+    const { normal: marriageNormal } = pathPointAndNormal(marriageT);
+    keptPositions.push({ gapIndex: -1, pos: marriagePos.clone().addScaledVector(marriageNormal, WEDDING_COUPLE_SIDE_OFFSET) });
+    keptPositions.push({ gapIndex: -1, pos: marriagePos.clone().addScaledVector(marriageNormal, -WEDDING_COUPLE_SIDE_OFFSET) });
+    keptPositions.push({ gapIndex: -1, pos: marriagePos.clone().addScaledVector(marriageNormal, CHURCH_SIDE_OFFSET) });
+  }
   for (const cand of candidates) {
     const pos = propWorldPos(cand);
     const conflict = keptPositions.some(
@@ -241,6 +250,20 @@ const STAGE_PROP_MODELS = {
     scale: 1.5,
     yOffset: 0, // 雲は接地させず空中に手動配置するため未使用(createCloudsで直接position.yを指定)
   },
+  // マス目印アイコン9種(2026-08-11、Codex連携チャット作成)。他の建物・小物と同じ単一画像・
+  // Meshy5パイプラインのため、街灯/看板と同じくY軸=高さの前提でThree.js Box3実測から算出。
+  // 表示高さ0.65に揃えて8種を統一(元の縦横比はそのまま、統一しているのは最終的な見た目の大きさ)。
+  "icon-job": { url: new URL("./models/icon-job.glb", import.meta.url).href, scale: 0.3406, yOffset: 0.325 },
+  "icon-payday": { url: new URL("./models/icon-payday.glb", import.meta.url).href, scale: 0.3315, yOffset: 0.325 },
+  "icon-event": { url: new URL("./models/icon-event.glb", import.meta.url).href, scale: 0.325, yOffset: 0.325 },
+  "icon-fortune": { url: new URL("./models/icon-fortune.glb", import.meta.url).href, scale: 0.325, yOffset: 0.325 },
+  "icon-choice": { url: new URL("./models/icon-choice.glb", import.meta.url).href, scale: 0.4616, yOffset: 0.325 },
+  "icon-rest": { url: new URL("./models/icon-rest.glb", import.meta.url).href, scale: 0.6675, yOffset: 0.325 },
+  "icon-childbirth": { url: new URL("./models/icon-childbirth.glb", import.meta.url).href, scale: 0.3601, yOffset: 0.325 },
+  "icon-house": { url: new URL("./models/icon-house.glb", import.meta.url).href, scale: 0.325, yOffset: 0.325 },
+  "icon-stock": { url: new URL("./models/icon-stock.glb", import.meta.url).href, scale: 0.4062, yOffset: 0.325 },
+  // 結婚マス用の教会(2026-08-11、Codex連携チャット作成)。建物と同程度の表示高さ(1.05)を目安に算出。
+  "facility-church": { url: new URL("./models/facility-church.glb", import.meta.url).href, scale: 0.525, yOffset: 0.525 },
 };
 // 道沿いの小物(街灯・ベンチ・看板)を巡回配置するキー一覧
 const STREET_PROP_MODEL_KEYS = ["prop-streetlamp", "prop-bench", "prop-signboard"];
@@ -269,6 +292,32 @@ const SQUARE_TYPE_COLORS = {
 // 上記の種類別配色より優先して、目立つ金色で塗る(マスの意味自体は変わらないため
 // typeとは別の重ね掛けのプロパティとして扱う)
 const STOCK_TRIGGER_COLOR = 0xf6c343;
+
+// マス目印アイコン(2026-08-11)。マスの種類(タイル色)だけでは分かりにくかった見た目を、
+// 各マスに立つ小さな目印アイコンで補強する。house-*の3種は同じicon-houseにまとめる。
+// start/goal(既存ゲート)とmarriage(教会+新郎新婦)は専用の装飾があるため対象外。
+const SQUARE_TYPE_ICON_MODELS = {
+  job: "icon-job",
+  payday: "icon-payday",
+  event: "icon-event",
+  fortune: "icon-fortune",
+  choice: "icon-choice",
+  rest: "icon-rest",
+  childbirth: "icon-childbirth",
+  "house-market": "icon-house",
+  "house-fire": "icon-house",
+  "house-swap": "icon-house",
+};
+// 株購入チャンスのマスは、上記のタイプ別アイコンより優先してicon-stockを立てる
+// (squareTypeColor()の金色上書きと同じ考え方)。
+function squareIconModelKey(index) {
+  if (stockTriggerIndexes.includes(index)) return "icon-stock";
+  const type = squareTypes[index];
+  return SQUARE_TYPE_ICON_MODELS[type] || null;
+}
+// マスの中心からアイコンをずらす距離(プレイヤートークンの持ち場オフセット半径0.32より
+// 外側に置き、キャラクターと重ならないようにする)。
+const SQUARE_ICON_SIDE_OFFSET = 0.55;
 // マス土台モデル(masu-base.glb)。無地のため上記の色をマテリアルに都度上書きして使う。
 // yOffsetは他モデルと違い「上面がy=0(キャラクターの足元)に来る」ように中心を沈める値
 // (= -(scale × 実測厚みの半分0.164))。
@@ -345,6 +394,29 @@ const COSTUME_MODEL_MAP = {
 // モデルの正面が既定でワールド+Z(カメラ側)を向いている前提の補正値。
 // 実機で向きがズレて見える場合はこの値(ラジアン)を調整する。
 const CHARACTER_FORWARD_OFFSET = 0;
+
+// 結婚マス(game-data.jsのBOARD_SQUARES、index=17)の演出用に、Codex連携チャットが
+// 静的装飾として作成した新郎新婦モデル(プレイヤーの着せ替えではなく風景装飾)。
+// scale/yOffsetはThree.js Box3実測から算出(このファイルは素のchinchilla-gray/white-piedと
+// glTFノードのY/Z軸の対応が入れ替わっており、Box3実測でのみ正しい高さが分かる。
+// 詳細はdocs/models/CREDITS.md参照)。
+const WEDDING_COUPLE_MODELS = {
+  groom: {
+    url: new URL("./models/costume-wedding_chinchilla-gray.glb", import.meta.url).href,
+    scale: 0.3634,
+    yOffset: 0.5758,
+  },
+  bride: {
+    url: new URL("./models/costume-wedding_chinchilla-white-pied.glb", import.meta.url).href,
+    scale: 0.4691,
+    yOffset: 0.5674,
+  },
+};
+// 結婚マスのindex(game-data.jsのBOARD_SQUARESと同じ値を手動で同期。将来マス数拡張で
+// マス配置ロジックが動的化された際は、そちらから受け取る形に変更する)。
+const MARRIAGE_SQUARE_INDEX = 17;
+// 新郎新婦を結婚マスの左右に置く、道からの距離(街灯等のSTREET_PROP_SIDE_OFFSETと同程度の近さ)。
+const WEDDING_COUPLE_SIDE_OFFSET = 1.4;
 
 let renderer = null;
 let scene = null;
@@ -724,6 +796,99 @@ function placeGate(scene, modelKey, index, generation) {
   loadStagePropModel(owner, placeholder, modelKey, generation);
 }
 
+// loadStagePropModelと同じ差し替えパターンだが、STAGE_PROP_MODELSではなくWEDDING_COUPLE_MODELSの
+// configを直接渡す版(結婚マス装飾専用、モデルキーでのlookupを経由しない)。
+function loadWeddingFigureModel(owner, placeholder, config, generation) {
+  const loader = new GLTFLoader();
+  loader.setDRACOLoader(dracoLoader);
+  loader.load(
+    config.url,
+    (gltf) => {
+      if (generation !== sceneGeneration) return;
+      owner.remove(placeholder);
+      const model = gltf.scene;
+      model.scale.setScalar(config.scale);
+      model.position.y = config.yOffset;
+      model.traverse((node) => {
+        if (node.isMesh) {
+          node.castShadow = true;
+          node.receiveShadow = true;
+        }
+      });
+      owner.add(model);
+    },
+    undefined,
+    (err) => {
+      console.warn(`結婚マス装飾(${config.url})の読み込みに失敗、プレースホルダーのまま続行します`, err);
+    }
+  );
+}
+
+// 結婚マス(MARRIAGE_SQUARE_INDEX)の左右に新郎新婦を静的装飾として配置する
+// (プレイヤーの着せ替えではなく風景装飾、結婚マスに実際に止まれる領域は塞がない)。
+function createWeddingCouple(scene) {
+  const generation = sceneGeneration;
+  if (MARRIAGE_SQUARE_INDEX >= squareCount) return; // マス数拡張等で結婚マス自体が存在しない場合の保険
+  const pos = squarePosition(MARRIAGE_SQUARE_INDEX);
+  const t = Math.max(0.001, Math.min(squareCount - 1.001, MARRIAGE_SQUARE_INDEX));
+  const { normal } = pathPointAndNormal(t);
+
+  const place = (config, side) => {
+    const placeholder = createSmallPropPlaceholder();
+    const owner = new THREE.Group();
+    owner.position.copy(pos).addScaledVector(normal, side * WEDDING_COUPLE_SIDE_OFFSET);
+    // 建物と同じ考え方で、パス側(=自分のオフセット方向と逆向き)を向かせる。
+    // 新郎新婦を向かい合わせにする狙いもあるため、南北どちらもこの式で内向きになる。
+    owner.rotation.y = Math.atan2(-side * normal.x, -side * normal.z);
+    owner.add(placeholder);
+    scene.add(owner);
+    loadWeddingFigureModel(owner, placeholder, config, generation);
+  };
+
+  place(WEDDING_COUPLE_MODELS.groom, 1);
+  place(WEDDING_COUPLE_MODELS.bride, -1);
+}
+
+// 結婚マスの奥(新郎新婦より道から遠い側)に教会を1つ配置する。新郎新婦が道沿いの手前、
+// 教会がその背景という構図にする。
+const CHURCH_SIDE_OFFSET = 2.8;
+function createChurch(scene) {
+  const generation = sceneGeneration;
+  if (MARRIAGE_SQUARE_INDEX >= squareCount) return;
+  const pos = squarePosition(MARRIAGE_SQUARE_INDEX);
+  const t = Math.max(0.001, Math.min(squareCount - 1.001, MARRIAGE_SQUARE_INDEX));
+  const { normal } = pathPointAndNormal(t);
+  const side = 1; // 新郎(groom)と同じ側にまとめて、反対側は開けておく
+  const placeholder = createBuildingPlaceholder("facility-church");
+  const owner = new THREE.Group();
+  owner.position.copy(pos).addScaledVector(normal, side * CHURCH_SIDE_OFFSET);
+  owner.rotation.y = Math.atan2(-side * normal.x, -side * normal.z);
+  owner.add(placeholder);
+  scene.add(owner);
+  loadStagePropModel(owner, placeholder, "facility-church", generation);
+}
+
+// 結婚マス周辺(新郎新婦・教会が無いマス)に、マスの種類を示す目印アイコンを1つずつ配置する。
+// アイコンはマス中心からわずかに(SQUARE_ICON_SIDE_OFFSET)ずらし、プレイヤートークンの
+// 持ち場オフセット(半径0.32)と重ならないようにする。
+function createSquareIcons(scene) {
+  const generation = sceneGeneration;
+  for (let i = 0; i < squareCount; i++) {
+    const modelKey = squareIconModelKey(i);
+    if (!modelKey) continue;
+    const pos = squarePosition(i);
+    const t = Math.max(0.001, Math.min(squareCount - 1.001, i));
+    const { normal } = pathPointAndNormal(t);
+    const placeholder = createSmallPropPlaceholder();
+    const owner = new THREE.Group();
+    owner.position.copy(pos).addScaledVector(normal, SQUARE_ICON_SIDE_OFFSET);
+    owner.rotation.y = Math.atan2(-normal.x, -normal.z);
+    owner.add(placeholder);
+    scene.add(owner);
+    loadStagePropModel(owner, placeholder, modelKey, generation);
+  }
+}
+
 // 空を漂う雲を数個配置する(接地せず、盤面の長さに応じて数を決める)。
 function createClouds(scene) {
   const generation = sceneGeneration;
@@ -957,6 +1122,9 @@ function buildScene(players) {
 
   createStageProps(scene);
   createGates(scene);
+  createWeddingCouple(scene);
+  createChurch(scene);
+  createSquareIcons(scene);
   createClouds(scene);
 
   characters = new Map();
