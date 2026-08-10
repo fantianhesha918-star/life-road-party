@@ -15,16 +15,56 @@ const SHOP_ITEMS = [
   { id: "color-gold", category: "color", name: "ゴールド", price: 80, value: "#d4af37" },
   { id: "color-neon", category: "color", name: "ネオングリーン", price: 80, value: "#39ff14" },
   { id: "color-sky", category: "color", name: "スカイブルー", price: 60, value: "#7fd8ff" },
+];
 
-  { id: "hat-cap", category: "hat", name: "キャップ", price: 30, emoji: "🧢" },
-  { id: "hat-tophat", category: "hat", name: "シルクハット", price: 50, emoji: "🎩" },
-  { id: "hat-grad", category: "hat", name: "卒業帽", price: 60, emoji: "🎓" },
-  { id: "hat-crown", category: "hat", name: "王冠", price: 150, emoji: "👑" },
-
-  { id: "acc-sunglasses", category: "accessory", name: "サングラス", price: 40, emoji: "🕶️" },
-  { id: "acc-bowtie", category: "accessory", name: "蝶ネクタイ", price: 40, emoji: "🎀" },
-  { id: "acc-ring", category: "accessory", name: "指輪", price: 70, emoji: "💍" },
-  { id: "acc-star", category: "accessory", name: "スターバッジ", price: 90, emoji: "⭐" },
+// 全身コスチューム(帽子・アクセサリーの後継)。動物種ごとに体型へフィットさせた専用イラストを
+// 1着につき6種類ぶん用意し、images[speciesId]で引く(docs/costumes/配下、Codex作成の実イラスト)。
+// 未購入時はui.js側でシルエット表示、購入後はカラー表示に切り替える。
+const COSTUME_ITEMS = [
+  {
+    id: "costume-kimono", category: "costume", name: "着物", price: 100, emoji: "👘",
+    images: {
+      "species-chinchilla-gray": "costumes/costume-kimono_chinchilla-gray.png",
+      "species-chinchilla-white": "costumes/costume-kimono_chinchilla-white-pied.png",
+      "species-dog-frenchie-white": "costumes/costume-kimono_dog-frenchie-white.png",
+      "species-dog-frenchie-black": "costumes/costume-kimono_dog-frenchie-black.png",
+      "species-cat-calico": "costumes/costume-kimono_cat-calico.png",
+      "species-rabbit-white": "costumes/costume-kimono_rabbit-white.png",
+    },
+  },
+  {
+    id: "costume-suit", category: "costume", name: "スーツ", price: 110, emoji: "🤵",
+    images: {
+      "species-chinchilla-gray": "costumes/costume-suit_chinchilla-gray.png",
+      "species-chinchilla-white": "costumes/costume-suit_chinchilla-white-pied.png",
+      "species-dog-frenchie-white": "costumes/costume-suit_dog-frenchie-white.png",
+      "species-dog-frenchie-black": "costumes/costume-suit_dog-frenchie-black.png",
+      "species-cat-calico": "costumes/costume-suit_cat-calico.png",
+      "species-rabbit-white": "costumes/costume-suit_rabbit-white.png",
+    },
+  },
+  {
+    id: "costume-ninja", category: "costume", name: "忍者", price: 100, emoji: "🥷",
+    images: {
+      "species-chinchilla-gray": "costumes/costume-ninja_chinchilla-gray.png",
+      "species-chinchilla-white": "costumes/costume-ninja_chinchilla-white-pied.png",
+      "species-dog-frenchie-white": "costumes/costume-ninja_dog-frenchie-white.png",
+      "species-dog-frenchie-black": "costumes/costume-ninja_dog-frenchie-black.png",
+      "species-cat-calico": "costumes/costume-ninja_cat-calico.png",
+      "species-rabbit-white": "costumes/costume-ninja_rabbit-white.png",
+    },
+  },
+  {
+    id: "costume-bear-onesie", category: "costume", name: "くまの着ぐるみ", price: 90, emoji: "🧸",
+    images: {
+      "species-chinchilla-gray": "costumes/costume-bear-onesie_chinchilla-gray.png",
+      "species-chinchilla-white": "costumes/costume-bear-onesie_chinchilla-white-pied.png",
+      "species-dog-frenchie-white": "costumes/costume-bear-onesie_dog-frenchie-white.png",
+      "species-dog-frenchie-black": "costumes/costume-bear-onesie_dog-frenchie-black.png",
+      "species-cat-calico": "costumes/costume-bear-onesie_cat-calico.png",
+      "species-rabbit-white": "costumes/costume-bear-onesie_rabbit-white.png",
+    },
+  },
 ];
 
 // ターン中に「アイテムを使う」で消費する消耗品(所持数は複数持てる、使うと1つ減る)
@@ -51,12 +91,12 @@ const SPECIES_ITEMS = [
   { id: "species-rabbit-white", category: "species", name: "うさぎ(白)", price: 0, emoji: "🐰", avatarImage: "avatars/rabbit-white.png" },
 ];
 
-const ALL_ITEMS = [...FREE_COLOR_ITEMS, ...SHOP_ITEMS, ...CONSUMABLE_ITEMS, ...SPECIES_ITEMS];
+const ALL_ITEMS = [...FREE_COLOR_ITEMS, ...SHOP_ITEMS, ...COSTUME_ITEMS, ...CONSUMABLE_ITEMS, ...SPECIES_ITEMS];
 
-const DEFAULT_EQUIPPED = { color: "color-red", species: "species-chinchilla-gray", hat: null, accessory: null };
+const DEFAULT_EQUIPPED = { color: "color-red", species: "species-chinchilla-gray", costume: null };
 
 const FREE_ITEM_IDS = [...FREE_COLOR_ITEMS.map((it) => it.id), ...SPECIES_ITEMS.map((it) => it.id)];
 
 const GAME_REWARD_MONEY_PER_COIN = 10; // ゲーム内所持金10万円につき1コイン
 
-window.LifeRoadShop = { ALL_ITEMS, CONSUMABLE_ITEMS, SPECIES_ITEMS, FREE_ITEM_IDS, DEFAULT_EQUIPPED, GAME_REWARD_MONEY_PER_COIN, STOCK_CERTIFICATE_IMAGE };
+window.LifeRoadShop = { ALL_ITEMS, COSTUME_ITEMS, CONSUMABLE_ITEMS, SPECIES_ITEMS, FREE_ITEM_IDS, DEFAULT_EQUIPPED, GAME_REWARD_MONEY_PER_COIN, STOCK_CERTIFICATE_IMAGE };

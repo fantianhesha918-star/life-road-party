@@ -136,6 +136,11 @@ body {
   flex-shrink: 0;
 }
 
+/* 未購入コスチュームのシルエット表示(色情報を消して「まだ持っていない」を視覚的に示す) */
+.costume-silhouette {
+  filter: brightness(0) opacity(0.55);
+}
+
 .inline-icon {
   width: 1.1em;
   height: 1.1em;
@@ -266,23 +271,73 @@ body {
   background: var(--accent, #f4a300);
 }
 
-.shop-row {
-  transition: opacity 0.15s;
-}
-
-.shop-row-cant-afford {
-  opacity: 0.55;
-}
-
 .shop-item-emoji {
-  font-size: 1.4rem;
-  width: 28px;
-  text-align: center;
-  flex-shrink: 0;
+  font-size: 2rem;
 }
 
 .coin-display-lg {
   font-size: 1.3rem;
+}
+
+.shop-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.shop-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px 10px;
+  border-radius: 16px;
+  background: #f2f5f3;
+  transition: opacity 0.15s;
+}
+
+.shop-card-cant-afford {
+  opacity: 0.55;
+}
+
+.shop-card-icon {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 12px;
+  background: #dfe6e2;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.shop-card-icon .item-icon-img {
+  width: 70%;
+  height: 70%;
+}
+
+.swatch-lg {
+  width: 60%;
+  height: 60%;
+  border-radius: 50%;
+}
+
+.shop-card-name {
+  font-size: 0.72rem;
+  text-align: center;
+  line-height: 1.2;
+  min-height: 2.2em;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.shop-card-btn {
+  width: 100%;
+  font-size: 0.78rem;
+  padding: 6px 4px;
 }
 
 .shop-toast {
@@ -449,21 +504,6 @@ body {
   pointer-events: none;
 }
 
-.avatar-hat {
-  position: absolute;
-  top: -0.65em;
-  left: 50%;
-  transform: translateX(-50%);
-  line-height: 1;
-}
-
-.avatar-acc {
-  position: absolute;
-  bottom: -0.3em;
-  right: -0.3em;
-  line-height: 1;
-}
-
 .title-profile-row {
   display: flex;
   align-items: center;
@@ -502,6 +542,62 @@ body {
 .item-equipped {
   outline: 2px solid var(--brand);
   background: #e6f4ea;
+}
+
+.species-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.species-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px 10px;
+  border: 2px solid transparent;
+  border-radius: 16px;
+  background: #f2f5f3;
+  cursor: pointer;
+  transition: transform 0.1s, background 0.15s, border-color 0.15s;
+}
+
+.species-card:active {
+  transform: scale(0.96);
+}
+
+.species-card-selected {
+  border-color: var(--brand);
+  background: #e6f4ea;
+}
+
+.species-card-icon {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 12px;
+  background: #dfe6e2;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.species-card-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.species-card-emoji {
+  font-size: 2.4rem;
+}
+
+.species-card-name {
+  font-size: 0.72rem;
+  text-align: center;
+  line-height: 1.2;
+  color: var(--brand-dark);
 }
 
 .turn-popup {

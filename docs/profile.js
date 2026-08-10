@@ -92,7 +92,7 @@ function randIntInclusive(min, max) {
   return min + Math.floor(Math.random() * (max - min + 1));
 }
 
-// category: "color" | "species" | "hat" | "accessory"。hat/accessoryはitemId=nullで「なし」にできる
+// category: "color" | "species" | "costume"。costumeはitemId=nullで「なし」にできる
 function equipItem(profile, category, itemId) {
   if (itemId !== null) {
     if (!profile.ownedItems.includes(itemId)) return { ok: false, reason: "not-owned" };
@@ -123,14 +123,14 @@ function applyGameReward(profile, finalMoney, isFirstPlace) {
 function getAvatarVisual(equipped) {
   const colorItem = findShopItem(equipped.color) || findShopItem(DEFAULT_EQUIPPED.color);
   const speciesItem = findShopItem(equipped.species) || findShopItem(DEFAULT_EQUIPPED.species);
-  const hatItem = equipped.hat ? findShopItem(equipped.hat) : null;
-  const accItem = equipped.accessory ? findShopItem(equipped.accessory) : null;
+  const costumeItem = equipped.costume ? findShopItem(equipped.costume) : null;
+  const costumeImage = costumeItem && speciesItem ? costumeItem.images[speciesItem.id] || null : null;
   return {
     color: colorItem ? colorItem.value : "#999999",
     speciesId: speciesItem ? speciesItem.id : null,
     speciesEmoji: speciesItem ? speciesItem.emoji : null,
-    hatEmoji: hatItem ? hatItem.emoji : null,
-    accessoryEmoji: accItem ? accItem.emoji : null,
+    costumeId: costumeItem ? costumeItem.id : null,
+    costumeImage,
   };
 }
 

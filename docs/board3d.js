@@ -328,6 +328,20 @@ const SPECIES_MODEL_MAP = {
     yOffset: 0.445,
   },
 };
+
+// コスチューム装備時の専用モデル(キー: "{costumeId}_{speciesId}")。
+// コスチュームのイラストは動物6種ぶん全て用意済みだが、3Dモデル化は試作(着物×チンチラグレー)の
+// 1件のみ完了しており、他の組み合わせは今後少しずつ追加していく方針(2026-08-10)。
+// ここに無い組み合わせはloadCharacterModel側で素の動物モデル(SPECIES_MODEL_MAP)にフォールバックする
+// (コスチュームの見た目は2DアバターバッジやショップUI側では表示されるが、3D盤面には未反映のまま)。
+// scale/yOffsetはThree.js Box3の実測(素のchinchilla-gray.glbとの比率)から算出。
+const COSTUME_MODEL_MAP = {
+  "costume-kimono_species-chinchilla-gray": {
+    url: new URL("./models/costume-kimono_chinchilla-gray.glb", import.meta.url).href,
+    scale: 0.4875,
+    yOffset: 0.4295,
+  },
+};
 // モデルの正面が既定でワールド+Z(カメラ側)を向いている前提の補正値。
 // 実機で向きがズレて見える場合はこの値(ラジアン)を調整する。
 const CHARACTER_FORWARD_OFFSET = 0;
@@ -784,10 +798,12 @@ function playAction(entry, action) {
   entry.currentAction = action;
 }
 
-// speciesIdに対応する実モデルがあれば非同期ロードして差し替える。無ければプレースホルダーのまま
-// (SPECIES_MODEL_MAPに無い動物種は、残り4種の3Dモデル化が完了するまでこの状態が続く想定)。
-function loadCharacterModel(entry, speciesId, generation) {
-  const config = SPECIES_MODEL_MAP[speciesId];
+// speciesId(+装備中のcostumeId)に対応する実モデルがあれば非同期ロードして差し替える。
+// コスチューム+動物種の組み合わせ専用モデルがCOSTUME_MODEL_MAPにあればそちらを優先し、
+// 無ければ素の動物モデル(SPECIES_MODEL_MAP)にフォールバックする。
+// (SPECIES_MODEL_MAP自体に無い動物種は、残り4種の3Dモデル化が完了するまでプレースホルダーのまま)。
+function loadCharacterModel(entry, speciesId, costumeId, generation) {
+  const config = (costumeId && COSTUME_MODEL_MAP[`${costumeId}_${speciesId}`]) || SPECIES_MODEL_MAP[speciesId];
   if (!config) {
     // ここに来るのはspeciesIdがSPECIES_MODEL_MAPに無い(=旧セーブ等でspeciesId自体が
     // 欠落している、または未対応の値)場合。無言のままだと「プレースホルダーのまま
@@ -855,7 +871,7 @@ function createCharacterEntry(player, playerIndex, totalPlayers) {
     slotOffset,
   };
   characters.set(player.id, entry);
-  loadCharacterModel(entry, visual.speciesId, sceneGeneration);
+  loadCharacterModel(entry, visual.speciesId, visual.costumeId, sceneGeneration);
   return entry;
 }
 

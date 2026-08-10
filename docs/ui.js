@@ -21,9 +21,7 @@ function findAvatarImage(speciesId) {
 function renderAvatarBadge(visual, size) {
   const px = size || 28;
   const speciesSize = Math.round(px * 0.7);
-  const hatSize = Math.round(px * 0.55);
-  const accSize = Math.round(px * 0.45);
-  const avatarImage = findAvatarImage(visual.speciesId);
+  const avatarImage = visual.costumeImage || findAvatarImage(visual.speciesId);
   const speciesVisual = avatarImage
     ? `<img class="avatar-species-img" src="${avatarImage}" alt="" />`
     : visual.speciesEmoji
@@ -32,8 +30,6 @@ function renderAvatarBadge(visual, size) {
   return `
     <span class="avatar-badge" style="width:${px}px;height:${px}px;background:${visual.color}">
       ${speciesVisual}
-      ${visual.hatEmoji ? `<span class="avatar-hat" style="font-size:${hatSize}px">${visual.hatEmoji}</span>` : ""}
-      ${visual.accessoryEmoji ? `<span class="avatar-acc" style="font-size:${accSize}px">${visual.accessoryEmoji}</span>` : ""}
     </span>
   `;
 }
@@ -118,7 +114,7 @@ function renderHelpScreen() {
       </div>
       <div class="field">
         <h3>キャラクター・ショップ</h3>
-        <p class="lead">タイトル画面の「キャラクターを編集」で見た目(動物の種類・色・帽子・アクセサリー)を変更できます。「ショップ」では対戦後にもらえるコイン🪙で色・帽子・アクセサリー・消耗品アイテムを購入できます。</p>
+        <p class="lead">タイトル画面の「キャラクターを編集」で見た目(動物の種類・色・コスチューム)を変更できます。「ショップ」では対戦後にもらえるコイン🪙で色・コスチューム・消耗品アイテムを購入できます。</p>
       </div>
       <button class="btn" onclick="App.goTitle()">タイトルへ戻る</button>
     </section>
@@ -140,41 +136,63 @@ function renderStatsScreen(stats) {
   `;
 }
 
+// 動物の種類選択カード。角丸の正方形にアイコンを大きめに表示する専用レイアウト
+// (色の小さなチップ選択とは別の見た目にして、一番大事な選択であることを目立たせる)。
+function renderSpeciesCard(item, isEquipped) {
+  const iconHtml = item.avatarImage
+    ? `<img class="species-card-img" src="${item.avatarImage}" alt="" />`
+    : `<span class="species-card-emoji">${item.emoji}</span>`;
+  return `
+    <button class="species-card ${isEquipped ? "species-card-selected" : ""}" onclick="App.equipAvatarItem('species', '${item.id}')">
+      <span class="species-card-icon">${iconHtml}</span>
+      <span class="species-card-name">${escapeHtml(item.name)}</span>
+    </button>
+  `;
+}
+
+// 所持中コスチュームの装備切替カード(現在選択中の動物種に合わせたイラストを表示)。
+function renderCostumeEquipCard(item, speciesId, isEquipped) {
+  const img = item.images[speciesId];
+  const iconHtml = img ? `<img class="item-icon-img" src="${img}" alt="" />` : `<span class="shop-item-emoji">${item.emoji}</span>`;
+  const badgeHtml = isEquipped ? `<span class="badge badge-equipped">装着中</span>` : "";
+  const actionHtml = isEquipped
+    ? `<button class="btn btn-offer shop-card-btn" onclick="App.equipAvatarItem('costume', null)">解除する</button>`
+    : `<button class="btn btn-offer shop-card-btn" onclick="App.equipAvatarItem('costume', '${item.id}')">装備する</button>`;
+  return renderShopCard({ iconHtml, name: escapeHtml(item.name), badgeHtml, actionHtml });
+}
+
 function renderProfileScreen(profile) {
   const visual = LifeRoadProfile.getAvatarVisual(profile.equipped);
-  const categories = [
-    { key: "species", label: "動物の種類", allowNone: false },
-    { key: "color", label: "色", allowNone: false },
-    { key: "hat", label: "帽子", allowNone: true },
-    { key: "accessory", label: "アクセサリー", allowNone: true },
-  ];
-  const sections = categories
-    .map((cat) => {
-      const owned = ALL_ITEMS.filter((it) => it.category === cat.key && profile.ownedItems.includes(it.id));
-      const noneButton = cat.allowNone
-        ? `<button class="btn item-btn ${!profile.equipped[cat.key] ? "item-equipped" : ""}" onclick="App.equipAvatarItem('${cat.key}', null)">なし</button>`
-        : "";
-      const itemButtons = owned
-        .map((it) => {
-          const isEquipped = profile.equipped[cat.key] === it.id;
-          const preview = it.category === "color" ? `<span class="swatch" style="background:${it.value}"></span>` : it.emoji;
-          return `<button class="btn item-btn ${isEquipped ? "item-equipped" : ""}" onclick="App.equipAvatarItem('${cat.key}', '${it.id}')">${preview} ${escapeHtml(it.name)}</button>`;
-        })
-        .join("");
-      return `
-        <div class="field">
-          <h3>${cat.label}</h3>
-          <div class="item-grid">${noneButton}${itemButtons}</div>
-        </div>
-      `;
+  const speciesOwned = SPECIES_ITEMS.filter((it) => profile.ownedItems.includes(it.id));
+  const speciesSection = `
+    <div class="field">
+      <h3>動物の種類</h3>
+      <div class="species-grid">${speciesOwned.map((it) => renderSpeciesCard(it, profile.equipped.species === it.id)).join("")}</div>
+    </div>
+  `;
+  const colorOwned = ALL_ITEMS.filter((it) => it.category === "color" && profile.ownedItems.includes(it.id));
+  const colorButtons = colorOwned
+    .map((it) => {
+      const isEquipped = profile.equipped.color === it.id;
+      return `<button class="btn item-btn ${isEquipped ? "item-equipped" : ""}" onclick="App.equipAvatarItem('color', '${it.id}')"><span class="swatch" style="background:${it.value}"></span> ${escapeHtml(it.name)}</button>`;
     })
     .join("");
+  const colorSection = `<div class="field"><h3>色</h3><div class="item-grid">${colorButtons}</div></div>`;
+
+  const costumeOwned = COSTUME_ITEMS.filter((it) => profile.ownedItems.includes(it.id));
+  const costumeCards = costumeOwned.length
+    ? costumeOwned.map((it) => renderCostumeEquipCard(it, profile.equipped.species, profile.equipped.costume === it.id)).join("")
+    : `<p class="lead">まだコスチュームを持っていません。ショップで購入できます。</p>`;
+  const costumeSection = `<div class="field"><h3>コスチューム</h3><div class="shop-grid">${costumeCards}</div></div>`;
+
   return `
     <section class="screen screen-profile">
       <h2>キャラクターを編集</h2>
       <div class="avatar-preview">${renderAvatarBadge(visual, 72)}</div>
       <p class="coin-display">🪙 ${profile.coins}</p>
-      ${sections}
+      ${speciesSection}
+      ${colorSection}
+      ${costumeSection}
       <button class="btn" onclick="App.goShop()">ショップへ</button>
       <button class="btn" onclick="App.goTitle()">タイトルへ戻る</button>
     </section>
@@ -191,49 +209,68 @@ function renderShopToast(toast) {
   `;
 }
 
+// ショップの1アイテムを、角丸の正方形アイコン+名前+購入ボタンのカードとして描画する
+// (キャラクター選択画面のspecies-cardと同じ視覚言語で統一感を持たせる)。
+function renderShopCard({ iconHtml, name, badgeHtml, actionHtml, disabled, cardClass }) {
+  return `
+    <div class="shop-card ${cardClass || ""}">
+      <span class="shop-card-icon">${iconHtml}</span>
+      <span class="shop-card-name">${name}${badgeHtml || ""}</span>
+      ${actionHtml}
+    </div>
+  `;
+}
+
 function renderShopScreen(profile, shopToast) {
-  const categories = [
-    { key: "color", label: "色", icon: "🎨" },
-    { key: "hat", label: "帽子", icon: "🧢" },
-    { key: "accessory", label: "アクセサリー", icon: "✨" },
-  ];
-  const sections = categories
-    .map((cat) => {
-      const items = ALL_ITEMS.filter((it) => it.category === cat.key);
-      const rows = items
-        .map((it) => {
-          const owned = profile.ownedItems.includes(it.id);
-          const equipped = profile.equipped[cat.key] === it.id;
-          const canBuy = !owned && profile.coins >= it.price;
-          const preview = it.category === "color" ? `<span class="swatch" style="background:${it.value}"></span>` : `<span class="shop-item-emoji">${it.emoji}</span>`;
-          const statusBadge = equipped ? `<span class="badge badge-equipped">装着中</span>` : owned ? `<span class="badge">所持済み</span>` : "";
-          const actionLabel = owned ? "所持済み" : `🪙${it.price} で購入`;
-          return `
-            <li class="player-row shop-row ${!owned && !canBuy ? "shop-row-cant-afford" : ""}">
-              ${preview}
-              <span class="p-name">${escapeHtml(it.name)}${statusBadge}</span>
-              <button class="btn btn-offer" ${owned || !canBuy ? "disabled" : ""} onclick="App.buyShopItem('${it.id}')">${actionLabel}</button>
-            </li>
-          `;
-        })
-        .join("");
-      return `<div class="field"><h3>${cat.icon} ${cat.label}</h3><ul class="player-list">${rows}</ul></div>`;
+  const colorItems = ALL_ITEMS.filter((it) => it.category === "color");
+  const colorCards = colorItems
+    .map((it) => {
+      const owned = profile.ownedItems.includes(it.id);
+      const equipped = profile.equipped.color === it.id;
+      const canBuy = !owned && profile.coins >= it.price;
+      const iconHtml = `<span class="swatch swatch-lg" style="background:${it.value}"></span>`;
+      const badgeHtml = equipped ? `<span class="badge badge-equipped">装着中</span>` : owned ? `<span class="badge">所持済み</span>` : "";
+      const actionHtml = owned
+        ? `<button class="btn btn-offer shop-card-btn" disabled>所持済み</button>`
+        : `<button class="btn btn-offer shop-card-btn" ${canBuy ? "" : "disabled"} onclick="App.buyShopItem('${it.id}')">🪙${it.price}</button>`;
+      return renderShopCard({ iconHtml, name: escapeHtml(it.name), badgeHtml, actionHtml, cardClass: !owned && !canBuy ? "shop-card-cant-afford" : "" });
     })
     .join("");
-  const consumableRows = CONSUMABLE_ITEMS
+  const colorSection = `<div class="field"><h3>🎨 色</h3><div class="shop-grid">${colorCards}</div></div>`;
+
+  // コスチューム: 現在選択中の動物種のイラストで表示。未購入はシルエット、購入済みはカラー表示。
+  const speciesId = profile.equipped.species;
+  const costumeCards = COSTUME_ITEMS
+    .map((it) => {
+      const owned = profile.ownedItems.includes(it.id);
+      const equipped = profile.equipped.costume === it.id;
+      const canBuy = !owned && profile.coins >= it.price;
+      const img = it.images[speciesId];
+      const iconHtml = img
+        ? `<img class="item-icon-img ${owned ? "" : "costume-silhouette"}" src="${img}" alt="" />`
+        : `<span class="shop-item-emoji">${it.emoji}</span>`;
+      const badgeHtml = equipped ? `<span class="badge badge-equipped">装着中</span>` : owned ? `<span class="badge">所持済み</span>` : "";
+      const actionHtml = owned
+        ? equipped
+          ? `<button class="btn btn-offer shop-card-btn" disabled>装着中</button>`
+          : `<button class="btn btn-offer shop-card-btn" onclick="App.equipAvatarItem('costume', '${it.id}')">装備する</button>`
+        : `<button class="btn btn-offer shop-card-btn" ${canBuy ? "" : "disabled"} onclick="App.buyShopItem('${it.id}')">🪙${it.price}</button>`;
+      return renderShopCard({ iconHtml, name: escapeHtml(it.name), badgeHtml, actionHtml, cardClass: !owned && !canBuy ? "shop-card-cant-afford" : "" });
+    })
+    .join("");
+  const costumeSection = `<div class="field"><h3>👘 コスチューム</h3><div class="shop-grid">${costumeCards}</div></div>`;
+
+  const sections = colorSection + costumeSection;
+  const consumableCards = CONSUMABLE_ITEMS
     .map((it) => {
       const count = (profile.consumables && profile.consumables[it.id]) || 0;
       const canBuy = profile.coins >= it.price;
-      return `
-        <li class="player-row shop-row ${!canBuy ? "shop-row-cant-afford" : ""}">
-          ${renderItemIcon(it, 32)}
-          <span class="p-name">${escapeHtml(it.name)}${count > 0 ? `<span class="badge">所持${count}個</span>` : ""}</span>
-          <button class="btn btn-offer" ${canBuy ? "" : "disabled"} onclick="App.buyShopItem('${it.id}')">🪙${it.price} で購入</button>
-        </li>
-      `;
+      const badgeHtml = count > 0 ? `<span class="badge">所持${count}個</span>` : "";
+      const actionHtml = `<button class="btn btn-offer shop-card-btn" ${canBuy ? "" : "disabled"} onclick="App.buyShopItem('${it.id}')">🪙${it.price}</button>`;
+      return renderShopCard({ iconHtml: renderItemIcon(it, 44), name: escapeHtml(it.name), badgeHtml, actionHtml, cardClass: !canBuy ? "shop-card-cant-afford" : "" });
     })
     .join("");
-  const consumableSection = `<div class="field"><h3>🎒 消耗品(対戦中に使える)</h3><ul class="player-list">${consumableRows}</ul></div>`;
+  const consumableSection = `<div class="field"><h3>🎒 消耗品(対戦中に使える)</h3><div class="shop-grid">${consumableCards}</div></div>`;
   return `
     <section class="screen screen-shop">
       ${renderShopToast(shopToast)}
@@ -297,7 +334,7 @@ function renderOnlineLobbyScreen(room, roomCode, myUid) {
       const tags = [uid === room.hostUid ? "ホスト" : null, uid === myUid ? "あなた" : null]
         .filter(Boolean)
         .join("・");
-      const visual = p.avatar || { color: "#999999", speciesEmoji: null, hatEmoji: null, accessoryEmoji: null };
+      const visual = p.avatar || { color: "#999999", speciesEmoji: null, costumeImage: null };
       return `
         <li class="player-row">
           ${renderAvatarBadge(visual, 26)}
@@ -349,7 +386,7 @@ function renderSetupScreen() {
 function renderPlayerList(state) {
   const rows = state.players.map((p, i) => {
     const isTurn = i === state.currentTurnIndex && state.status === "playing";
-    const visual = p.avatar || { color: p.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null };
+    const visual = p.avatar || { color: p.color, speciesEmoji: null, costumeImage: null };
     return `
       <li class="player-row ${isTurn ? "is-turn" : ""} ${p.finished ? "is-finished" : ""}">
         ${renderAvatarBadge(visual, 26)}
@@ -517,13 +554,13 @@ function renderHeaderTurnContent(state, overridePlayerId) {
     ? state.players.find((p) => p.id === overridePlayerId)
     : state.players[state.currentTurnIndex];
   if (!turnPlayer) return "アニマルライフ";
-  const visual = turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null };
+  const visual = turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, costumeImage: null };
   return `${renderAvatarBadge(visual, 28)}<span>${escapeHtml(turnPlayer.name)} の番です</span>`;
 }
 
 function renderTurnHub(state, humanId, profile, hub) {
   const turnPlayer = state.players[state.currentTurnIndex];
-  const visual = turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null };
+  const visual = turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, costumeImage: null };
   const view = (hub && hub.view) || "menu";
 
   // 通常時(menu)は毎ターン表示される最も頻度の高い画面のため、マップを隠さない
@@ -695,7 +732,7 @@ function renderSettlementBreakdown(settlement) {
 function renderResultScreen(state, mode, rewardCoins) {
   const ranking = getRanking(state);
   const rows = ranking.map((p, i) => {
-    const visual = p.avatar || { color: p.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null };
+    const visual = p.avatar || { color: p.color, speciesEmoji: null, costumeImage: null };
     return `
     <li class="result-row">
       <span class="result-rank">${i + 1}位</span>

@@ -35,7 +35,7 @@ function roomToEngineState(room) {
       name: p.nickname || `プレイヤー${i + 1}`,
       isCPU: !!p.isCPU,
       color,
-      avatar: ensureSpeciesId(p.avatar || { color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null }, color),
+      avatar: ensureSpeciesId(p.avatar || { color, speciesEmoji: null, costumeImage: null }, color),
       position: typeof p.position === "number" ? p.position : 0,
       money: typeof p.money === "number" ? p.money : window.LifeRoadData.START_MONEY,
       job: p.job || null,
@@ -299,8 +299,7 @@ const App = {
           color: TOKEN_COLORS[i % TOKEN_COLORS.length],
           speciesId: species.id,
           speciesEmoji: species.emoji,
-          hatEmoji: null,
-          accessoryEmoji: "🤖",
+          costumeImage: null,
         },
       });
     }
@@ -337,7 +336,7 @@ const App = {
       if (!result.pendingChoice && result.reveal) {
         // choice以外のマス(できごと・運命の分かれ道・給料日・ひと休み等)もテロップ枠で
         // 見せてから次へ進む。「つぎへ」を押すまでdismissReveal()が呼ばれずターンは進まない
-        this.reveal = { ...result.reveal, visual: turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null } };
+        this.reveal = { ...result.reveal, visual: turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, costumeImage: null } };
         this.render();
         return;
       }
@@ -429,7 +428,7 @@ const App = {
       return {
         id: this.moneyToastSeq,
         name: player ? player.name : "",
-        visual: player ? player.avatar || { color: player.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null } : null,
+        visual: player ? player.avatar || { color: player.color, speciesEmoji: null, costumeImage: null } : null,
         delta: e.delta,
       };
     });
@@ -521,7 +520,7 @@ const App = {
     const player = this.state.players.find((p) => p.id === this.state.pendingChoice.playerId);
     const result = resolveChoice(this.state, this.state.pendingChoice.playerId, optionIndex);
     this.pushLog(result.entries);
-    this.reveal = { ...result.reveal, visual: player.avatar || { color: player.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null } };
+    this.reveal = { ...result.reveal, visual: player.avatar || { color: player.color, speciesEmoji: null, costumeImage: null } };
     this.render();
   },
 
@@ -558,7 +557,7 @@ const App = {
   showTurnPopup() {
     const turnPlayer = currentPlayer(this.state);
     if (!turnPlayer) return;
-    this.turnPopup = { name: turnPlayer.name, visual: turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null } };
+    this.turnPopup = { name: turnPlayer.name, visual: turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, costumeImage: null } };
     LifeRoadAudio.playSe("notify");
     this.render();
     clearTimeout(this.turnPopupTimer);
@@ -571,7 +570,7 @@ const App = {
   // オンライン版のsyncOnlineScreen()から、手番プレイヤーが切り替わるたびに呼ばれる
   showOnlineTurnPopup(turnPlayer) {
     if (!this.online) return;
-    this.online.turnPopup = { name: turnPlayer.name, visual: turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null } };
+    this.online.turnPopup = { name: turnPlayer.name, visual: turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, costumeImage: null } };
     LifeRoadAudio.playSe("notify");
     clearTimeout(this.turnPopupTimer);
     this.turnPopupTimer = setTimeout(() => {
@@ -622,7 +621,7 @@ const App = {
       if (!result.pendingChoice && result.reveal) {
         this.reveal = {
           ...result.reveal,
-          visual: player.avatar || { color: player.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null },
+          visual: player.avatar || { color: player.color, speciesEmoji: null, costumeImage: null },
           interactive: false,
         };
         this.render();
@@ -647,7 +646,7 @@ const App = {
       this.pushLog(result.entries);
       this.reveal = {
         ...result.reveal,
-        visual: choosingPlayer.avatar || { color: choosingPlayer.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null },
+        visual: choosingPlayer.avatar || { color: choosingPlayer.color, speciesEmoji: null, costumeImage: null },
         interactive: false,
       };
       this.render();
@@ -891,7 +890,7 @@ const App = {
       if (!result.pendingChoice && result.reveal) {
         // choice以外のマスもテロップ枠で見せる。オンラインはターン確定(Firestore書き込み)を
         // 待たせない設計を維持するため、表示と同時にcommitOnlineTurnも呼ぶ(dismissは見た目のみ)
-        this.online.reveal = { ...result.reveal, visual: turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null } };
+        this.online.reveal = { ...result.reveal, visual: turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, costumeImage: null } };
       }
       this.render();
       if (result.pendingChoice) return;
@@ -908,7 +907,7 @@ const App = {
     this.pushOnlineLog(result.entries);
     // pendingChoiceが外れた状態を引き続き楽観表示し、確定はonSnapshotで後追いする
     this.online.localTurnState = localState;
-    this.online.reveal = { ...result.reveal, visual: player.avatar || { color: player.color, speciesEmoji: null, hatEmoji: null, accessoryEmoji: null } };
+    this.online.reveal = { ...result.reveal, visual: player.avatar || { color: player.color, speciesEmoji: null, costumeImage: null } };
     this.commitOnlineTurn(localState);
   },
 
