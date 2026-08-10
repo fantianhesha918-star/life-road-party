@@ -6,7 +6,11 @@
 // 具体的な中身は下のEVENT_CARDS/FORTUNE_CARDS/CHOICE_EVENTS(このマス数より多く用意してある
 // 予備の内容ライブラリ)からeventCardIndex/fortuneCardIndex/choiceEventIndexで指定する。
 // 「ひと休み」マスは、そのプレイヤー自身の次の自分の番を1回休みにする(game-engine.js参照)。
-const BOARD_SQUARES = [
+//
+// この30マス配列は、ゲームモード導入(2026-08-11〜、短い/普通/長い=100/200/300マス)より前の
+// セーブ・オンライン部屋を後方互換で開くためだけに残してある「レガシー盤面」。新規ゲームでは
+// 使われず、setActiveBoard()がsquareCount===30(またはフィールド欠落)のときだけ採用する。
+const LEGACY_BOARD_SQUARES_30 = [
   { index: 0, type: "start", label: "人生スタート" },
   { index: 1, type: "event", label: "できごと", eventCardIndex: 0 },
   { index: 2, type: "fortune", label: "運命の分かれ道", fortuneCardIndex: 0 },
@@ -53,8 +57,142 @@ const CHILDBIRTH_GIFT_COST = 20;
 
 // 株購入のチャンスは特定マスに「止まらなくても」「通り過ぎるだけ」で発生する
 // (game-engine.jsのapplyRollで、移動範囲にこのインデックスが含まれるか判定する)。
-// 対象は就職・選択マス以外(pendingChoiceの二重発生を避けるため)から選定している。
-const STOCK_TRIGGER_INDEXES = [5, 11, 20, 26];
+// 対象は就職・選択・マイホーム購入マス以外(pendingChoiceの二重発生を避けるため)から選定している。
+// これもLEGACY_BOARD_SQUARES_30専用の値(下記参照)。
+const LEGACY_STOCK_TRIGGER_INDEXES_30 = [5, 11, 20, 26];
+
+// ==================== ゲームモード別マス数拡張(2026-08-11〜) ====================
+// BOARD_SQUARES/STOCK_TRIGGER_INDEXESは、以前は上記の30マス固定配列だったが、
+// ゲームモード(短い/普通/長い=100/200/300マス)導入により「新しいゲーム開始のたびに
+// setActiveBoard(squareCount)で差し替えるlet」に変更した。game-engine.js/board3d.js等の
+// 既存コードはこの2つをグローバル(クラシックスクリプト共有スコープ)として直接参照して
+// いるため、差し替え可能なletにしておけば呼び出し側の大部分は無改修で追従する。
+let BOARD_SQUARES = LEGACY_BOARD_SQUARES_30;
+let STOCK_TRIGGER_INDEXES = LEGACY_STOCK_TRIGGER_INDEXES_30;
+
+// 選べるゲームモード。以前の相談で「20/40/60分の目安」として合意済みの数値(2026-08-09)。
+const GAME_MODES = [
+  { id: "short", label: "短い(100マス・目安20分)", squareCount: 100 },
+  { id: "normal", label: "普通(200マス・目安40分)", squareCount: 200 },
+  { id: "long", label: "長い(300マス・目安60分)", squareCount: 300 },
+];
+
+// LEGACY_BOARD_SQUARES_30から「単発の特殊マス」(結婚・火事・家の交換・マイホーム購入・
+// 子どもが生まれる×3)を除いた、残り21マス分の並び順をそのまま抽出したテンプレート。
+// 比率を新規に考案するのではなく、既存デザインのリズムをそのまま繰り返して長い盤面を作る。
+const REGULAR_TYPE_TILE = [
+  "event", "fortune", "job", "rest", "payday", "event", "choice", "job",
+  "payday", "fortune", "rest", "payday", "job", "choice", "payday",
+  "fortune", "rest", "payday", "job", "payday", "fortune",
+];
+
+const REGULAR_TYPE_LABELS = {
+  event: "できごと",
+  fortune: "運命の分かれ道",
+  rest: "ひと休み",
+  payday: "給料日",
+  choice: "選択のとき",
+  // jobだけは1マス目だけ「就職の関門」、2マス目以降は「スキルアップ研修」(生成時に個別付与)
+};
+
+// LEGACY_BOARD_SQUARES_30における「単発の特殊マス」の位置(0-28、末尾のgoalは除く)。
+// squareCountに合わせてこの相対位置(index/29)を比例スケールして配置する。
+const SPECIAL_SQUARE_TEMPLATE = [
+  { type: "house-fire", label: "火事発生", originalIndex: 9 },
+  { type: "house-swap", label: "家の交換", originalIndex: 12 },
+  { type: "marriage", label: "結婚", originalIndex: 17 },
+  { type: "childbirth", label: "子どもが生まれる", originalIndex: 19 },
+  { type: "childbirth", label: "子どもが生まれる", originalIndex: 23 },
+  { type: "house-market", label: "マイホーム購入", originalIndex: 25 },
+  { type: "childbirth", label: "子どもが生まれる", originalIndex: 26 },
+];
+
+// pendingChoiceを返すマス種別(就職・選択・マイホーム購入)。株購入トリガーはこれらの
+// マスには重ねない(pendingChoiceの二重発生を避けるため、既存の設計方針を踏襲)。
+const PENDING_CHOICE_TYPES = ["job", "choice", "house-market"];
+
+// squareCount(100/200/300等の任意マス数)から盤面を生成する。マス0=start、
+// マスsquareCount-1=goalは固定、それ以外はREGULAR_TYPE_TILEを巡回させて埋めたあと、
+// SPECIAL_SQUARE_TEMPLATEの位置を比例スケールして上書きする。
+function buildBoardSquares(squareCount) {
+  const lastIndex = squareCount - 1;
+  const squares = new Array(squareCount);
+  squares[0] = { index: 0, type: "start", label: "人生スタート" };
+  squares[lastIndex] = { index: lastIndex, type: "goal", label: "ゴール" };
+
+  let eventCounter = 0;
+  let fortuneCounter = 0;
+  let jobCount = 0;
+  for (let i = 1; i < lastIndex; i++) {
+    const type = REGULAR_TYPE_TILE[(i - 1) % REGULAR_TYPE_TILE.length];
+    const square = { index: i, type, label: REGULAR_TYPE_LABELS[type] || "" };
+    if (type === "event") {
+      square.eventCardIndex = eventCounter % EVENT_CARDS.length;
+      eventCounter++;
+    } else if (type === "fortune") {
+      square.fortuneCardIndex = fortuneCounter % FORTUNE_CARDS.length;
+      fortuneCounter++;
+    } else if (type === "job") {
+      square.label = jobCount === 0 ? "就職の関門" : "スキルアップ研修";
+      jobCount++;
+    }
+    squares[i] = square;
+  }
+
+  // 特殊マス(結婚・火事・家の交換・マイホーム購入・子どもが生まれる)を比例位置へ上書き配置。
+  // 衝突(丸め誤差で同じindexになった場合)は後続のものを1マスずつ前方へずらして回避する。
+  const usedSpecialIndexes = new Set();
+  let choiceCounter = 0;
+  SPECIAL_SQUARE_TEMPLATE.forEach((tmpl) => {
+    let idx = Math.round((lastIndex * tmpl.originalIndex) / 29);
+    idx = Math.max(1, Math.min(lastIndex - 1, idx));
+    while (usedSpecialIndexes.has(idx) && idx < lastIndex - 1) idx++;
+    usedSpecialIndexes.add(idx);
+    squares[idx] = { index: idx, type: tmpl.type, label: tmpl.label };
+  });
+  // choiceマスはchoiceEventIndexが必要なため、特殊マス配置が終わったあと改めて全マスを
+  // 走査して割り当てる(REGULAR_TYPE_TILEループの時点ではまだ特殊マス上書き前のため)
+  for (let i = 1; i < lastIndex; i++) {
+    if (squares[i].type === "choice") {
+      squares[i].choiceEventIndex = choiceCounter % CHOICE_EVENTS.length;
+      choiceCounter++;
+    }
+  }
+
+  // 株購入トリガー: pendingChoiceを返さないマス種別(job/choice/house-market以外)から
+  // LEGACY_BOARD_SQUARES_30と同じ密度(30マス中4箇所≒13%)で等間隔サンプリングする
+  const eligible = [];
+  for (let i = 1; i < lastIndex; i++) {
+    if (!PENDING_CHOICE_TYPES.includes(squares[i].type)) eligible.push(i);
+  }
+  const desiredTriggerCount = Math.max(1, Math.round((squareCount * 4) / 30));
+  const stockTriggerIndexes = [];
+  for (let k = 0; k < desiredTriggerCount && eligible.length > 0; k++) {
+    const pos = Math.floor((k * eligible.length) / desiredTriggerCount);
+    stockTriggerIndexes.push(eligible[pos]);
+  }
+
+  return { squares, stockTriggerIndexes };
+}
+
+// 新しいゲーム(一人プレイ開始・セーブ再開・オンライン部屋参加)を始める前に必ず呼び、
+// BOARD_SQUARES/STOCK_TRIGGER_INDEXES(と、game-engine.js側のGOAL_INDEX)を
+// 指定マス数の盤面へ差し替える。squareCount===30(または未指定)は、モード導入前の
+// セーブ・オンライン部屋を開くためのレガシー盤面フォールバックとして扱う。
+function setActiveBoard(squareCount) {
+  if (!squareCount || squareCount === 30) {
+    BOARD_SQUARES = LEGACY_BOARD_SQUARES_30;
+    STOCK_TRIGGER_INDEXES = LEGACY_STOCK_TRIGGER_INDEXES_30;
+  } else if (BOARD_SQUARES.length !== squareCount) {
+    const built = buildBoardSquares(squareCount);
+    BOARD_SQUARES = built.squares;
+    STOCK_TRIGGER_INDEXES = built.stockTriggerIndexes;
+  }
+  // game-engine.js側で`let`宣言されているGOAL_INDEXを再代入する。クラシックスクリプト
+  // 同士は同じグローバルスコープを共有するため、game-data.js側からも参照・代入できる
+  // (game-engine.jsが既にBOARD_SQUARES等をこの方式で参照しているのと同じパターン)。
+  GOAL_INDEX = BOARD_SQUARES.length - 1;
+}
 
 const STOCK_PRICE_PER_SHARE = 3; // 万円/株
 const STOCK_BUY_LOT = 10; // 1回の購入で買える株数(-30万円)

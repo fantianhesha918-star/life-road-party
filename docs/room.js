@@ -38,7 +38,7 @@ function currentAvatarVisual() {
 }
 
 // 部屋を新規作成する。部屋コードが偶然重複した場合は数回リトライする。
-async function createRoom({ nickname, maxPlayers }) {
+async function createRoom({ nickname, maxPlayers, squareCount }) {
   const user = await window.FirebaseCtx.ensureSignedIn();
   const uid = user.uid;
 
@@ -52,6 +52,7 @@ async function createRoom({ nickname, maxPlayers }) {
       status: "lobby",
       hostUid: uid,
       maxPlayers,
+      squareCount,
       boardId: "original-v1",
       turnOrder: [],
       currentTurnIndex: 0,

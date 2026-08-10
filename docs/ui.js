@@ -288,6 +288,9 @@ function renderOnlineMenuScreen(error, busy, lastRoom) {
   const sizeOptions = [2, 3, 4, 5, 6]
     .map((n) => `<option value="${n}" ${n === 4 ? "selected" : ""}>${n}人まで</option>`)
     .join("");
+  const onlineModeOptions = GAME_MODES
+    .map((m) => `<option value="${m.squareCount}" ${m.id === "short" ? "selected" : ""}>${m.label}</option>`)
+    .join("");
   return `
     <section class="screen screen-online-menu">
       <h2>通信対戦</h2>
@@ -307,6 +310,10 @@ function renderOnlineMenuScreen(error, busy, lastRoom) {
         <label class="field">
           <span>最大人数</span>
           <select id="online-maxplayers-select">${sizeOptions}</select>
+        </label>
+        <label class="field">
+          <span>マス数(モード)</span>
+          <select id="online-mode-select">${onlineModeOptions}</select>
         </label>
         <button class="btn btn-primary" ${busy ? "disabled" : ""} onclick="App.createOnlineRoom()">部屋を作る</button>
       </div>
@@ -346,11 +353,14 @@ function renderOnlineLobbyScreen(room, roomCode, myUid) {
     .join("");
   const isHost = room.hostUid === myUid;
   const canStart = players.length >= 2;
+  const roomMode = GAME_MODES.find((m) => m.squareCount === room.squareCount);
+  const modeLabel = roomMode ? roomMode.label : "30マス(旧仕様)";
   return `
     <section class="screen screen-online-lobby">
       <h2>部屋番号</h2>
       <div class="room-code">${escapeHtml(roomCode)}</div>
       <p class="lead">この番号を友達に伝えてください(現在 ${players.length}/${room.maxPlayers}人)</p>
+      <p class="lead">モード: ${escapeHtml(modeLabel)}</p>
       <ul class="player-list">${rows}</ul>
       ${
         isHost
@@ -366,6 +376,9 @@ function renderSetupScreen() {
   const cpuOptions = [1, 2, 3, 4, 5]
     .map((n) => `<option value="${n}">CPU ${n}人(合計${n + 1}人)</option>`)
     .join("");
+  const modeOptions = GAME_MODES
+    .map((m) => `<option value="${m.squareCount}" ${m.id === "short" ? "selected" : ""}>${m.label}</option>`)
+    .join("");
   return `
     <section class="screen screen-setup">
       <h2>対戦の設定</h2>
@@ -376,6 +389,10 @@ function renderSetupScreen() {
       <label class="field">
         <span>CPU人数</span>
         <select id="cpu-count-select">${cpuOptions}</select>
+      </label>
+      <label class="field">
+        <span>マス数(モード)</span>
+        <select id="mode-select">${modeOptions}</select>
       </label>
       <button class="btn btn-primary" onclick="App.startGame()">この設定で始める</button>
       <button class="btn" onclick="App.goTitle()">戻る</button>

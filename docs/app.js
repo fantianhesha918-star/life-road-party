@@ -26,6 +26,9 @@ function ensureSpeciesId(avatar, fallbackColor) {
 // Firestoreの部屋ドキュメント(playersがuidキーのマップ)を、game-engine.jsが
 // 扱えるゲーム状態(playersが配列)に変換する
 function roomToEngineState(room) {
+  // 全クライアント(ホスト・参加者とも)が同じ盤面(BOARD_SQUARES等)を独立に再現できるよう、
+  // room.squareCountから毎回セットし直す(決定的な生成のため配列自体をFirestoreに送る必要はない)。
+  setActiveBoard(room.squareCount || 30);
   const order = room.turnOrder && room.turnOrder.length ? room.turnOrder : Object.keys(room.players);
   const players = order.map((uid, i) => {
     const p = room.players[uid] || {};
@@ -251,6 +254,9 @@ const App = {
     this.state = saved.state;
     this.log = saved.log;
     this.humanId = saved.humanId;
+    // 旧セーブ(ゲームモード導入前)にはboardSquareCountが無いため、30マスのレガシー盤面
+    // にフォールバックする(setActiveBoardは30以外なら生成、30なら手作業盤面を使う)。
+    setActiveBoard(this.state.boardSquareCount || 30);
     // 旧セーブにはavatar.speciesIdが無い場合がある。人間は現在の装備種、CPU等は既定種で補う
     // (ensureSpeciesIdは既定種のみのため、人間だけ先に現在の装備種を明示的に当てる)
     const profile = LifeRoadProfile.loadProfile();
@@ -280,8 +286,11 @@ const App = {
   startGame() {
     const nicknameInput = document.getElementById("nickname-input");
     const cpuSelect = document.getElementById("cpu-count-select");
+    const modeSelect = document.getElementById("mode-select");
     const nickname = ((nicknameInput && nicknameInput.value) || "プレイヤー").trim().slice(0, 10) || "プレイヤー";
     const cpuCount = parseInt((cpuSelect && cpuSelect.value) || "1", 10);
+    const squareCount = parseInt((modeSelect && modeSelect.value) || "100", 10);
+    setActiveBoard(squareCount);
 
     const profile = LifeRoadProfile.loadProfile();
     const humanAvatar = LifeRoadProfile.getAvatarVisual(profile.equipped);
@@ -703,14 +712,16 @@ const App = {
   createOnlineRoom() {
     const nicknameInput = document.getElementById("online-nickname-input");
     const maxPlayersSelect = document.getElementById("online-maxplayers-select");
+    const modeSelect = document.getElementById("online-mode-select");
     const nickname = ((nicknameInput && nicknameInput.value) || "プレイヤー").trim().slice(0, 10) || "プレイヤー";
     const maxPlayers = parseInt((maxPlayersSelect && maxPlayersSelect.value) || "4", 10);
+    const squareCount = parseInt((modeSelect && modeSelect.value) || "100", 10);
 
     this.onlineError = null;
     this.onlineBusy = true;
     this.render();
     this.loadFirebaseModules()
-      .then(() => window.Room.createRoom({ nickname, maxPlayers }))
+      .then(() => window.Room.createRoom({ nickname, maxPlayers, squareCount }))
       .then(({ roomCode, uid }) => this.enterOnlineRoom(roomCode, uid, nickname))
       .catch((err) => this.handleOnlineError(err));
   },

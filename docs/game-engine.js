@@ -1,10 +1,14 @@
 // ライフロード ゲームロジックコア(一人モード・通信モード共通で使う想定)
 // 純粋なゲームルールのみを扱い、画面描画やFirebase通信には関与しない
 
-const GOAL_INDEX = BOARD_SQUARES.length - 1;
+// ゲームモード(短い/普通/長い)導入により、盤面の長さは固定ではなくなった。
+// game-data.jsのsetActiveBoard()がゲーム開始のたびにBOARD_SQUARESと一緒にこの値も
+// 再代入する(letにしているのはそのため。詳細はgame-data.js側のコメント参照)。
+let GOAL_INDEX = BOARD_SQUARES.length - 1;
 
 function createInitialState(playerConfigs) {
   return {
+    boardSquareCount: BOARD_SQUARES.length,
     players: playerConfigs.map((p, i) => ({
       id: p.id,
       name: p.name,

@@ -115,15 +115,15 @@ function buildStagePropLayout(count) {
   // 別々のgap同士だけ、先に確定した装飾との距離が近すぎる場合に間引く。
   // スタート/ゴールのゲート(index 0とcount-1、道を横切って立つ)も障害物として先に登録しておき、
   // ゲートのすぐ脇にベンチ等が配置されてしまうのを防ぐ(2026-08-10発覚)。
-  // 結婚マス(MARRIAGE_SQUARE_INDEX)の新郎新婦も同様に障害物として登録し、ベンチ等と重ならないようにする。
+  // 結婚マス(marriageSquareIndex)の新郎新婦も同様に障害物として登録し、ベンチ等と重ならないようにする。
   const layout = [];
   const keptPositions = [
     { gapIndex: -1, pos: squarePosition(0) },
     { gapIndex: -1, pos: squarePosition(count - 1) },
   ];
-  if (MARRIAGE_SQUARE_INDEX < count) {
-    const marriagePos = squarePosition(MARRIAGE_SQUARE_INDEX);
-    const marriageT = Math.max(0.001, Math.min(count - 1.001, MARRIAGE_SQUARE_INDEX));
+  if (marriageSquareIndex < count) {
+    const marriagePos = squarePosition(marriageSquareIndex);
+    const marriageT = Math.max(0.001, Math.min(count - 1.001, marriageSquareIndex));
     const { normal: marriageNormal } = pathPointAndNormal(marriageT);
     keptPositions.push({ gapIndex: -1, pos: marriagePos.clone().addScaledVector(marriageNormal, WEDDING_COUPLE_SIDE_OFFSET) });
     keptPositions.push({ gapIndex: -1, pos: marriagePos.clone().addScaledVector(marriageNormal, -WEDDING_COUPLE_SIDE_OFFSET) });
@@ -412,9 +412,9 @@ const WEDDING_COUPLE_MODELS = {
     yOffset: 0.5674,
   },
 };
-// 結婚マスのindex(game-data.jsのBOARD_SQUARESと同じ値を手動で同期。将来マス数拡張で
-// マス配置ロジックが動的化された際は、そちらから受け取る形に変更する)。
-const MARRIAGE_SQUARE_INDEX = 17;
+// 結婚マスのindex。マス数拡張(ゲームモード)で結婚マスの絶対位置がモードごとに変わるため、
+// mount()時にsquareTypesから実際の位置を検索して代入する(17はモジュール読み込み直後の暫定値)。
+let marriageSquareIndex = 17;
 // 新郎新婦を結婚マスの左右に置く、道からの距離(街灯等のSTREET_PROP_SIDE_OFFSETと同程度の近さ)。
 const WEDDING_COUPLE_SIDE_OFFSET = 1.4;
 
@@ -824,13 +824,13 @@ function loadWeddingFigureModel(owner, placeholder, config, generation) {
   );
 }
 
-// 結婚マス(MARRIAGE_SQUARE_INDEX)の左右に新郎新婦を静的装飾として配置する
+// 結婚マス(marriageSquareIndex)の左右に新郎新婦を静的装飾として配置する
 // (プレイヤーの着せ替えではなく風景装飾、結婚マスに実際に止まれる領域は塞がない)。
 function createWeddingCouple(scene) {
   const generation = sceneGeneration;
-  if (MARRIAGE_SQUARE_INDEX >= squareCount) return; // マス数拡張等で結婚マス自体が存在しない場合の保険
-  const pos = squarePosition(MARRIAGE_SQUARE_INDEX);
-  const t = Math.max(0.001, Math.min(squareCount - 1.001, MARRIAGE_SQUARE_INDEX));
+  if (marriageSquareIndex >= squareCount) return; // マス数拡張等で結婚マス自体が存在しない場合の保険
+  const pos = squarePosition(marriageSquareIndex);
+  const t = Math.max(0.001, Math.min(squareCount - 1.001, marriageSquareIndex));
   const { normal } = pathPointAndNormal(t);
 
   const place = (config, side) => {
@@ -854,9 +854,9 @@ function createWeddingCouple(scene) {
 const CHURCH_SIDE_OFFSET = 2.8;
 function createChurch(scene) {
   const generation = sceneGeneration;
-  if (MARRIAGE_SQUARE_INDEX >= squareCount) return;
-  const pos = squarePosition(MARRIAGE_SQUARE_INDEX);
-  const t = Math.max(0.001, Math.min(squareCount - 1.001, MARRIAGE_SQUARE_INDEX));
+  if (marriageSquareIndex >= squareCount) return;
+  const pos = squarePosition(marriageSquareIndex);
+  const t = Math.max(0.001, Math.min(squareCount - 1.001, marriageSquareIndex));
   const { normal } = pathPointAndNormal(t);
   const side = 1; // 新郎(groom)と同じ側にまとめて、反対側は開けておく
   const placeholder = createBuildingPlaceholder("facility-church");
@@ -1227,6 +1227,10 @@ function mount(canvasEl, options) {
   squareCount = opts.squareCount || 10;
   squareTypes = opts.squareTypes || [];
   stockTriggerIndexes = opts.stockTriggerIndexes || [];
+  // 結婚マスの絶対位置はゲームモード(マス数)ごとに変わるため、squareTypesから実際の
+  // 位置を検索する(見つからない場合は暫定値17のまま、buildScene側で範囲チェック済み)。
+  const foundMarriageIndex = squareTypes.indexOf("marriage");
+  if (foundMarriageIndex >= 0) marriageSquareIndex = foundMarriageIndex;
   renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.shadowMap.enabled = true;
