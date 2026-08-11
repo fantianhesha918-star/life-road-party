@@ -377,15 +377,17 @@ const ROAD_HALF_WIDTH = 0.9;
 const CAMERA_IDLE = { back: 5.2, up: 4.5, trail: 3.0 };
 const CAMERA_MOVE = { up: 1.5, trail: 2.2 };
 const CAMERA_LERP = 0.08;
-// 動物種(shop-data.jsのSPECIES_ITEMS)ごとの実3Dモデル。6種(チンチラ2色+いぬ2色+ねこ+うさぎ)
-// すべて実測済み(2026-08-09)。scaleは「実測した縦幅(Three.jsでBox3計測、Y軸)を基準に、
-// 描画後の高さがチンチラ(グレー)と揃うよう逆算した値」、yOffsetはどのモデルもバウンディング
-// ボックスの中心がほぼ原点(center.y≈0)のため、chinchilla-grayと同じ0.445で全種そのまま接地する
-// (実測でscale×|min.y|≈0.445〜0.446になることを確認済み)。
+// 動物種(shop-data.jsのSPECIES_ITEMS)ごとの実3Dモデル。scaleは「実測した縦幅
+// (Three.jsでBox3計測、Y軸)を基準に、描画後の高さが全種で揃うよう逆算した値」
+// (目標の描画後の高さ≈0.89)、yOffsetはどのモデルもバウンディングボックスの中心が
+// ほぼ原点(center.y≈0)のため、scale×|min.y|≈0.445〜0.446で全種そのまま接地する。
+// 2026-08-11: chinchilla-grayのscaleを、しっぽ改善版(v3、Y軸実測1.468)に合わせて
+// 0.47→0.606に修正(旧scaleのままだと他種より描画後の高さが約2割低く・宙に浮いて
+// 見える状態だった。v2→v3の差し替え時に実測し直さず放置していたバグ)。
 const SPECIES_MODEL_MAP = {
   "species-chinchilla-gray": {
     url: new URL("./models/chinchilla-gray.glb", import.meta.url).href,
-    scale: 0.47,
+    scale: 0.606,
     yOffset: 0.445,
   },
   "species-chinchilla-white": {
@@ -412,6 +414,16 @@ const SPECIES_MODEL_MAP = {
     url: new URL("./models/rabbit-white.glb", import.meta.url).href,
     scale: 0.469,
     yOffset: 0.445,
+  },
+  "species-human-male": {
+    url: new URL("./models/human-male.glb", import.meta.url).href,
+    scale: 0.469,
+    yOffset: 0.446,
+  },
+  "species-human-female": {
+    url: new URL("./models/human-female.glb", import.meta.url).href,
+    scale: 0.469,
+    yOffset: 0.446,
   },
 };
 

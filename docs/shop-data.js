@@ -89,6 +89,8 @@ const SPECIES_ITEMS = [
   { id: "species-dog-frenchie-black", category: "species", name: "いぬ(フレンチブルドッグ・黒)", price: 0, emoji: "🐶", avatarImage: "avatars/dog-frenchie-black.png" },
   { id: "species-cat-calico", category: "species", name: "ねこ(三毛猫)", price: 0, emoji: "🐱", avatarImage: "avatars/cat-calico.png" },
   { id: "species-rabbit-white", category: "species", name: "うさぎ(白)", price: 0, emoji: "🐰", avatarImage: "avatars/rabbit-white.png" },
+  { id: "species-human-male", category: "species", name: "にんげん(男の子)", price: 0, emoji: "🧑", avatarImage: "avatars/human-male.png" },
+  { id: "species-human-female", category: "species", name: "にんげん(女の子)", price: 0, emoji: "👧", avatarImage: "avatars/human-female.png" },
 ];
 
 const ALL_ITEMS = [...FREE_COLOR_ITEMS, ...SHOP_ITEMS, ...COSTUME_ITEMS, ...CONSUMABLE_ITEMS, ...SPECIES_ITEMS];
