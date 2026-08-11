@@ -58,6 +58,41 @@ const BUILDING_MODEL_KEYS = [
   "facility-zoo",
   "facility-farm",
 ];
+// マスの種類(game-data.js参照)ごとに、意味の合う建物・施設をテーマとして割り当てる
+// (2026-08-11、従来は種類を問わずBUILDING_MODEL_KEYSを単純に巡回していたのを見直した)。
+// 各テーマ内は複数候補を用意し、同じ種類のマスが続いても飽きないよう巡回させる。
+// 該当テーマの無い種類(start/goal/marriageは専用装飾があるため対象外)は、従来通り
+// BUILDING_MODEL_KEYS全体の巡回にフォールバックする。
+const SQUARE_TYPE_BUILDING_THEMES = {
+  job: ["building-office", "building-school", "building-hospital", "building-station"],
+  payday: ["building-station", "building-shop"],
+  choice: ["building-shop", "building-restaurant"],
+  rest: ["facility-park", "facility-farm"],
+  event: ["facility-amusement-park", "facility-aquarium", "facility-zoo"],
+  fortune: ["facility-amusement-park", "facility-aquarium", "facility-zoo"],
+  childbirth: ["facility-park", "facility-zoo", "facility-aquarium"],
+  "house-market": ["building-house", "building-apartment"],
+  "house-fire": ["building-house", "building-apartment"],
+  "house-swap": ["building-house", "building-apartment"],
+};
+// SQUARE_TYPE_BUILDING_THEMESのテーマ内巡回カウンタ。buildStagePropLayoutの呼び出しごと
+// (mount()のたびに)リセットする。
+let buildingThemeCounters = {};
+
+// gapIndexの両端のマス(gapIndexとgapIndex+1)の種類から、テーマに合う建物を1つ選ぶ。
+// 手前のマスの種類を優先し、テーマが無ければ奥のマスの種類を試す。どちらもテーマが
+// 無ければ(start/goal/marriage周辺のみ)、従来通りBUILDING_MODEL_KEYSを巡回する。
+function pickBuildingModel(gapIndex) {
+  for (const type of [squareTypes[gapIndex], squareTypes[gapIndex + 1]]) {
+    const themeModels = SQUARE_TYPE_BUILDING_THEMES[type];
+    if (!themeModels) continue;
+    const usedCount = buildingThemeCounters[type] || 0;
+    buildingThemeCounters[type] = usedCount + 1;
+    return themeModels[usedCount % themeModels.length];
+  }
+  return BUILDING_MODEL_KEYS[gapIndex % BUILDING_MODEL_KEYS.length];
+}
+
 // マスの間の隙間(gapIndex)ごとに建物・木を1組ずつ配置するレイアウトを動的に組み立てる。
 // 手作業の固定配列(旧STAGE_PROP_LAYOUT)だと将来のマス数拡張(100〜300マス)に
 // 追従できないため、建物モデルを順番に巡回させるアルゴリズム方式にした。
@@ -82,8 +117,9 @@ function buildStagePropLayout(count) {
   const candidates = [];
   const gapCount = Math.max(0, count - 1);
   const lastRow = Math.floor(Math.max(0, count - 1) / ROW_LENGTH);
+  buildingThemeCounters = {};
   for (let i = 0; i < gapCount; i++) {
-    const buildingModel = BUILDING_MODEL_KEYS[i % BUILDING_MODEL_KEYS.length];
+    const buildingModel = pickBuildingModel(i);
     // 行(row)は1行ごとに進行方向が左右反転するため、法線ベクトルの向きも1行ごとに
     // 反転する。worldSide(i%2による従来通りのジグザグ配置の意図)をそのままside名に
     // していると、偶数行と奇数行とで実際に押し出される座標(ワールド座標のZ方向)が
