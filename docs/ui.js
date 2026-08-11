@@ -884,15 +884,12 @@ function renderSnackHub(state, humanId, hub, showEndTurn) {
   const view = (hub && hub.view) || "menu";
   const me = state.players.find((p) => p.id === humanId);
   if (view === "spinning") {
+    // 出目の表示自体は3Dマップ側(snack-board3d.jsのplayDiceRoll、頭上で回転→ジャンプで停止)が
+    // 担当するため、ここは操作を止めるための軽い案内のみ表示する。
     return `
       <div class="turn-hub-modal">
         <div class="roulette-display">
-          <div class="roulette-wheel-wrap">
-            <div class="roulette-pointer">▼</div>
-            <div class="roulette-wheel${hub.spinning ? " is-spinning" : ""}"></div>
-            <div class="roulette-wheel-number">${hub.spinNumber}</div>
-          </div>
-          <p class="lead">${hub.spinning ? "サイコロが回転中…" : "サイコロ、止まった！"}</p>
+          <p class="lead">🎲 サイコロを振っています…</p>
         </div>
       </div>
     `;

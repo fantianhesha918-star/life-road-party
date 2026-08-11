@@ -1373,7 +1373,28 @@ const App = {
 
   snackRoll() {
     if (this.snack.hub.view === "spinning") return;
-    this.runRouletteAnimation((roll) => this.commitSnackRoll(roll));
+    const player = currentSnackPlayer(this.snack.state);
+    this.runSnackDiceAnimation(player.id, (roll) => this.commitSnackRoll(roll));
+  },
+
+  // おやつ集めモード専用のサイコロ演出(頭上で回転→ジャンプで停止、マリオパーティ風)。
+  // 既存の共有runRouletteAnimation()は本編の1〜10ルーレット(rollDice())専用で、以前は
+  // これを流用していたため出目が1〜6のはずのサイコロが実質1〜10になってしまっていた
+  // (2026-08-11、この演出追加時に発見・修正)。出目自体はrollSnackDice()で先に確定させ、
+  // 3D側の演出(snack-board3d.jsのplayDiceRoll)はあくまで見た目でロジックには影響しない。
+  runSnackDiceAnimation(playerId, onFinish) {
+    const finalRoll = rollSnackDice();
+    LifeRoadAudio.playSe("diceRoll");
+    this.snack.hub = { view: "spinning" };
+    this.render();
+    this.loadSnackBoard3DModules()
+      .then(() => window.LifeRoadSnackBoard3D.playDiceRoll(playerId, finalRoll))
+      .catch((err) => {
+        console.error("おやつ集めモード: サイコロ演出の読み込みに失敗", err);
+      })
+      .then(() => {
+        onFinish(finalRoll);
+      });
   },
 
   commitSnackRoll(roll) {
@@ -1513,7 +1534,7 @@ const App = {
         if (currentSnackPlayer(this.snack.state).id !== player.id) return;
         const itemId = window.LifeRoadSnackCPU.cpuDecideItemToUse(this.snack.state, player);
         if (itemId) useSnackItem(this.snack.state, player.id, itemId);
-        this.runRouletteAnimation((roll) => {
+        this.runSnackDiceAnimation(player.id, (roll) => {
           const result = rollSnackAndMove(this.snack.state, roll);
           this.pushSnackLog(result.entries);
           this.saveSnackGame();

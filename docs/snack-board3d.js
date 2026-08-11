@@ -13,7 +13,19 @@ const ROAD_TEXTURE_URL = new URL("./images/road-path.jpg", import.meta.url).href
 const ROAD_HALF_WIDTH = 0.9;
 const HOP_HEIGHT = 0.5;
 const HOP_DURATION_MS = 450;
-const CAMERA_LERP = 0.06;
+// カメラはすごろく本編(board3d.js)と同じ「静止時=ジオラマ風の見下ろし/移動中=進行方向の
+// 真後ろから追う三人称視点」の2段構成にする(2026-08-11、ユーザー指示で本編と統一)。
+// ループ型マップでも、追従先はあくまで現在の手番プレイヤー1人なので同じ値をそのまま使える。
+const CAMERA_IDLE = { back: 6.0, up: 5.2, trail: 3.4 };
+const CAMERA_MOVE = { up: 1.7, trail: 2.5 };
+const CAMERA_LERP = 0.08;
+
+// マリオパーティ風、頭上でサイコロが回転→ジャンプしながら着地して出目を確定させる演出用の定数。
+const DICE_SIZE = 0.42;
+const DICE_HEAD_HEIGHT = 1.15;
+const DICE_SPIN_DURATION_MS = 700;
+const DICE_SETTLE_DURATION_MS = 380;
+const DICE_HOLD_DURATION_MS = 260;
 
 // board3d.jsのSPECIES_MODEL_MAPと同一定義(2026-08-11時点)。動物種ごとの実3Dモデル。
 const SPECIES_MODEL_MAP = {
@@ -100,6 +112,42 @@ const SNACK_STAGE_MODELS = {
     scale: 0.7,
     yOffset: 0.135,
   },
+  // ショップの出店(shopノード脇)。目標高さ1.8
+  shopKiosk: {
+    url: new URL("./models/item-shop-kiosk.glb", import.meta.url).href,
+    scale: 0.9,
+    yOffset: 0.9,
+  },
+  // アイテム箱(item-boxノード脇)。目標高さ0.5
+  itemBox: {
+    url: new URL("./models/item-pickup-box.glb", import.meta.url).href,
+    scale: 0.34,
+    yOffset: 0.25,
+  },
+  // 発動中の「いたずらの実」の罠マーカー(node.activeTrapがある間だけ動的に表示)。目標高さ0.45
+  trapMarker: {
+    url: new URL("./models/placed-trap-marker.glb", import.meta.url).href,
+    scale: 0.339,
+    yOffset: 0.225,
+  },
+  // 分岐ノード脇の道しるべ。目標高さ1.3
+  routeSignpost: {
+    url: new URL("./models/route-choice-signpost.glb", import.meta.url).href,
+    scale: 0.7,
+    yOffset: 0.65,
+  },
+  // おやつマスコットの足元の台座。目標高さ0.4
+  spawnPedestal: {
+    url: new URL("./models/snack-spawn-pedestal.glb", import.meta.url).href,
+    scale: 0.4,
+    yOffset: 0.204,
+  },
+  // 現在の手番プレイヤーの足元に出すリング。モデルはXY平面の縦向きディスクのため
+  // (Box3実測でz軸だけ薄いことを確認済み)、配置時にX軸-90°回転させて地面に寝かせる。
+  turnRing: {
+    url: new URL("./models/current-turn-ring.glb", import.meta.url).href,
+    scale: 0.5,
+  },
 };
 
 // snack-data.jsのnodeType別の色分け(2D版のイメージに寄せた簡易配色)
@@ -127,11 +175,17 @@ let characters = new Map(); // playerId -> entry
 let nodeMap = new Map(); // nodeId -> node
 let nodePositions = new Map(); // nodeId -> THREE.Vector3
 let nodeMarkers = [];
-let mascotState = null; // { nodeId, entry: { group } }
+let mascotState = null; // { nodeId, entry: { group, model, baseY } }
 let focusPlayerId = null;
+let isMoving = false; // 追従対象(focusPlayerId)が現在ホップ移動中かどうか
 let animationFrameId = null;
 let sceneGeneration = 0;
-const cameraTarget = new THREE.Vector3();
+const cameraCurrentPos = new THREE.Vector3();
+let trapMarkerEntries = new Map(); // nodeId -> THREE.Group(発動中の罠マーカー)
+let turnRingGroup = null;
+let diceMesh = null;
+let diceAnim = null; // { playerId, mesh, startTime, settled, resolve }
+const diceFaceTextureCache = {};
 
 function nodeVec3(node) {
   return new THREE.Vector3(node.position.x, 0, node.position.z);
@@ -297,6 +351,100 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
     scene.add(group);
     loadDecorationModel(group, SNACK_STAGE_MODELS.distantHill);
   }
+
+  const shopNode = nodes.find((n) => n.nodeType === "shop");
+  if (shopNode) {
+    const pos = nodePositions.get(shopNode.id);
+    const dir = new THREE.Vector3(pos.x - centerX, 0, pos.z - centerZ).normalize();
+    const group = new THREE.Group();
+    group.position.set(pos.x + dir.x * 1.6, 0, pos.z + dir.z * 1.6);
+    group.rotation.y = Math.atan2(-dir.x, -dir.z);
+    scene.add(group);
+    loadDecorationModel(group, SNACK_STAGE_MODELS.shopKiosk);
+  }
+
+  const branchNode = nodes.find((n) => n.nodeType === "branch");
+  if (branchNode) {
+    const pos = nodePositions.get(branchNode.id);
+    const dir = new THREE.Vector3(pos.x - centerX, 0, pos.z - centerZ).normalize();
+    const group = new THREE.Group();
+    group.position.set(pos.x + dir.x * 1.4, 0, pos.z + dir.z * 1.4);
+    group.rotation.y = Math.atan2(-dir.x, -dir.z);
+    scene.add(group);
+    loadDecorationModel(group, SNACK_STAGE_MODELS.routeSignpost);
+  }
+
+  nodes
+    .filter((n) => n.nodeType === "item-box")
+    .forEach((n) => {
+      const pos = nodePositions.get(n.id);
+      const dir = new THREE.Vector3(pos.x - centerX, 0, pos.z - centerZ).normalize();
+      const group = new THREE.Group();
+      group.position.set(pos.x + dir.x * 1.0, 0, pos.z + dir.z * 1.0);
+      group.rotation.y = Math.atan2(-dir.x, -dir.z);
+      scene.add(group);
+      loadDecorationModel(group, SNACK_STAGE_MODELS.itemBox);
+    });
+}
+
+// 発動中の罠(node.activeTrap)を持つノードにだけplaced-trap-marker.glbを表示する。
+// nodeMapはmount()時にnodesの参照をそのまま格納しているため(deep cloneしていない)、
+// snack-engine.jsが直接ミューテートするactiveTrapの最新値をここで読める。
+function syncTrapMarkers() {
+  if (!scene) return;
+  const activeIds = new Set();
+  nodeMap.forEach((node, id) => {
+    if (node.activeTrap) activeIds.add(id);
+  });
+  trapMarkerEntries.forEach((group, id) => {
+    if (!activeIds.has(id)) {
+      scene.remove(group);
+      trapMarkerEntries.delete(id);
+    }
+  });
+  activeIds.forEach((id) => {
+    if (trapMarkerEntries.has(id)) return;
+    const pos = nodePositions.get(id);
+    if (!pos) return;
+    const group = new THREE.Group();
+    group.position.set(pos.x, 0, pos.z);
+    scene.add(group);
+    loadDecorationModel(group, SNACK_STAGE_MODELS.trapMarker);
+    trapMarkerEntries.set(id, group);
+  });
+}
+
+// 現在の手番プレイヤーの足元に表示するリング。モデルが縦向き(Y軸方向に厚い円盤)のため
+// X軸-90°回転させて地面に寝かせる(loadDecorationModelの共通ロジックは使わず専用に実装)。
+function ensureTurnRing() {
+  if (turnRingGroup) return turnRingGroup;
+  turnRingGroup = new THREE.Group();
+  scene.add(turnRingGroup);
+  const generation = sceneGeneration;
+  loadGLTFSceneCached(SNACK_STAGE_MODELS.turnRing.url)
+    .then((template) => {
+      if (generation !== sceneGeneration) return;
+      const model = template.clone(true);
+      model.scale.setScalar(SNACK_STAGE_MODELS.turnRing.scale);
+      model.rotation.x = -Math.PI / 2;
+      model.position.y = 0.03;
+      model.traverse((node) => {
+        if (node.isMesh) node.receiveShadow = true;
+      });
+      turnRingGroup.add(model);
+    })
+    .catch((err) => {
+      console.warn("現在の手番リングモデルの読み込みに失敗", err);
+    });
+  return turnRingGroup;
+}
+
+function updateTurnRing() {
+  if (!scene) return;
+  const entry = focusPlayerId ? characters.get(focusPlayerId) : null;
+  if (!entry) return;
+  const ring = ensureTurnRing();
+  ring.position.set(entry.group.position.x, 0.02, entry.group.position.z);
 }
 
 function createMascotEntry(nodeId) {
@@ -306,7 +454,10 @@ function createMascotEntry(nodeId) {
   const group = new THREE.Group();
   group.position.set(pos.x, 0, pos.z);
   scene.add(group);
-  mascotState = { nodeId, entry: { group } };
+  mascotState = { nodeId, entry: { group, model: null, baseY: SNACK_STAGE_MODELS.mascot.yOffset } };
+  // 台座はgroup直下の別要素として追加する(マスコット本体だけを上下バウンドさせるため、
+  // マスコットのモデル読み込み完了後にentry.modelへ参照を残し、groupごと動かさないようにする)。
+  loadDecorationModel(group, SNACK_STAGE_MODELS.spawnPedestal);
   const generation = sceneGeneration;
   loadGLTFSceneCached(SNACK_STAGE_MODELS.mascot.url)
     .then((template) => {
@@ -318,6 +469,7 @@ function createMascotEntry(nodeId) {
         if (node.isMesh) node.castShadow = true;
       });
       group.add(model);
+      mascotState.entry.model = model;
     })
     .catch((err) => {
       console.warn("おやつマスコットモデルの読み込みに失敗", err);
@@ -373,10 +525,19 @@ function createCharacterEntry(player) {
   const visual = player.avatar || {};
   const placeholder = createCharacterPlaceholder(visual.color);
   group.add(placeholder);
-  const entry = { group, placeholder, hop: null, currentNodeId: player.currentNodeId };
+  const entry = { group, placeholder, hop: null, currentNodeId: player.currentNodeId, playerId: player.id };
   characters.set(player.id, entry);
   loadSnackCharacterModel(entry, visual.speciesId);
   return entry;
+}
+
+// 移動方向を向かせる(board3d.jsのfaceDirectionと同じ考え方)。カメラの「移動中は進行方向の
+// 真後ろから追う」演出にはこのrotation.yを使う。
+function faceDirection(entry, fromPos, toPos) {
+  const dx = toPos.x - fromPos.x;
+  const dz = toPos.z - fromPos.z;
+  if (Math.abs(dx) < 1e-6 && Math.abs(dz) < 1e-6) return;
+  entry.group.rotation.y = Math.atan2(dx, dz);
 }
 
 // 移動元→移動先ノードのワールド座標を直線+放物線アーチで結ぶ簡易ホップ演出。
@@ -398,6 +559,7 @@ function updateHopForEntry(entry, now) {
     entry.group.position.y = 0;
     entry.group.scale.set(1, 1, 1);
     entry.hop = null;
+    if (entry.playerId === focusPlayerId) isMoving = false;
   }
 }
 
@@ -413,6 +575,8 @@ function syncPlayers(players, activeSnackNodeId) {
       const fromPos = nodePositions.get(entry.currentNodeId) || entry.group.position.clone();
       const toPos = nodePositions.get(p.currentNodeId);
       if (toPos) {
+        faceDirection(entry, fromPos, toPos);
+        if (p.id === focusPlayerId) isMoving = true;
         entry.hop = { from: fromPos, to: toPos, toNodeId: p.currentNodeId, startTime: performance.now(), durationMs: HOP_DURATION_MS };
       } else {
         entry.currentNodeId = p.currentNodeId;
@@ -420,21 +584,37 @@ function syncPlayers(players, activeSnackNodeId) {
     }
   });
   syncMascot(activeSnackNodeId);
+  syncTrapMarkers();
 }
 
 function focusCamera(playerId) {
   if (playerId) focusPlayerId = playerId;
 }
 
+// すごろく本編(board3d.js)と同じ「静止時=ジオラマ風の見下ろし固定角度/移動中=進行方向の
+// 真後ろから追う三人称視点」の2段構成(2026-08-11、ユーザー指示で本編と統一)。
 function updateCamera() {
   if (!camera) return;
   const entry = focusPlayerId ? characters.get(focusPlayerId) : null;
-  const focusPos = entry ? entry.group.position : cameraTarget;
-  // ループ全体を常に見渡せる固定の俯瞰視点を基本にしつつ、注視点だけを現在の手番プレイヤー側へ
-  // ごくわずかに寄せる(中心からの距離を1/3程度に抑え、ループ全体が視界から外れないようにする)。
-  const desiredTarget = new THREE.Vector3(focusPos.x * 0.35, 0.4, focusPos.z * 0.35);
-  cameraTarget.lerp(desiredTarget, CAMERA_LERP);
-  camera.lookAt(cameraTarget);
+  if (!entry) return;
+  const focusGroup = entry.group;
+  let desired;
+  if (isMoving) {
+    const forward = new THREE.Vector3(Math.sin(focusGroup.rotation.y), 0, Math.cos(focusGroup.rotation.y));
+    desired = focusGroup.position
+      .clone()
+      .addScaledVector(forward, -CAMERA_MOVE.trail)
+      .add(new THREE.Vector3(0, CAMERA_MOVE.up, 0));
+  } else {
+    desired = new THREE.Vector3(
+      focusGroup.position.x - CAMERA_IDLE.trail,
+      CAMERA_IDLE.up,
+      focusGroup.position.z + CAMERA_IDLE.back
+    );
+  }
+  cameraCurrentPos.lerp(desired, CAMERA_LERP);
+  camera.position.copy(cameraCurrentPos);
+  camera.lookAt(focusGroup.position.x, 0.5, focusGroup.position.z);
 }
 
 function resize() {
@@ -449,6 +629,9 @@ function resize() {
 
 function buildScene(nodes, players, activeSnackNodeId) {
   scene = new THREE.Scene();
+  trapMarkerEntries = new Map();
+  turnRingGroup = null;
+  diceMesh = null;
   scene.fog = new THREE.Fog(0xbfe3da, 16, 40);
   const bgTexture = textureLoader.load(SKY_BACKDROP_URL);
   bgTexture.colorSpace = THREE.SRGBColorSpace;
@@ -512,21 +695,141 @@ function buildScene(nodes, players, activeSnackNodeId) {
   light.shadow.camera.bottom = -shadowExtent * 0.5;
   scene.add(light);
   scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+}
 
-  const overviewBack = halfZ * 1.9 + 6;
-  const overviewUp = Math.max(halfX, halfZ) * 1.7 + 6;
-  camera.position.set(centerX, overviewUp, centerZ + overviewBack);
-  cameraTarget.set(centerX, 0.4, centerZ);
-  camera.lookAt(cameraTarget);
+// 1〜6の目を白い角丸カードに黒(赤)の目玉で描いたテクスチャをCanvasで生成する。
+// GLB素材(item-dice-plus1.glb等)は「+1」等の専用アイコンで汎用の目玉表現には使えないため、
+// マリオパーティ風のサイコロ演出専用に軽量な手続き生成テクスチャで用意する。
+function createDiceFaceTexture(value) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fbfaf5";
+  ctx.beginPath();
+  const r = 20;
+  ctx.moveTo(r, 4);
+  ctx.arcTo(124, 4, 124, 124, r);
+  ctx.arcTo(124, 124, 4, 124, r);
+  ctx.arcTo(4, 124, 4, 4, r);
+  ctx.arcTo(4, 4, 124, 4, r);
+  ctx.closePath();
+  ctx.fill();
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = "#c9a15a";
+  ctx.stroke();
+  ctx.fillStyle = "#d8442c";
+  const pipLayout = {
+    1: [[64, 64]],
+    2: [[40, 40], [88, 88]],
+    3: [[40, 40], [64, 64], [88, 88]],
+    4: [[40, 40], [88, 40], [40, 88], [88, 88]],
+    5: [[40, 40], [88, 40], [64, 64], [40, 88], [88, 88]],
+    6: [[40, 34], [88, 34], [40, 64], [88, 64], [40, 94], [88, 94]],
+  }[value] || [];
+  pipLayout.forEach(([x, y]) => {
+    ctx.beginPath();
+    ctx.arc(x, y, 11, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function getDiceFaceTexture(value) {
+  if (!diceFaceTextureCache[value]) diceFaceTextureCache[value] = createDiceFaceTexture(value);
+  return diceFaceTextureCache[value];
+}
+
+function ensureDiceMesh() {
+  if (diceMesh) return diceMesh;
+  const geometry = new THREE.BoxGeometry(DICE_SIZE, DICE_SIZE, DICE_SIZE);
+  const materials = [0, 1, 2, 3, 4, 5].map(() => new THREE.MeshStandardMaterial({ color: 0xffffff }));
+  diceMesh = new THREE.Mesh(geometry, materials);
+  diceMesh.visible = false;
+  diceMesh.castShadow = true;
+  return diceMesh;
+}
+
+function setDiceFaceValue(mesh, value) {
+  const texture = getDiceFaceTexture(value);
+  mesh.material.forEach((mat) => {
+    mat.map = texture;
+    mat.needsUpdate = true;
+  });
+}
+
+// マリオパーティ風、頭上でサイコロが高速回転→終盤にジャンプしながら減速して止まる演出。
+// snack-engine.jsは移動を同期的に一括処理するため出目(value)は既に確定済みの値を渡す
+// (この演出はあくまで見た目で、ゲームロジックの結果には影響しない)。戻り値のPromiseは
+// 演出(回転+着地+一瞬の静止)が完了したタイミングでresolveする。
+function playDiceRoll(playerId, value) {
+  return new Promise((resolve) => {
+    const entry = characters.get(playerId);
+    if (!entry || !scene) {
+      resolve();
+      return;
+    }
+    const mesh = ensureDiceMesh();
+    if (!mesh.parent) scene.add(mesh);
+    setDiceFaceValue(mesh, value);
+    mesh.visible = true;
+    mesh.rotation.set(0, 0, 0);
+    diceAnim = { playerId, mesh, startTime: performance.now(), settled: false, resolve };
+  });
+}
+
+function finishDiceAnim() {
+  if (!diceAnim) return;
+  const anim = diceAnim;
+  diceAnim = null;
+  if (anim.mesh) anim.mesh.visible = false;
+  anim.resolve();
+}
+
+function updateDiceAnim(now) {
+  if (!diceAnim) return;
+  const entry = characters.get(diceAnim.playerId);
+  if (!entry) {
+    finishDiceAnim();
+    return;
+  }
+  const mesh = diceAnim.mesh;
+  const pos = entry.group.position;
+  const elapsed = now - diceAnim.startTime;
+  if (elapsed < DICE_SPIN_DURATION_MS) {
+    const t = elapsed / DICE_SPIN_DURATION_MS;
+    mesh.position.set(pos.x, DICE_HEAD_HEIGHT + Math.sin(t * Math.PI * 3) * 0.18 + 0.15, pos.z);
+    mesh.rotation.x += 0.35;
+    mesh.rotation.y += 0.28;
+    mesh.rotation.z += 0.18;
+  } else if (elapsed < DICE_SPIN_DURATION_MS + DICE_SETTLE_DURATION_MS) {
+    const t = (elapsed - DICE_SPIN_DURATION_MS) / DICE_SETTLE_DURATION_MS;
+    const bounce = Math.sin(t * Math.PI);
+    mesh.rotation.x *= 0.8;
+    mesh.rotation.y *= 0.8;
+    mesh.rotation.z *= 0.8;
+    mesh.position.set(pos.x, DICE_HEAD_HEIGHT + bounce * 0.22, pos.z);
+  } else if (!diceAnim.settled) {
+    diceAnim.settled = true;
+    mesh.rotation.set(0, 0, 0);
+    mesh.position.set(pos.x, DICE_HEAD_HEIGHT, pos.z);
+    setTimeout(finishDiceAnim, DICE_HOLD_DURATION_MS);
+  } else {
+    mesh.position.set(pos.x, DICE_HEAD_HEIGHT, pos.z);
+  }
 }
 
 function animate() {
   animationFrameId = requestAnimationFrame(animate);
   const now = performance.now();
   characters.forEach((entry) => updateHopForEntry(entry, now));
-  if (mascotState && mascotState.entry) {
-    mascotState.entry.group.position.y = 0.15 + Math.sin(now / 500) * 0.08;
+  if (mascotState && mascotState.entry && mascotState.entry.model) {
+    mascotState.entry.model.position.y = mascotState.entry.baseY + Math.sin(now / 500) * 0.08;
   }
+  updateTurnRing();
+  updateDiceAnim(now);
   updateCamera();
   renderer.render(scene, camera);
 }
@@ -548,11 +851,18 @@ function mount(canvasEl, options) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   camera = new THREE.PerspectiveCamera(55, 1, 0.1, 200);
 
-  buildScene(nodes, opts.players, opts.activeSnackNodeId);
-
   const players = opts.players || [];
   const turnPlayer = typeof opts.currentTurnIndex === "number" ? players[opts.currentTurnIndex] : null;
   focusPlayerId = (turnPlayer && turnPlayer.id) || (players[0] && players[0].id) || null;
+  isMoving = false;
+  const focusStartPos =
+    (turnPlayer && nodePositions.get(turnPlayer.currentNodeId)) ||
+    (players[0] && nodePositions.get(players[0].currentNodeId)) ||
+    new THREE.Vector3();
+  cameraCurrentPos.set(focusStartPos.x - CAMERA_IDLE.trail, CAMERA_IDLE.up, focusStartPos.z + CAMERA_IDLE.back);
+  camera.position.copy(cameraCurrentPos);
+
+  buildScene(nodes, players, opts.activeSnackNodeId);
 
   resize();
   window.addEventListener("resize", resize);
@@ -563,6 +873,7 @@ function dispose() {
   if (animationFrameId) cancelAnimationFrame(animationFrameId);
   animationFrameId = null;
   window.removeEventListener("resize", resize);
+  if (diceAnim) finishDiceAnim();
   if (renderer) renderer.dispose();
   renderer = null;
   scene = null;
@@ -570,6 +881,9 @@ function dispose() {
   characters = new Map();
   nodeMarkers = [];
   mascotState = null;
+  trapMarkerEntries = new Map();
+  turnRingGroup = null;
+  diceMesh = null;
 }
 
-window.LifeRoadSnackBoard3D = { mount, dispose, syncPlayers, focusCamera };
+window.LifeRoadSnackBoard3D = { mount, dispose, syncPlayers, focusCamera, playDiceRoll };
