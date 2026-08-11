@@ -2,6 +2,7 @@
 
 const SAVE_KEY = "liferoad_solo_save_v1";
 const ONLINE_ROOM_KEY = "liferoad_online_room_v1";
+const SNACK_SAVE_KEY = "liferoad_snack_save_v1";
 const HEARTBEAT_INTERVAL_MS = 15000;
 const HOP_STEP_MS = 420; // マス移動アニメーション、1マスあたりの所要時間
 const CPU_PRE_ROLL_MS = 1100; // CPUがルーレットを回す前の「間」
@@ -130,6 +131,8 @@ const App = {
   turnPopupTimer: null,
   // ---- 3D盤面のマウント状態管理(sync3DBoard参照)。現在マウント中かどうかを覚えておく ----
   board3dMounted: false,
+  // ---- おやつ集めモード3D盤面のマウント状態(sync3DBoard参照、既存board3dMountedとは別管理) ----
+  snackBoard3dMounted: false,
   // ---- ショップで購入成功時に一瞬表示する「入手しました」トースト。solo/online共通で使う ----
   shopToast: null, // { name, image, emoji }
   shopToastTimer: null,
@@ -217,6 +220,11 @@ const App = {
   loadBoard3DModules() {
     if (window.LifeRoadBoard3D) return Promise.resolve();
     return import("./board3d.js");
+  },
+
+  loadSnackBoard3DModules() {
+    if (window.LifeRoadSnackBoard3D) return Promise.resolve();
+    return import("./snack-board3d.js");
   },
 
   equipAvatarItem(category, itemId) {
@@ -1145,6 +1153,12 @@ const App = {
     } else if (this.screen === "online-result" && this.online && this.online.room) {
       const state = roomToEngineState(this.online.room);
       view.innerHTML = renderResultScreen(state, "online", this.online.lastReward);
+    } else if (this.screen === "snack-setup") {
+      view.innerHTML = renderSnackSetupScreen();
+    } else if (this.screen === "snack-game" && this.snack) {
+      view.innerHTML = renderSnackGameScreen(this.snack, this.snackHumanId);
+    } else if (this.screen === "snack-result" && this.snack) {
+      view.innerHTML = renderSnackResultScreen(this.snack.state, this.snackHumanId);
     }
     this.sync3DBoard();
     this.syncHeader();
@@ -1170,16 +1184,30 @@ const App = {
   // マウント中は現在のプレイヤー位置・手番へ同期する(renderのたびに呼ばれる軽量な処理)。
   sync3DBoard() {
     const isGameScreen = this.screen === "game" || this.screen === "online-game";
+    const isSnackGameScreen = this.screen === "snack-game" && !!this.snack;
     const dock = document.getElementById("board3d-overlay");
-    if (!isGameScreen) {
+
+    // 画面遷移で使わなくなった側の3D盤面(本編/おやつ集め)は都度dispose()する
+    // (両方を同時にマウントしたままにしない。同じ#board3d-canvasを共用するため)。
+    if (!isGameScreen && this.board3dMounted && window.LifeRoadBoard3D) {
+      window.LifeRoadBoard3D.dispose();
+      this.board3dMounted = false;
+    }
+    if (!isSnackGameScreen && this.snackBoard3dMounted && window.LifeRoadSnackBoard3D) {
+      window.LifeRoadSnackBoard3D.dispose();
+      this.snackBoard3dMounted = false;
+    }
+
+    if (!isGameScreen && !isSnackGameScreen) {
       if (dock) dock.classList.remove("is-active");
-      if (this.board3dMounted && window.LifeRoadBoard3D) {
-        window.LifeRoadBoard3D.dispose();
-        this.board3dMounted = false;
-      }
       return;
     }
     if (dock) dock.classList.add("is-active");
+
+    if (isSnackGameScreen) {
+      this.syncSnackBoard3D();
+      return;
+    }
 
     let state = null;
     if (this.mode === "online") {
@@ -1220,6 +1248,309 @@ const App = {
       .catch((err) => {
         console.error("3D盤面の読み込みに失敗", err);
       });
+  },
+
+  // おやつ集めモード用3D盤面の同期(sync3DBoard()から画面がsnack-gameのときだけ呼ばれる)。
+  syncSnackBoard3D() {
+    const snack = this.snack.state;
+    const player = snack.players[snack.currentTurnIndex];
+    if (!player) return;
+    const focusId = player.id;
+    this.loadSnackBoard3DModules()
+      .then(() => {
+        // 非同期読み込み完了までの間に画面遷移していたら何もしない
+        if (this.screen !== "snack-game" || !this.snack) return;
+        if (!this.snackBoard3dMounted) {
+          window.LifeRoadSnackBoard3D.mount(document.getElementById("board3d-canvas"), {
+            nodes: SNACK_STAGE_NODES,
+            players: snack.players,
+            currentTurnIndex: snack.currentTurnIndex,
+            activeSnackNodeId: snack.activeSnackNodeId,
+          });
+          this.snackBoard3dMounted = true;
+        } else {
+          window.LifeRoadSnackBoard3D.syncPlayers(snack.players, snack.activeSnackNodeId);
+        }
+        window.LifeRoadSnackBoard3D.focusCamera(focusId);
+      })
+      .catch((err) => {
+        console.error("おやつ集めモード3D盤面の読み込みに失敗", err);
+      });
+  },
+
+  // ==================== おやつ集めモード(フェーズ1試作) ====================
+  // 既存の人生ゲームモード(this.state等)とは完全に別の状態(this.snack)で管理する。
+  // 保存タイミングは、Codexレビュー対応で見つけたバグ(reveal表示中に保存が遅れて中断時に
+  // 巻き戻る)と同じ設計ミスを避けるため、state変更の直後に必ずsaveSnackGame()する。
+
+  hasSnackSave() {
+    return !!localStorage.getItem(SNACK_SAVE_KEY);
+  },
+
+  goSnackSetup() {
+    this.screen = "snack-setup";
+    this.render();
+  },
+
+  startSnackGame() {
+    const nicknameInput = document.getElementById("snack-nickname-input");
+    const cpuSelect = document.getElementById("snack-cpu-count-select");
+    const nickname = ((nicknameInput && nicknameInput.value) || "プレイヤー").trim().slice(0, 10) || "プレイヤー";
+    const cpuCount = parseInt((cpuSelect && cpuSelect.value) || "1", 10);
+    const profile = LifeRoadProfile.loadProfile();
+    const humanAvatar = LifeRoadProfile.getAvatarVisual(profile.equipped);
+    const configs = [{ id: "human", name: nickname, isCPU: false, avatar: humanAvatar }];
+    for (let i = 1; i <= cpuCount; i++) {
+      const species = SPECIES_ITEMS[Math.floor(Math.random() * SPECIES_ITEMS.length)];
+      configs.push({
+        id: `cpu${i}`,
+        name: `CPU${i}`,
+        isCPU: true,
+        personality: LifeRoadCPU.pickRandomPersonality(),
+        avatar: { color: TOKEN_COLORS[i % TOKEN_COLORS.length], speciesId: species.id, speciesEmoji: species.emoji, costumeImage: null },
+      });
+    }
+    this.snackHumanId = "human";
+    this.snack = { state: createSnackState(configs), log: [{ type: "info", text: "おやつ集めモード開始！" }], hub: { view: "menu" }, logOpen: false };
+    this.screen = "snack-game";
+    this.saveSnackGame();
+    this.render();
+    this.maybeRunSnackCPUTurn();
+  },
+
+  continueSnackGame() {
+    const saved = this.loadSnackSave();
+    if (!saved) {
+      this.goTitle();
+      return;
+    }
+    this.snackHumanId = saved.humanId;
+    this.snack = { state: saved.state, log: saved.log, hub: { view: "menu" }, logOpen: false };
+    this.screen = "snack-game";
+    this.render();
+    this.maybeRunSnackCPUTurn();
+  },
+
+  pushSnackLog(entries) {
+    this.snack.log = [...entries].reverse().concat(this.snack.log).slice(0, 100);
+  },
+
+  saveSnackGame() {
+    try {
+      localStorage.setItem(SNACK_SAVE_KEY, JSON.stringify({ state: this.snack.state, log: this.snack.log, humanId: this.snackHumanId }));
+    } catch (e) {
+      // 保存容量オーバー等は無視(オートセーブは補助機能のため)
+    }
+  },
+
+  loadSnackSave() {
+    try {
+      return JSON.parse(localStorage.getItem(SNACK_SAVE_KEY));
+    } catch (e) {
+      return null;
+    }
+  },
+
+  clearSnackSave() {
+    localStorage.removeItem(SNACK_SAVE_KEY);
+  },
+
+  showSnackHubView(view) {
+    this.snack.hub = { view };
+    this.render();
+  },
+
+  snackShowShop() {
+    this.snack.hub = { view: "shop" };
+    this.render();
+  },
+
+  snackToggleLog() {
+    this.snack.logOpen = !this.snack.logOpen;
+    LifeRoadAudio.playSe(this.snack.logOpen ? "modalOpen" : "modalClose");
+    this.render();
+  },
+
+  snackRoll() {
+    if (this.snack.hub.view === "spinning") return;
+    this.runRouletteAnimation((roll) => this.commitSnackRoll(roll));
+  },
+
+  commitSnackRoll(roll) {
+    this.snack.hub = { view: "menu" };
+    const state = this.snack.state;
+    const player = currentSnackPlayer(state);
+    if (player.id !== this.snackHumanId) return;
+    const result = rollSnackAndMove(state, roll);
+    this.pushSnackLog(result.entries);
+    this.saveSnackGame();
+    this.render();
+    this.afterSnackAction();
+  },
+
+  snackChooseBranch(nextNodeId) {
+    if (!this.snack.state.pendingBranch) return;
+    const player = this.snack.state.players.find((p) => p.id === this.snack.state.pendingBranch.playerId);
+    if (player.id !== this.snackHumanId) return;
+    const result = resolveSnackBranch(this.snack.state, nextNodeId);
+    this.pushSnackLog(result.entries);
+    this.saveSnackGame();
+    this.render();
+    this.afterSnackAction();
+  },
+
+  snackChooseSnackPurchase(buy) {
+    if (!this.snack.state.pendingSnackChoice) return;
+    const player = this.snack.state.players.find((p) => p.id === this.snack.state.pendingSnackChoice.playerId);
+    if (player.id !== this.snackHumanId) return;
+    const result = resolveSnackChoice(this.snack.state, buy);
+    this.pushSnackLog(result.entries);
+    this.saveSnackGame();
+    this.render();
+    this.afterSnackAction();
+  },
+
+  snackChooseStopOption(optionIndex) {
+    if (!this.snack.state.pendingStopChoice) return;
+    const player = this.snack.state.players.find((p) => p.id === this.snack.state.pendingStopChoice.playerId);
+    if (player.id !== this.snackHumanId) return;
+    const result = resolveSnackStopChoice(this.snack.state, optionIndex);
+    this.pushSnackLog(result.entries);
+    this.saveSnackGame();
+    this.render();
+    this.afterSnackAction();
+  },
+
+  snackBuyShopItem(itemId) {
+    const result = buySnackShopItem(this.snack.state, this.snackHumanId, itemId);
+    LifeRoadAudio.playSe(result.ok ? "confirm" : "error");
+    if (result.ok) this.saveSnackGame();
+    this.render();
+  },
+
+  snackUseItem(itemId) {
+    const result = useSnackItem(this.snack.state, this.snackHumanId, itemId);
+    if (result.ok) {
+      this.pushSnackLog(result.entries || []);
+      LifeRoadAudio.playSe("confirm");
+      this.saveSnackGame();
+    } else {
+      LifeRoadAudio.playSe("error");
+    }
+    this.render();
+  },
+
+  snackEndTurn() {
+    const player = currentSnackPlayer(this.snack.state);
+    if (player.id !== this.snackHumanId) return;
+    this.endSnackTurnAndContinue();
+  },
+
+  endSnackTurnAndContinue() {
+    endSnackTurn(this.snack.state);
+    this.saveSnackGame();
+    this.render();
+    if (this.snack.state.status === "finished") {
+      this.finishSnackGame();
+      return;
+    }
+    this.maybeRunSnackCPUTurn();
+  },
+
+  // 手番プレイヤーがCPUの場合、分岐/おやつ確認/選択イベント/ロールをApp側から自動進行する
+  // (演出のタイミングを揃えるため、既存のmaybeRunCPUTurnと同様に短いsetTimeoutを挟む)。
+  maybeRunSnackCPUTurn() {
+    const state = this.snack && this.snack.state;
+    if (!state || state.status !== "playing") return;
+
+    if (state.pendingBranch) {
+      const player = state.players.find((p) => p.id === state.pendingBranch.playerId);
+      if (!player.isCPU) return;
+      setTimeout(() => {
+        if (!this.snack || !this.snack.state.pendingBranch) return;
+        const choice = window.LifeRoadSnackCPU.cpuChooseSnackBranch(this.snack.state, player);
+        const result = resolveSnackBranch(this.snack.state, choice);
+        this.pushSnackLog(result.entries);
+        this.saveSnackGame();
+        this.render();
+        this.afterSnackAction();
+      }, 700);
+      return;
+    }
+    if (state.pendingSnackChoice) {
+      const player = state.players.find((p) => p.id === state.pendingSnackChoice.playerId);
+      if (!player.isCPU) return;
+      setTimeout(() => {
+        if (!this.snack || !this.snack.state.pendingSnackChoice) return;
+        const result = resolveSnackChoice(this.snack.state, window.LifeRoadSnackCPU.cpuDecideSnackPurchase());
+        this.pushSnackLog(result.entries);
+        this.saveSnackGame();
+        this.render();
+        this.afterSnackAction();
+      }, 700);
+      return;
+    }
+    if (state.pendingStopChoice) {
+      const player = state.players.find((p) => p.id === state.pendingStopChoice.playerId);
+      if (!player.isCPU) return;
+      setTimeout(() => {
+        if (!this.snack || !this.snack.state.pendingStopChoice) return;
+        const idx = LifeRoadCPU.cpuDecideOption(this.snack.state.pendingStopChoice, player.personality);
+        const result = resolveSnackStopChoice(this.snack.state, idx);
+        this.pushSnackLog(result.entries);
+        this.saveSnackGame();
+        this.render();
+        this.afterSnackAction();
+      }, 700);
+      return;
+    }
+
+    const player = currentSnackPlayer(state);
+    if (!player.isCPU) return;
+    if (!player.turnRolled) {
+      setTimeout(() => {
+        if (!this.snack || this.snack.state.status !== "playing") return;
+        if (currentSnackPlayer(this.snack.state).id !== player.id) return;
+        const itemId = window.LifeRoadSnackCPU.cpuDecideItemToUse(this.snack.state, player);
+        if (itemId) useSnackItem(this.snack.state, player.id, itemId);
+        this.runRouletteAnimation((roll) => {
+          const result = rollSnackAndMove(this.snack.state, roll);
+          this.pushSnackLog(result.entries);
+          this.saveSnackGame();
+          this.render();
+          this.afterSnackAction();
+        });
+      }, 700);
+      return;
+    }
+    // 移動・確認まで完了しているのにここへ来た場合(=CPUのターン終了待ち)
+    setTimeout(() => this.endSnackTurnAndContinue(), 500);
+  },
+
+  // ロール・分岐・おやつ確認・選択イベントのいずれかを解決した直後に必ず呼ぶ。
+  // ゲーム終了判定、CPU自動進行、および(CPUの移動が完了した場合の)自動ターン終了を行う。
+  afterSnackAction() {
+    const state = this.snack.state;
+    if (state.status === "finished") {
+      this.finishSnackGame();
+      return;
+    }
+    if (state.pendingBranch || state.pendingSnackChoice || state.pendingStopChoice) {
+      this.maybeRunSnackCPUTurn();
+      return;
+    }
+    const player = currentSnackPlayer(state);
+    if (player.isCPU && player.turnRolled && player.remainingSteps === 0) {
+      this.endSnackTurnAndContinue();
+      return;
+    }
+    this.maybeRunSnackCPUTurn();
+  },
+
+  finishSnackGame() {
+    this.screen = "snack-result";
+    this.clearSnackSave();
+    this.render();
   },
 };
 

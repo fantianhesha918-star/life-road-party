@@ -55,6 +55,8 @@ function renderTitleScreen(hasSave, profile) {
       ${hasSave ? `<button class="btn btn-primary" onclick="App.continueGame()">続きから再開する</button>` : ""}
       <button class="btn ${hasSave ? "" : "btn-primary"}" onclick="App.goSetup()">一人で遊ぶ(CPU対戦)</button>
       <button class="btn" onclick="App.goOnlineMenu()">友達と通信して遊ぶ</button>
+      ${App.hasSnackSave() ? `<button class="btn btn-primary" onclick="App.continueSnackGame()">🍪 おやつ集めモードの続きから</button>` : ""}
+      <button class="btn" onclick="App.goSnackSetup()">🍪 おやつ集めモード(試作)で遊ぶ</button>
       <button class="btn" onclick="App.goProfile()">キャラクターを編集</button>
       <button class="btn" onclick="App.goShop()">ショップ</button>
       <button class="btn" onclick="App.goHelp()">📖 遊び方</button>
@@ -807,6 +809,278 @@ function renderResultScreen(state, mode, rewardCoins) {
       <ul class="result-list">${rows}</ul>
       ${rewardHtml}
       ${buttons}
+    </section>
+  `;
+}
+
+// ==================== おやつ集めモード(フェーズ1試作) ====================
+
+function renderSnackSetupScreen() {
+  const cpuOptions = [1, 2, 3].map((n) => `<option value="${n}">CPU ${n}人(合計${n + 1}人)</option>`).join("");
+  return `
+    <section class="screen screen-setup">
+      <h2>🍪 おやつ集めモード(試作)</h2>
+      <p class="lead">周回・分岐マップでおやつを取り合う、マリオパーティ風の新モードです。全${SNACK_TOTAL_ROUNDS}ラウンドで、おやつ数の多いプレイヤーが優勝(同数なら所持コイン、さらに同額なら歩いたマス数で決定)。</p>
+      <label class="field">
+        <span>あなたのニックネーム</span>
+        <input id="snack-nickname-input" type="text" maxlength="10" value="プレイヤー" />
+      </label>
+      <label class="field">
+        <span>CPU人数</span>
+        <select id="snack-cpu-count-select">${cpuOptions}</select>
+      </label>
+      <button class="btn btn-primary" onclick="App.startSnackGame()">この設定で始める</button>
+      <button class="btn" onclick="App.goTitle()">戻る</button>
+    </section>
+  `;
+}
+
+function renderSnackLogModal(entries) {
+  return `
+    <div class="modal-backdrop log-modal">
+      <div class="modal">
+        <h3>できごとログ</h3>
+        ${renderLog(entries)}
+        <button class="btn" onclick="App.snackToggleLog()">閉じる</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderSnackHUD(state, me) {
+  const roundsLeft = state.totalRounds - state.round + 1;
+  const turnPlayer = state.players[state.currentTurnIndex];
+  return `
+    <div class="snack-hud">
+      <div class="snack-hud-row">🍪 <strong>${me.snacks}</strong>個</div>
+      <div class="snack-hud-row">🪙 <strong>${me.matchCoins}</strong>コイン</div>
+      <div class="snack-hud-row">🎒 ${me.items.length}/${SNACK_ITEM_SLOT_LIMIT}</div>
+      <div class="snack-hud-row">⏳ 残り${Math.max(0, roundsLeft)}ラウンド</div>
+      <div class="snack-hud-row">👤 ${escapeHtml(turnPlayer.name)}の番</div>
+    </div>
+  `;
+}
+
+function renderSnackItemList(player, usable) {
+  if (!player.items.length) return `<p class="lead">アイテムは持っていません</p>`;
+  const rows = player.items
+    .map((itemId) => {
+      const item = SNACK_ITEMS.find((it) => it.id === itemId);
+      if (!item) return "";
+      const actionHtml = usable ? `<button class="btn btn-offer" onclick="App.snackUseItem('${item.id}')">使う</button>` : "";
+      return `
+        <li class="player-row">
+          ${renderItemIcon(item, 28)}
+          <span class="p-name">${escapeHtml(item.name)}</span>
+          ${actionHtml}
+        </li>
+      `;
+    })
+    .join("");
+  return `<ul class="player-list">${rows}</ul>`;
+}
+
+function renderSnackHub(state, humanId, hub, showEndTurn) {
+  const view = (hub && hub.view) || "menu";
+  const me = state.players.find((p) => p.id === humanId);
+  if (view === "spinning") {
+    return `
+      <div class="turn-hub-modal">
+        <div class="roulette-display">
+          <div class="roulette-wheel-wrap">
+            <div class="roulette-pointer">▼</div>
+            <div class="roulette-wheel${hub.spinning ? " is-spinning" : ""}"></div>
+            <div class="roulette-wheel-number">${hub.spinNumber}</div>
+          </div>
+          <p class="lead">${hub.spinning ? "サイコロが回転中…" : "サイコロ、止まった！"}</p>
+        </div>
+      </div>
+    `;
+  }
+  if (view === "items") {
+    return `
+      <div class="turn-hub-modal">
+        <div class="turn-hub-card">
+          <h3>アイテムを使う</h3>
+          ${renderSnackItemList(me, true)}
+          <button class="btn" onclick="App.showSnackHubView('menu')">戻る</button>
+        </div>
+      </div>
+    `;
+  }
+  return `
+    <div class="hub-bar">
+      ${showEndTurn ? `<button class="hub-bar-btn" onclick="App.snackShowShop()"><span class="hub-bar-icon">🏪</span><span class="hub-bar-label">ショップ</span></button>` : ""}
+      ${!showEndTurn ? `<button class="hub-bar-btn hub-bar-btn-primary" onclick="App.snackRoll()"><span class="hub-bar-icon">🎲</span><span class="hub-bar-label">サイコロ</span></button>` : ""}
+      <button class="hub-bar-btn" onclick="App.showSnackHubView('items')"><span class="hub-bar-icon">🎒</span><span class="hub-bar-label">アイテム</span></button>
+      <button class="hub-bar-btn" onclick="App.snackToggleLog()"><span class="hub-bar-icon">📜</span><span class="hub-bar-label">ログ</span></button>
+      ${showEndTurn ? `<button class="hub-bar-btn hub-bar-btn-primary" onclick="App.snackEndTurn()"><span class="hub-bar-icon">➡️</span><span class="hub-bar-label">つぎへ</span></button>` : ""}
+    </div>
+  `;
+}
+
+function renderSnackBranchModal(state, isHumanTurn) {
+  if (!state.pendingBranch) return "";
+  const branchNode = findSnackNode(state.pendingBranch.nodeId);
+  const player = state.players.find((p) => p.id === state.pendingBranch.playerId);
+  if (!isHumanTurn) {
+    return `
+      <div class="modal-backdrop">
+        <div class="modal">
+          <div class="modal-telop">
+            <h3>分かれ道</h3>
+            <p>${escapeHtml(player.name)}が考え中…</p>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  const buttons = branchNode.nextNodeIds
+    .map((nid, i) => {
+      const isShortcut = i === 1;
+      const label = isShortcut ? `近道(内周)へ進む(通行料 ${branchNode.tollCost}コイン)` : "そのまま外周を進む";
+      return `<button class="btn btn-offer" onclick="App.snackChooseBranch('${nid}')">${label}</button>`;
+    })
+    .join("");
+  return `
+    <div class="modal-backdrop">
+      <div class="modal">
+        <div class="modal-telop">
+          <h3>分かれ道</h3>
+          <p>外周をそのまま進むか、近道の内周へ入るか選んでください。</p>
+        </div>
+        <p class="coin-display">🪙 所持コイン: ${state.players.find((p) => p.id === state.pendingBranch.playerId).matchCoins}</p>
+        ${buttons}
+      </div>
+    </div>
+  `;
+}
+
+function renderSnackSnackChoiceModal(state, isHumanTurn) {
+  if (!state.pendingSnackChoice) return "";
+  const player = state.players.find((p) => p.id === state.pendingSnackChoice.playerId);
+  if (!isHumanTurn) {
+    return `
+      <div class="modal-backdrop">
+        <div class="modal">
+          <div class="modal-telop">
+            <h3>🍪 おやつ発見！</h3>
+            <p>${escapeHtml(player.name)}が考え中…</p>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  return `
+    <div class="modal-backdrop">
+      <div class="modal">
+        <div class="modal-telop">
+          <h3>🍪 おやつ発見！</h3>
+          <p>${SNACK_SNACK_PRICE}コインで、おやつを手に入れますか？(所持コイン: ${player.matchCoins})</p>
+        </div>
+        <button class="btn btn-offer" onclick="App.snackChooseSnackPurchase(true)">買う(-${SNACK_SNACK_PRICE})</button>
+        <button class="btn btn-offer" onclick="App.snackChooseSnackPurchase(false)">見送る</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderSnackStopChoiceModal(state, isHumanTurn) {
+  if (!state.pendingStopChoice) return "";
+  const pc = state.pendingStopChoice;
+  const player = state.players.find((p) => p.id === pc.playerId);
+  if (!isHumanTurn) {
+    return `
+      <div class="modal-backdrop">
+        <div class="modal">
+          <div class="modal-telop">
+            <h3>${escapeHtml(pc.title)}</h3>
+            <p>${escapeHtml(player.name)}が考え中…</p>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  const optionButtons = pc.options
+    .map((o, i) => `<button class="btn btn-offer" onclick="App.snackChooseStopOption(${i})">${escapeHtml(o.label)}</button>`)
+    .join("");
+  return `
+    <div class="modal-backdrop">
+      <div class="modal">
+        <div class="modal-telop">
+          <h3>${escapeHtml(pc.title)}</h3>
+          <p>${escapeHtml(pc.prompt)}</p>
+        </div>
+        ${optionButtons}
+      </div>
+    </div>
+  `;
+}
+
+function renderSnackShopModal(me) {
+  const cards = SNACK_ITEMS
+    .map((it) => {
+      const canBuy = me.items.length < SNACK_ITEM_SLOT_LIMIT && me.matchCoins >= it.price;
+      const actionHtml = `<button class="btn btn-offer shop-card-btn" ${canBuy ? "" : "disabled"} onclick="App.snackBuyShopItem('${it.id}')">${buyButtonLabel(it.price, me.matchCoins)}</button>`;
+      return renderShopCard({ iconHtml: renderItemIcon(it, 44), name: escapeHtml(it.name), badgeHtml: "", actionHtml, cardClass: !canBuy ? "shop-card-cant-afford" : "" });
+    })
+    .join("");
+  return `
+    <div class="modal-backdrop">
+      <div class="modal">
+        <h3>🏪 ショップ(アイテム所持: ${me.items.length}/${SNACK_ITEM_SLOT_LIMIT})</h3>
+        <p class="coin-display">🪙 所持コイン: ${me.matchCoins}</p>
+        <div class="shop-grid">${cards}</div>
+        <button class="btn" onclick="App.showSnackHubView('menu')">閉じる</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderSnackGameScreen(snack, humanId) {
+  const state = snack.state;
+  const turnPlayer = state.players[state.currentTurnIndex];
+  const isHumanTurn = turnPlayer.id === humanId;
+  const hasPending = !!(state.pendingBranch || state.pendingSnackChoice || state.pendingStopChoice);
+  const isCPUSpinning = !isHumanTurn && snack.hub && snack.hub.view === "spinning";
+  const me = state.players.find((p) => p.id === humanId);
+  const movementDone = !hasPending && turnPlayer.turnRolled && turnPlayer.remainingSteps === 0;
+  const showHub = (isHumanTurn && !hasPending) || isCPUSpinning;
+  return `
+    <section class="screen screen-game screen-snack-game">
+      ${renderSnackHUD(state, me)}
+      ${showHub ? renderSnackHub(state, humanId, snack.hub, movementDone && isHumanTurn) : ""}
+      ${renderSnackBranchModal(state, isHumanTurn)}
+      ${renderSnackSnackChoiceModal(state, isHumanTurn)}
+      ${renderSnackStopChoiceModal(state, isHumanTurn)}
+      ${snack.hub && snack.hub.view === "shop" ? renderSnackShopModal(me) : ""}
+      ${snack.logOpen ? renderSnackLogModal(snack.log) : ""}
+      <button class="btn" onclick="App.goTitle()">☰ タイトルへ戻る</button>
+    </section>
+  `;
+}
+
+function renderSnackResultScreen(state, humanId) {
+  const ranking = getSnackRanking(state);
+  const rows = ranking
+    .map((p, i) => {
+      const visual = p.avatar || { color: "#e4572e", speciesEmoji: null, costumeImage: null };
+      return `
+        <li class="result-row">
+          <span class="result-rank">${i + 1}位</span>
+          ${renderAvatarBadge(visual, 26)}
+          <span class="p-name">${escapeHtml(p.name)}${p.isCPU ? "(CPU)" : ""}</span>
+          <span class="p-money">🍪${p.snacks} 🪙${p.matchCoins}</span>
+        </li>
+      `;
+    })
+    .join("");
+  return `
+    <section class="screen screen-result">
+      <h2>おやつ集め結果発表</h2>
+      <ul class="result-list">${rows}</ul>
+      <button class="btn btn-primary" onclick="App.goSnackSetup()">もう一度遊ぶ</button>
+      <button class="btn" onclick="App.goTitle()">タイトルへ</button>
     </section>
   `;
 }
