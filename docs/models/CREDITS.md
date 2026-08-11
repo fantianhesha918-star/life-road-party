@@ -2,6 +2,8 @@
 
 盤面3D化(フェーズB検証)で使用している3Dモデルの出典を記録する。すべて大手が運営する定番サイトのみから調達する方針(2026-08-04確定)。
 
+**注意(2026-08-10)**: このファイル内の「バウンディングボックス」「Y幅」等の記述は、クロコ(Codex連携チャット)がBlenderまたはGLBのaccessor min/maxをオフラインで読んだ簡易チェックの値であり、glTFノードのtransform(回転等)を考慮できていないため軸の対応がファイルごとにずれる場合がある。**スケール・配置の最終確認は、進行用チャットが実施するThree.js(Box3)での実機実測を優先すること。**
+
 ## animal-dog.glb
 
 - 配布元: [Kenney.nl](https://kenney.nl/assets/cube-pets) — 「Cube Pets」パック
@@ -21,7 +23,7 @@
 - 最終仕上げ: Blenderでテクスチャ解像度を1024に縮小・Draco圧縮・JPEG変換(従来と同じパイプライン)
 - 最終仕様(v3): 15,637ポリゴン・346KB、バウンディングボックスY幅1.899(旧バージョンとほぼ一致、CHARACTER_SCALE等の変更は不要な見込み)
 - **旧v1の経緯(参考)**: 最初はMeshy無料プランのWeb UI(Image-to-3D、Meshy 5、正面画像のみ)で生成し689,686ポリゴン・33MBと過大だった。単純なBlender Decimateでは、Meshyのテクスチャが「複数視点写真を継ぎ接ぎしたアトラス画像」形式であることが原因でUV対応が崩れノイズが出る問題があり、Meshy公式の「Remesh」機能(Web UI、5クレジット)で解決した経緯がある。API化後はこの手動手順が不要になった
-- **`docs/board3d.js`などへの反映は進行用チャット側の作業待ち**(まだcommit/pushしていない)。テクスチャ・見た目のみの差し替えのためscale/yOffsetの変更は不要な見込みだが、念のため実機確認を推奨
+- **2026-08-11、進行用チャット側で`docs/board3d.js`に反映・commit済み**。Three.js Box3実機実測(Y軸=1.468、min.y=-0.734)の結果、旧scale(0.47)のままだと表示後の高さ(≈0.69)が他5種の基準(≈0.89)より約2割低く、地面から少し浮いて見える状態だった(v2→v3差し替え時にscaleを再計算していなかったバグ)。scaleを0.606に修正し、他種と揃う表示高さにした(yOffsetは0.445のまま変更不要)。
 
 ## chinchilla-white-pied.glb
 
@@ -119,7 +121,7 @@
 - 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)
 - 最終ファイルサイズ: human-male 384KB、human-female 369KB(他キャラクターと同水準)
 - バウンディングボックス(Blender座標、原点中心): human-male X幅0.80/Y幅0.62/Z幅1.90、human-female X幅0.79/Y幅0.73/Z幅1.90(board3d.js組み込み時のCHARACTER_SCALE/Y_OFFSET算出用)
-- **`docs/board3d.js`・`shop-data.js`(SPECIES_ITEMSへの追加)への組み込みは未実施**、進行用チャット側での対応待ち。まだcommit/pushしていない
+- **2026-08-11、進行用チャット側で組み込み完了**: `shop-data.js`のSPECIES_ITEMSに`species-human-male`/`species-human-female`(価格0、既存6種と同じ無料枠)を追加。`docs/board3d.js`のSPECIES_MODEL_MAPにもThree.js Box3実測(human-male: Y軸1.898/min.y -0.951、human-female: Y軸1.899/min.y -0.950)から算出したscale 0.469・yOffset 0.446を設定し、他6種と表示後の高さ(≈0.89)が揃うようにした。アバターバッジ(`docs/avatars/human-male.png`/`human-female.png`)は、上記front参考イラストから四隅を背景色として検出し透明化(既存のコスチュームバッジと同じ手法)して新規生成した。トイフィギュア調のイラストのまま統合しており、動物6種のリアル路線の見た目とは意図的にテイストが異なる(ユーザー了承済み、2026-08-11)。
 
 ## costume-kimono_chinchilla-gray.glb
 
@@ -133,24 +135,39 @@
 - **`docs/board3d.js`(コスチューム装備時のモデル差し替えロジック)への組み込みは未実施**、進行用チャット側での対応待ち。まだcommit/pushしていない
 - **2026-08-10、進行用チャット側で組み込み完了**: ユーザーから「帽子・アクセサリーを廃止し、全身コスチューム(動物種ごとに着せる、独立キャラクターではなく既存の動物種フィット型を採用)に置き換える」との指示を受け、この試作モデルをテストケースとして`board3d.js`にコスチューム+動物種の組み合わせモデル差し替えロジック(`COSTUME_MODEL_MAP`、キー`"{costumeId}_{speciesId}"`)を実装した。
   - scale/yOffset算出: Three.js`GLTFLoader`+`DRACOLoader`(本番と同じ構成)で素の`chinchilla-gray.glb`とこのモデルを実機読み込みし、`Box3.setFromObject(gltf.scene)`で実測。Y軸(垂直方向)の実測サイズは素=1.4678/コスチューム版=1.4151、min.y絶対値は素=0.7343/コスチューム版=0.7088で、既存の`scale=0.47, yOffset=0.445`(素のchinchilla-gray用)に対してこの比率をそのまま適用し`scale=0.4875, yOffset=0.4295`を算出。実機表示(Playwright)でも素のモデルと違和感のない大きさ・接地で表示されることを確認済み。
-  - **注記**: このファイル冒頭の「Blender等のオフライン計測は軸がずれる場合がある」という注意の実例が、まさにこのモデルで確認できた。Blender計測では「Y幅1.90/Z幅1.42」だったのに対し、Three.js実機実測では垂直方向(表示上の高さ)がZ軸相当(≈1.899)ではなくY軸(≈1.415〜1.468)に出ており、素のchinchilla-gray.glbも同じ傾向(Y軸1.468/Z軸1.899)だった。両ファイルで軸の出方が揃っていたため、今回はY軸実測値どうしの比率をそのまま使えば正しく揃うと判断した。
+  - **注記**: このファイル冒頭(2026-08-10)の「Blender等のオフライン計測は軸がずれる場合がある」という注意書きの実例が、まさにこのモデルで確認できた。Blender計測では「Y幅1.90/Z幅1.42」だったのに対し、Three.js実機実測では垂直方向(表示上の高さ)がZ軸相当(≈1.899)ではなくY軸(≈1.415〜1.468)に出ており、素のchinchilla-gray.glbも同じ傾向(Y軸1.468/Z軸1.899)だった。両ファイルで軸の出方が揃っていたため、今回はY軸実測値どうしの比率をそのまま使えば正しく揃うと判断した。
   - 他29組み合わせ(スーツ・忍者・くまの着ぐるみ×6種、着物の残り5種)は3Dモデル化未着手のため、`COSTUME_MODEL_MAP`に無ければ素の動物モデルにフォールバックする(3D盤面には反映されないが、ショップ・キャラクター編集画面の2Dイラストには反映される)。
   - あわせて、`docs/costumes/costume-<id>_<species>.png`(24枚、512×512、透過PNG)をショップ・キャラクター編集画面用のバッジ画像として新規生成した。各コスチュームフォルダの`front.png`(3Dモデル化用の参考イラスト、白背景)から、四隅を背景色として検出し外周と連結した領域のみを透明化する手法(内部の白い衣装部分は透明化しない)で背景除去し、正方形にトリミングしている。
 
-## 結婚マス装飾(新郎新婦)のboard3d.js組み込み(2026-08-10、進行用チャット)
+## costume-wedding_chinchilla-gray.glb / costume-wedding_chinchilla-white-pied.glb
 
-Codex連携チャットが作成した`costume-wedding_chinchilla-gray.glb`(タキシード)・`costume-wedding_chinchilla-white-pied.glb`(ウェディングドレス)を、結婚マス(`game-data.js`の`BOARD_SQUARES`index17)周辺の静的装飾として`docs/board3d.js`に組み込んだ(プレイヤーの着せ替えではなく風景装飾、`WEDDING_COUPLE_MODELS`・`createWeddingCouple()`)。
+- 2026-08-10、結婚マスの飾り(新郎新婦キャラ)として、納品済みのウェディング衣装イラスト(オス=タキシード/メス=ウェディングドレス)のうち代表2体を3Dモデル化。全6種ではなくこの2体のみ(コスト抑制、結婚マス周辺に静的に配置する用途のため)
+- 参考イラスト: `クロコとcodex受け渡し\素材受け渡し\02_Codex作成素材\アニマルライフ_コスチューム_ウェディング_6種_2026-08-10\`(既存納品分)
+- 生成: 他コスチュームと同じMeshy AI API Multi-Image to 3D(`ai_model: meshy-6`、`enable_pbr: true`、`texture_resolution: 4k`、`should_remesh: true`、`target_polycount: 15000`)
+- 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)
+- 最終仕様: chinchilla-gray(タキシード)15,392ポリゴン・481KB / chinchilla-white-pied(ウェディングドレス)14,813ポリゴン・693KB
+- **用途**: 結婚マス(`BOARD_SQUARES`のindex17)周辺に静的な装飾として配置する想定(プレイヤーキャラクターとしての着せ替えではなく、風景装飾)。
+- **組み込み・commit済み**(進行用チャット側、`docs/board3d.js`の`WEDDING_COUPLE_MODELS`/`createWeddingCouple()`)。scale/yOffsetはThree.js Box3実測から算出(groom: scale 0.3634/yOffset 0.5758、bride: scale 0.4691/yOffset 0.5674)。glb本体のgit追跡漏れ(コードはcommit済みだが本体ファイルが未追跡だった)を2026-08-11に発見・追加commit済み。
 
-- **scale/yOffset算出**: Three.js`GLTFLoader`+`DRACOLoader`(本番と同一構成)で実機読み込みしBox3実測。groom: 素のchinchilla-gray.glb(scale=0.47、Y軸実測1.4678、min.y絶対値0.7343)に対し、コスチューム版はY軸実測1.8985・min.y絶対値0.9502。bride: 素のchinchilla-white-pied.glb(scale=0.598、Y軸実測1.4894、min.y絶対値0.7453)に対し、コスチューム版はY軸実測1.8988・min.y絶対値0.9503。それぞれの比率から`groom: scale=0.3634, yOffset=0.5758` / `bride: scale=0.4691, yOffset=0.5674`を算出。
-- **軸ずれの実例(このファイル冒頭の注意書き通り)**: 素のchinchilla-gray/white-piedはY軸実測が1.47〜1.49と小さくZ軸が1.899と大きいのに対し、ウェディング衣装版はY軸実測が1.898と大きくZ軸が1.45〜1.48と小さい。Three.jsが実際に描画するY-upワールド座標では常にY軸がそのまま縦方向になるため、この違いはノードtransformの入り方の差(Blender等でのエクスポート時の補正回転の有無)による軸の入れ替わりであり、追加の回転補正なしでBox3実測値をそのまま使えば正しく直立して配置できることを実機で確認した。
-- **配置**: 結婚マスの座標(`squarePosition(17)`)から、その地点の道の法線方向へ左右(WEDDING_COUPLE_SIDE_OFFSET=1.4)にオフセットしてgroom/brideを配置。結婚マス自体(プレイヤーが実際に止まる領域)は塞がない。街灯・ベンチ等の巡回装飾配置(`buildStagePropLayout`)にも新郎新婦の座標を障害物として登録し、既存の街灯・ベンチ等と重ならないよう調整した。
-- Playwrightで結婚マス周辺の表示を実機確認(プレイヤーキャラクターと並んだ際のサイズ感・接地・向き)、Node vm 300ゲームランダム回帰テストも実施、いずれも問題なし。
+## icon-job.glb / icon-payday.glb / icon-event.glb / icon-fortune.glb / icon-choice.glb / icon-rest.glb / icon-childbirth.glb / icon-house.glb / icon-stock.glb / facility-church.glb(マス種別の視覚的判別強化)
 
-## マス目印アイコン9種・結婚マス用の教会のboard3d.js組み込み(2026-08-11、進行用チャット)
+- 2026-08-11、「マスの種類が見た目で分かるようにしたい」という要望を受け、マス目印アイコン9種+結婚マス用の教会を作成
+- 参考イラスト: Codexへ依頼(`アニマルライフ_マス目印アイコン_9種_2026-08-10`・`アニマルライフ_教会_2026-08-10`)、既存の街灯/ベンチ/看板/建物と同じフェルト調ミニチュアジオラマ様式。教会は正面が開いた内部ジオラマ版(`facility-church.png`、新郎新婦キャラが中に配置された演出込み)を採用、扉が閉じた外観のみ版(`facility-church-exterior-v1.png`)は不採用
+- アイコンの対応関係: icon-job=就職(カバン)、icon-payday=給料日(お金袋)、icon-event=イベント(ギフトボックス)、icon-fortune=運(水晶玉)、icon-choice=選択(二股看板)、icon-rest=ひと休み(ベンチ+Zzz)、icon-childbirth=出産(ベビーカー)、icon-house=マイホーム(家看板)、icon-stock=株(グラフ看板)
+- 生成: 他の街灯/ベンチ/看板/建物と同じ簡易パイプライン(`ai_model: meshy-5`、単一画像、`enable_pbr: false`、`should_remesh: true`、`topology: triangle`)。`target_polycount`はアイコン5,000〜8,000(形状の複雑さに応じて個別設定)、教会は建物と同じ12,000
+- 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)
+- 最終仕様: icon-job 140KB / icon-payday 127KB / icon-event 139KB / icon-fortune 116KB / icon-choice 126KB / icon-rest 165KB / icon-childbirth 141KB / icon-house 153KB / icon-stock 173KB / facility-church 214KB
+- Blender簡易レンダーで形状・質感を確認済み(icon-job・icon-stock・facility-churchで実施、いずれも既存の街灯/ベンチ/看板/建物と同等の品質)。教会は単一画像からの再構築のため側面・背面のディテールは簡略化されている(既存建物群と同じ制約、正面重視のジオラマ用途として許容範囲)
+- **用途**: 各マス種別の周辺に静的な目印として配置する想定。スタート/ゴールは既存ゲートがあるため対象外
+- **組み込み・commit済み**(進行用チャット側、`docs/board3d.js`の`SQUARE_TYPE_ICON_MODELS`/`createSquareIcons()`・`createChurch()`)。glb本体のgit追跡漏れ(コードはcommit済みだが本体ファイルが未追跡だった)を2026-08-11に発見・追加commit済み。
 
-Codex連携チャットが作成した`icon-job.glb`〜`icon-stock.glb`(9種)・`facility-church.glb`を`docs/board3d.js`に組み込んだ。
+## snack-mascot.glb / building-job-center.glb / prop-flowerbed.glb / facility-plaza-circle.glb / scenery-distant-hill.glb(おやつ集めモード・ステージ1プロトタイプ素材)
 
-- **マス目印アイコン**: `SQUARE_TYPE_ICON_MODELS`でマス種別→アイコンのキー対応(job/payday/event/fortune/choice/rest/childbirth、house-market・house-fire・house-swapの3種は共通で`icon-house`)を定義し、`squareIconModelKey(index)`で解決。株購入チャンスのマス(`STOCK_TRIGGER_INDEXES`)は既存の金色タイル上書きと同じ考え方で、種別アイコンより優先して`icon-stock`を立てる。start/goal(既存ゲート)とmarriage(教会+新郎新婦)はアイコン対象外。`createSquareIcons()`で各マスの中心から法線方向へ0.55ずらして配置し、プレイヤートークンの持ち場オフセット(半径0.32)と重ならないようにした。
-- **scale/yOffset算出**: 9種ともThree.js Box3実測(既存の建物・街灯と同じMeshy5単一画像パイプラインのため軸ずれ無し、Y軸=高さの前提で算出)。表示高さ0.65に統一(縦横比はモデルのまま、最終的な見た目の大きさを揃えた)。教会は建物と同程度の表示高さ1.05を目安に算出。
-- **教会の配置**: 結婚マスの新郎新婦より奥(道から2.8)の新郎側に配置し、新郎新婦が手前・教会が背景という構図にした。教会の内部には(単一画像から再構築した簡略化ディテールだが)新郎新婦の小さなシルエットが焼き込まれている(CREDITS.md該当セクション参照)。`buildStagePropLayout`の障害物リストにも教会の座標を登録し、通常の建物巡回配置と重ならないようにした。
-- Playwrightで複数のマス種別(就職・給料日・イベント・株トリガー・火事・マイホーム・出産・結婚)を実機確認、アイコン・教会・新郎新婦とも既存装飾との衝突なし。Node vm 300ゲーム回帰テストも実施、問題なし。
+- 2026-08-11、検討中の新ゲームモード「おやつ集めモード」のステージ1(アニマルタウン・リングパーク)プロトタイプ向けに作成
+- 参考イラスト: Codexへ依頼(`アニマルライフ_おやつ集めモード_おやつマスコット_2026-08-11`・`アニマルライフ_おやつ集めモード_プロトタイプ地形素材4種_2026-08-11`)、既存の建物/小道具/マス目印アイコンと同じフェルト調ミニチュアジオラマ様式
+- 生成: 既存の街灯/ベンチ/看板/建物/マス目印アイコンと同じ簡易パイプライン(`ai_model: meshy-5`、単一画像、`enable_pbr: false`、`should_remesh: true`、`topology: triangle`)。`target_polycount`はsnack-mascot 8,000・building-job-center 12,000(建物と同じ)・prop-flowerbed 6,000・facility-plaza-circle 8,000・scenery-distant-hill 5,000
+- 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)
+- 最終仕様: snack-mascot 89KB / building-job-center 248KB / prop-flowerbed 170KB / facility-plaza-circle 147KB / scenery-distant-hill 79KB
+- Blender簡易レンダーで形状・質感を確認済み、いずれも既存素材と同等の品質。building-job-centerの壁面に単一画像生成由来の軽い模様ノイズがあるが、実用上問題ないレベル
+- **用途**: おやつ集めモードのステージ1(北エリア=就職センター、中央=円形広場、道沿い=花壇、遠景=丘)。snack-mascotはマップ上に出現・取得・再配置される中心の収集アイテム
+- **このゲームモード自体はまだアイデア段階で実装未着手**、`docs/board3d.js`への組み込みも未実施。素材のみ準備完了の状態。まだcommit/pushしていない
