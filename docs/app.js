@@ -411,8 +411,10 @@ const App = {
       this.online.remoteFocusPlayerId = uid; // カメラもこの演出中のプレイヤーを追う(sync3DBoard参照)
       this.loadBoard3DModules().then(() => {
         window.LifeRoadBoard3D.hopSteps(uid, prevPos, newPos, { stepDurationMs: HOP_STEP_MS }).then(() => {
+          // ホップ演出中に退室していたら(this.online=null)何もしない
+          if (!this.online) return;
           this.online.remoteHoppingIds.delete(uid);
-          if (this.online && this.online.remoteFocusPlayerId === uid) this.online.remoteFocusPlayerId = null;
+          if (this.online.remoteFocusPlayerId === uid) this.online.remoteFocusPlayerId = null;
           this.render();
         });
       });
