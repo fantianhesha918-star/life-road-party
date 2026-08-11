@@ -82,15 +82,18 @@ const STOCK_CERTIFICATE_IMAGE = "images/items/item-stock-certificate.png";
 // キャラクターの動物種(全種すべて最初から無料所持)。avatarImageはdocs/avatars/配下の
 // 実イラスト(Codex作成、背景透過)へのパス。アバターバッジ(ui.jsのrenderAvatarBadge)は
 // このavatarImageがあれば絵文字より優先して表示する。
+// shortNameは、キャラクター編集画面の3列カード(species-card、幅が狭く長い名前だと
+// 3行に折り返ってしまう)専用の短縮表示名。無い場合はnameをそのまま使う。正式名(name)は
+// ショップ一覧など横幅に余裕がある場所でこれまで通り使う(レビュー指摘対応、2026-08-11)。
 const SPECIES_ITEMS = [
   { id: "species-chinchilla-gray", category: "species", name: "チンチラ(グレー)", price: 0, emoji: "🐹", avatarImage: "avatars/chinchilla-gray.png" },
-  { id: "species-chinchilla-white", category: "species", name: "チンチラ(白パイド)", price: 0, emoji: "🐹", avatarImage: "avatars/chinchilla-white-pied.png" },
-  { id: "species-dog-frenchie-white", category: "species", name: "いぬ(フレンチブルドッグ・白)", price: 0, emoji: "🐶", avatarImage: "avatars/dog-frenchie-white.png" },
-  { id: "species-dog-frenchie-black", category: "species", name: "いぬ(フレンチブルドッグ・黒)", price: 0, emoji: "🐶", avatarImage: "avatars/dog-frenchie-black.png" },
+  { id: "species-chinchilla-white", category: "species", name: "チンチラ(白パイド)", shortName: "チンチラ(白)", price: 0, emoji: "🐹", avatarImage: "avatars/chinchilla-white-pied.png" },
+  { id: "species-dog-frenchie-white", category: "species", name: "いぬ(フレンチブルドッグ・白)", shortName: "フレブル(白)", price: 0, emoji: "🐶", avatarImage: "avatars/dog-frenchie-white.png" },
+  { id: "species-dog-frenchie-black", category: "species", name: "いぬ(フレンチブルドッグ・黒)", shortName: "フレブル(黒)", price: 0, emoji: "🐶", avatarImage: "avatars/dog-frenchie-black.png" },
   { id: "species-cat-calico", category: "species", name: "ねこ(三毛猫)", price: 0, emoji: "🐱", avatarImage: "avatars/cat-calico.png" },
   { id: "species-rabbit-white", category: "species", name: "うさぎ(白)", price: 0, emoji: "🐰", avatarImage: "avatars/rabbit-white.png" },
-  { id: "species-human-male", category: "species", name: "にんげん(男の子)", price: 0, emoji: "🧑", avatarImage: "avatars/human-male.png" },
-  { id: "species-human-female", category: "species", name: "にんげん(女の子)", price: 0, emoji: "👧", avatarImage: "avatars/human-female.png" },
+  { id: "species-human-male", category: "species", name: "にんげん(男の子)", shortName: "にんげん(男)", price: 0, emoji: "🧑", avatarImage: "avatars/human-male.png" },
+  { id: "species-human-female", category: "species", name: "にんげん(女の子)", shortName: "にんげん(女)", price: 0, emoji: "👧", avatarImage: "avatars/human-female.png" },
 ];
 
 const ALL_ITEMS = [...FREE_COLOR_ITEMS, ...SHOP_ITEMS, ...COSTUME_ITEMS, ...CONSUMABLE_ITEMS, ...SPECIES_ITEMS];

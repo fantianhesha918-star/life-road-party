@@ -143,9 +143,9 @@ function renderSpeciesCard(item, isEquipped) {
     ? `<img class="species-card-img" src="${item.avatarImage}" alt="" />`
     : `<span class="species-card-emoji">${item.emoji}</span>`;
   return `
-    <button class="species-card ${isEquipped ? "species-card-selected" : ""}" onclick="App.equipAvatarItem('species', '${item.id}')">
+    <button class="species-card ${isEquipped ? "species-card-selected" : ""}" onclick="App.equipAvatarItem('species', '${item.id}')" title="${escapeHtml(item.name)}">
       <span class="species-card-icon">${iconHtml}</span>
-      <span class="species-card-name">${escapeHtml(item.name)}</span>
+      <span class="species-card-name">${escapeHtml(item.shortName || item.name)}</span>
     </button>
   `;
 }
@@ -182,7 +182,7 @@ function renderProfileScreen(profile) {
   const costumeOwned = COSTUME_ITEMS.filter((it) => profile.ownedItems.includes(it.id));
   const costumeCards = costumeOwned.length
     ? costumeOwned.map((it) => renderCostumeEquipCard(it, profile.equipped.species, profile.equipped.costume === it.id)).join("")
-    : `<p class="lead">まだコスチュームを持っていません。ショップで購入できます。</p>`;
+    : `<p class="lead shop-grid-empty">まだコスチュームを持っていません。ショップで購入できます。</p>`;
   const costumeSection = `<div class="field"><h3>コスチューム</h3><div class="shop-grid">${costumeCards}</div></div>`;
 
   return `
@@ -209,6 +209,13 @@ function renderShopToast(toast) {
   `;
 }
 
+// 購入ボタンのラベル。コイン不足の場合は「あと◯」を添えて、コイン獲得の目標を
+// 見た目だけで判断できるようにする(レビュー指摘対応、2026-08-11)。
+function buyButtonLabel(price, coins) {
+  const shortage = price - coins;
+  return shortage > 0 ? `🪙${price}<span class="shop-card-shortage">あと${shortage}</span>` : `🪙${price}`;
+}
+
 // ショップの1アイテムを、角丸の正方形アイコン+名前+購入ボタンのカードとして描画する
 // (キャラクター選択画面のspecies-cardと同じ視覚言語で統一感を持たせる)。
 function renderShopCard({ iconHtml, name, badgeHtml, actionHtml, disabled, cardClass }) {
@@ -232,7 +239,7 @@ function renderShopScreen(profile, shopToast) {
       const badgeHtml = equipped ? `<span class="badge badge-equipped">装着中</span>` : owned ? `<span class="badge">所持済み</span>` : "";
       const actionHtml = owned
         ? `<button class="btn btn-offer shop-card-btn" disabled>所持済み</button>`
-        : `<button class="btn btn-offer shop-card-btn" ${canBuy ? "" : "disabled"} onclick="App.buyShopItem('${it.id}')">🪙${it.price}</button>`;
+        : `<button class="btn btn-offer shop-card-btn" ${canBuy ? "" : "disabled"} onclick="App.buyShopItem('${it.id}')">${buyButtonLabel(it.price, profile.coins)}</button>`;
       return renderShopCard({ iconHtml, name: escapeHtml(it.name), badgeHtml, actionHtml, cardClass: !owned && !canBuy ? "shop-card-cant-afford" : "" });
     })
     .join("");
@@ -254,7 +261,7 @@ function renderShopScreen(profile, shopToast) {
         ? equipped
           ? `<button class="btn btn-offer shop-card-btn" disabled>装着中</button>`
           : `<button class="btn btn-offer shop-card-btn" onclick="App.equipAvatarItem('costume', '${it.id}')">装備する</button>`
-        : `<button class="btn btn-offer shop-card-btn" ${canBuy ? "" : "disabled"} onclick="App.buyShopItem('${it.id}')">🪙${it.price}</button>`;
+        : `<button class="btn btn-offer shop-card-btn" ${canBuy ? "" : "disabled"} onclick="App.buyShopItem('${it.id}')">${buyButtonLabel(it.price, profile.coins)}</button>`;
       return renderShopCard({ iconHtml, name: escapeHtml(it.name), badgeHtml, actionHtml, cardClass: !owned && !canBuy ? "shop-card-cant-afford" : "" });
     })
     .join("");
@@ -266,7 +273,7 @@ function renderShopScreen(profile, shopToast) {
       const count = (profile.consumables && profile.consumables[it.id]) || 0;
       const canBuy = profile.coins >= it.price;
       const badgeHtml = count > 0 ? `<span class="badge">所持${count}個</span>` : "";
-      const actionHtml = `<button class="btn btn-offer shop-card-btn" ${canBuy ? "" : "disabled"} onclick="App.buyShopItem('${it.id}')">🪙${it.price}</button>`;
+      const actionHtml = `<button class="btn btn-offer shop-card-btn" ${canBuy ? "" : "disabled"} onclick="App.buyShopItem('${it.id}')">${buyButtonLabel(it.price, profile.coins)}</button>`;
       return renderShopCard({ iconHtml: renderItemIcon(it, 44), name: escapeHtml(it.name), badgeHtml, actionHtml, cardClass: !canBuy ? "shop-card-cant-afford" : "" });
     })
     .join("");
@@ -444,6 +451,25 @@ function renderLogModal(entries) {
   `;
 }
 
+// pendingChoice.prompt(給料日/株価変動/質問文などが\n区切りで連結された文字列)を、
+// 1行ずつ別のp要素に分けて表示する(レビュー指摘: 全部が1つの段落に連結されて読みづらい件の対応)。
+// 「+◯万円」「-◯万円」を含む行は、reveal演出カードと同じ緑/赤で色分けする。
+function renderPromptLines(prompt) {
+  return prompt
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const deltaClass = /[+＋]\d+万円/.test(line)
+        ? "telop-line-positive"
+        : /-\d+万円/.test(line)
+          ? "telop-line-negative"
+          : "";
+      return `<p class="telop-line ${deltaClass}">${escapeHtml(line)}</p>`;
+    })
+    .join("");
+}
+
 // cpuName有り=CPUが選択中の画面。人間が誤って押して二重確定させないよう、
 // 選択肢はdisabledのまま見せるだけにする(押せる選択肢は人間自身の番のときのみ)。
 function renderChoiceModal(pendingChoice, mode, cpuName, coins) {
@@ -473,7 +499,7 @@ function renderChoiceModal(pendingChoice, mode, cpuName, coins) {
       <div class="modal">
         <div class="modal-telop">
           <h3>${escapeHtml(pendingChoice.title)}</h3>
-          <p>${escapeHtml(pendingChoice.prompt)}</p>
+          ${renderPromptLines(pendingChoice.prompt)}
         </div>
         ${typeof coins === "number" ? `<p class="coin-display">🪙 所持コイン: ${coins}</p>` : ""}
         <button class="btn" onclick="App.toggleStatusPeek()">📊 自分の状況を確認</button>

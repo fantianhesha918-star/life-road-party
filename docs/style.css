@@ -285,6 +285,12 @@ body {
   gap: 10px;
 }
 
+/* レビュー指摘: 「まだ持っていません」等の説明文が.shop-gridの1マス(3分の1幅)に
+   押し込まれ、数文字ごとに折り返す不具合の修正(2026-08-11)。グリッド全幅を使わせる。 */
+.shop-grid-empty {
+  grid-column: 1 / -1;
+}
+
 .shop-card {
   display: flex;
   flex-direction: column;
@@ -296,8 +302,10 @@ body {
   transition: opacity 0.15s;
 }
 
-.shop-card-cant-afford {
-  opacity: 0.55;
+/* レビュー指摘: カード全体を薄くすると商品名・価格まで読みにくくなるため、
+   購入不可を示すのは購入ボタン側のみにする(2026-08-11)。 */
+.shop-card-cant-afford .shop-card-btn {
+  opacity: 0.6;
 }
 
 .shop-card-icon {
@@ -338,6 +346,13 @@ body {
   width: 100%;
   font-size: 0.78rem;
   padding: 6px 4px;
+}
+
+.shop-card-shortage {
+  display: block;
+  font-size: 0.65rem;
+  font-weight: normal;
+  opacity: 0.85;
 }
 
 .shop-toast {
@@ -464,6 +479,22 @@ body {
 
 .modal-telop p {
   white-space: pre-line;
+}
+
+.telop-line + .telop-line {
+  margin-top: 0.4em;
+}
+
+/* ".modal p { color: var(--muted); }" (style.css内で先に定義済み)より詳細度を上げる
+   必要があるため、.modal-telop pまで含めたセレクタにする */
+.modal-telop p.telop-line-positive {
+  color: var(--ok);
+  font-weight: bold;
+}
+
+.modal-telop p.telop-line-negative {
+  color: var(--danger);
+  font-weight: bold;
 }
 
 .btn-offer {

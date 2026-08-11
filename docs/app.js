@@ -345,8 +345,12 @@ const App = {
       this.showMoneyToasts(result.entries, playerId, this.state.players);
       if (!result.pendingChoice && result.reveal) {
         // choice以外のマス(できごと・運命の分かれ道・給料日・ひと休み等)もテロップ枠で
-        // 見せてから次へ進む。「つぎへ」を押すまでdismissReveal()が呼ばれずターンは進まない
+        // 見せてから次へ進む。「つぎへ」を押すまでdismissReveal()が呼ばれずターンは進まない。
+        // applyRoll()は既にターンを次へ進めた状態までstateを更新済みのため、この時点で
+        // 一度保存しておく(「つぎへ」を押す前に中断されると、resultText表示中の内容が
+        // 保存されないまま次回再開時に古い状態へ巻き戻ってしまうバグの修正、2026-08-11)。
         this.reveal = { ...result.reveal, visual: turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, costumeImage: null } };
+        this.saveGame();
         this.render();
         return;
       }
@@ -568,6 +572,10 @@ const App = {
     const result = resolveChoice(this.state, this.state.pendingChoice.playerId, optionIndex);
     this.pushLog(result.entries);
     this.reveal = { ...result.reveal, visual: player.avatar || { color: player.color, speciesEmoji: null, costumeImage: null } };
+    // resolveChoice()は選択確定・ターン進行までstateを即座に更新済みのため、この時点で
+    // 一度保存する(「つぎへ」を押す前に中断されると選択前の状態へ巻き戻るバグの修正、2026-08-11、
+    // Codexレビューで指摘)。
+    this.saveGame();
     this.render();
   },
 
@@ -671,6 +679,9 @@ const App = {
           visual: player.avatar || { color: player.color, speciesEmoji: null, costumeImage: null },
           interactive: false,
         };
+        // CPUのロール結果も既にstateへ反映済みのため、非表示タイマーを待たず即座に保存する
+        // (人間の選択と同じ「reveal表示中の中断で巻き戻る」バグの修正、2026-08-11)。
+        this.saveGame();
         this.render();
         setTimeout(() => {
           if (!this.reveal) return;
@@ -696,6 +707,9 @@ const App = {
         visual: choosingPlayer.avatar || { color: choosingPlayer.color, speciesEmoji: null, costumeImage: null },
         interactive: false,
       };
+      // CPUの選択結果も既にstateへ反映済みのため、非表示タイマーを待たず即座に保存する
+      // (人間の選択と同じ「reveal表示中の中断で巻き戻る」バグの修正、2026-08-11)。
+      this.saveGame();
       this.render();
       setTimeout(() => {
         if (!this.reveal) return;

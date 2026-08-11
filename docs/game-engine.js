@@ -22,6 +22,7 @@ function createInitialState(playerConfigs) {
       finished: false,
       skipNextTurn: false,
       stockShares: 0,
+      stockChoiceCooldownRound: 0,
       children: 0,
       housePrice: 0,
       insurance: null,
@@ -72,6 +73,20 @@ function findForcedStop(fromPos, rawToPos) {
 // (止まらず通り過ぎただけでも発生する)
 function passesStockTrigger(fromPos, toPos) {
   return STOCK_TRIGGER_INDEXES.some((idx) => idx > fromPos && idx <= toPos);
+}
+
+// 序盤で証券会社の勧誘が2ターン連続で発生し単調に感じる、というレビュー指摘への対応。
+// 一度株の選択(購入・見送りどちらでも)を提示したプレイヤーには、最低1ラウンド
+// (全プレイヤーが1巡するまで)は再提示しないクールダウンを設ける。クールダウン中に
+// トリガーマスを通過した場合はそのマス自体は単に素通りしたことになる(以後同じマスを
+// 再度通ることはないため、その回のチャンス自体は失われるが、複数トリガーが近接している
+// レアケースの緩和を優先する)。
+const STOCK_CHOICE_COOLDOWN_ROUNDS = 1;
+function isStockChoiceOnCooldown(state, player) {
+  return state.turnNumber < (player.stockChoiceCooldownRound || 0);
+}
+function startStockChoiceCooldown(state, player) {
+  player.stockChoiceCooldownRound = state.turnNumber + STOCK_CHOICE_COOLDOWN_ROUNDS;
 }
 
 // 株購入の選択(pendingChoice)を組み立てる。保有株があれば先に株価変動を適用し、
@@ -133,9 +148,10 @@ function applyRoll(state, roll) {
     return { entries, pendingChoice: result.pendingChoice, reveal: null, turnEnded: false };
   }
 
-  if (passesStockTrigger(fromPos, toPos)) {
+  if (passesStockTrigger(fromPos, toPos) && !isStockChoiceOnCooldown(state, player)) {
     const stockChoice = buildStockChoice(player, result.reveal ? result.reveal.text : "", entries);
     state.pendingChoice = stockChoice;
+    startStockChoiceCooldown(state, player);
     return { entries, pendingChoice: stockChoice, reveal: null, turnEnded: false };
   }
 
