@@ -129,6 +129,9 @@ function buildStagePropLayout(count) {
     keptPositions.push({ gapIndex: -1, pos: marriagePos.clone().addScaledVector(marriageNormal, -WEDDING_COUPLE_SIDE_OFFSET) });
     keptPositions.push({ gapIndex: -1, pos: marriagePos.clone().addScaledVector(marriageNormal, CHURCH_SIDE_OFFSET) });
   }
+  for (const bridgeGapIndex of bridgeGapIndexes) {
+    keptPositions.push({ gapIndex: -1, pos: pathPointAndNormal(bridgeGapIndex + 0.5).point });
+  }
   for (const cand of candidates) {
     const pos = propWorldPos(cand);
     const conflict = keptPositions.some(
@@ -331,8 +334,6 @@ const GROUND_TEXTURE_URL = new URL("./images/ground-grass.jpg", import.meta.url)
 const ROAD_TEXTURE_URL = new URL("./images/road-path.jpg", import.meta.url).href;
 const SKY_BACKDROP_URL = new URL("./images/sky-backdrop.jpg", import.meta.url).href;
 const ROAD_HALF_WIDTH = 0.9;
-// facility-bridge.glbは将来「橋の上にすごろくマスを置く」機能用に生成済みだが、
-// 現時点ではbuildStagePropLayoutの対象外(パス自体の折れ曲がり機能の実装待ち)。
 // カメラは「静止時=盤面全体を見渡す見下ろし視点」「移動中=進行方向の真後ろから追う三人称視点」
 // の2段構成にする。isMoving(現在カメラが追従しているプレイヤーがホップ中かどうか)で自動的に切り替わる。
 // 画面いっぱいに表示するようになったため、真上寄りの見下ろし(旧: up6.5/back4.0)から
@@ -417,6 +418,55 @@ const WEDDING_COUPLE_MODELS = {
 let marriageSquareIndex = 17;
 // 新郎新婦を結婚マスの左右に置く、道からの距離(街灯等のSTREET_PROP_SIDE_OFFSETと同程度の近さ)。
 const WEDDING_COUPLE_SIDE_OFFSET = 1.4;
+
+// facility-bridge.glb(2026-08-11、道の一区間を橋のデザインに変える装飾)。当初「橋の上に
+// 複数マスを置く」案も検討したが、Three.js実測(_measure_bridge.htmlで実施)の結果、
+// 太鼓橋(アーチ型)のコンパクトな1区間分の橋だと判明したため、マスの間の隙間(gap)
+// 1箇所にまたがるアーチ状の装飾として配置する方式にした(ゲートと同じ「またぐ」構造)。
+// 水面・川の表現はしない(素材が無いため。ユーザー確認済み、2026-08-11)、地面にそのまま
+// 設置する簡易版。scaleは道幅(ROAD_HALF_WIDTH*2=1.8)を橋の全幅がやや上回る程度に、
+// yOffsetは他の建物・ゲートと同じ規約(モデル底面がy=0の地面に接地する値)で算出。
+const BRIDGE_MODEL = {
+  url: new URL("./models/facility-bridge.glb", import.meta.url).href,
+  scale: 1.574,
+  yOffset: 0.542,
+};
+// 橋を配置するgap位置(隣接マス間、gapIndex+0.5)の一覧。mount()のたびにsquareCountから計算する。
+let bridgeGapIndexes = [];
+
+// 折り返しカーブ区間(turnArcPoint対象)を避けた、直線区間のgapかどうか
+function isStraightGap(gapIndex) {
+  const row = Math.floor(gapIndex / ROW_LENGTH);
+  const posInRow = gapIndex - row * ROW_LENGTH;
+  const lastCol = lastColOf(row);
+  return posInRow >= TURN_EASE_SQUARES && posInRow <= lastCol - TURN_EASE_SQUARES - 1;
+}
+
+// 橋の配置本数はマス数に応じて増やす(目安100マスにつき1箇所: 短い=1・普通=2・長い=3)。
+// 盤面をその本数で均等分割し、各区間の中央付近から直線区間・スタート/ゴール・結婚マス
+// 周辺を避けた位置を探す(見つからなければその橋はスキップする)。
+function computeBridgeGapIndexes(count) {
+  if (count < ROW_LENGTH * 2) return [];
+  const numBridges = Math.max(1, Math.round(count / 100));
+  const gapCount = count - 1;
+  const picked = [];
+  for (let k = 0; k < numBridges; k++) {
+    const ideal = Math.round(((k + 0.5) * gapCount) / numBridges);
+    let found = null;
+    for (let d = 0; d < ROW_LENGTH && found === null; d++) {
+      for (const cand of [ideal - d, ideal + d]) {
+        if (cand < 2 || cand >= gapCount - 2) continue; // スタート/ゴールゲート付近を避ける
+        if (Math.abs(cand - marriageSquareIndex) < 3) continue; // 結婚マス周辺を避ける
+        if (!isStraightGap(cand)) continue;
+        if (picked.some((p) => Math.abs(p - cand) < 6)) continue; // 橋同士が近すぎない
+        found = cand;
+        break;
+      }
+    }
+    if (found !== null) picked.push(found);
+  }
+  return picked.sort((a, b) => a - b);
+}
 
 let renderer = null;
 let scene = null;
@@ -868,6 +918,52 @@ function createChurch(scene) {
   loadStagePropModel(owner, placeholder, "facility-church", generation);
 }
 
+// loadStagePropModelと同じ差し替えパターンだが、STAGE_PROP_MODELSのキーlookupを経由せず
+// BRIDGE_MODELのconfigを直接渡す版(結婚マス装飾のloadWeddingFigureModelと同じ考え方)。
+function loadBridgeModel(owner, placeholder, generation) {
+  const loader = new GLTFLoader();
+  loader.setDRACOLoader(dracoLoader);
+  loader.load(
+    BRIDGE_MODEL.url,
+    (gltf) => {
+      if (generation !== sceneGeneration) return;
+      owner.remove(placeholder);
+      const model = gltf.scene;
+      model.scale.setScalar(BRIDGE_MODEL.scale);
+      model.position.y = BRIDGE_MODEL.yOffset;
+      model.traverse((node) => {
+        if (node.isMesh) {
+          node.castShadow = true;
+          node.receiveShadow = true;
+        }
+      });
+      owner.add(model);
+    },
+    undefined,
+    (err) => {
+      console.warn("橋(facility-bridge)の読み込みに失敗、プレースホルダーのまま続行します", err);
+    }
+  );
+}
+
+// computeBridgeGapIndexesで決めた位置に、道をまたぐ橋を配置する(ゲートと同じ「またぐ」構造)。
+function createBridges(scene) {
+  const generation = sceneGeneration;
+  for (const gapIndex of bridgeGapIndexes) {
+    const { point, normal } = pathPointAndNormal(gapIndex + 0.5);
+    // 橋のモデルはX軸(local)が長手方向(Three.js実測で確認済み、_measure_bridge.html参照)。
+    // gate系のZ軸基準の式(atan2(tangent.x, tangent.z))とは90°異なるため、専用に導出した式を使う。
+    const tangent = new THREE.Vector3(normal.z, 0, -normal.x);
+    const placeholder = createSmallPropPlaceholder();
+    const owner = new THREE.Group();
+    owner.position.copy(point);
+    owner.rotation.y = Math.atan2(-tangent.z, tangent.x);
+    owner.add(placeholder);
+    scene.add(owner);
+    loadBridgeModel(owner, placeholder, generation);
+  }
+}
+
 // 結婚マス周辺(新郎新婦・教会が無いマス)に、マスの種類を示す目印アイコンを1つずつ配置する。
 // アイコンはマス中心からわずかに(SQUARE_ICON_SIDE_OFFSET)ずらし、プレイヤートークンの
 // 持ち場オフセット(半径0.32)と重ならないようにする。
@@ -1124,6 +1220,7 @@ function buildScene(players) {
   createGates(scene);
   createWeddingCouple(scene);
   createChurch(scene);
+  createBridges(scene);
   createSquareIcons(scene);
   createClouds(scene);
 
@@ -1231,6 +1328,7 @@ function mount(canvasEl, options) {
   // 位置を検索する(見つからない場合は暫定値17のまま、buildScene側で範囲チェック済み)。
   const foundMarriageIndex = squareTypes.indexOf("marriage");
   if (foundMarriageIndex >= 0) marriageSquareIndex = foundMarriageIndex;
+  bridgeGapIndexes = computeBridgeGapIndexes(squareCount);
   renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.shadowMap.enabled = true;
