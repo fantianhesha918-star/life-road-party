@@ -15,6 +15,25 @@ import { DRACOLoader } from "https://unpkg.com/three@0.169.0/examples/jsm/loader
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath("https://unpkg.com/three@0.169.0/examples/jsm/libs/draco/");
 
+// マス数モードの拡張(最大300マス)以降、建物・小物・マス目印アイコンなどの装飾は
+// マスの数だけ同じGLBを何度も読み込み直しており(建物だけで100〜300回規模)、モバイルでは
+// メモリ・CPU負荷で3D画面のままフリーズ→タブごと再読み込みされてタイトルに戻る不具合の
+// 原因になっていた(2026-08-11発覚)。同一URLは1回だけ読み込み、以降はロード済みの
+// テンプレートをclone(true)して使い回す(loadMasuBaseInstancesと同じ考え方を全装飾に適用)。
+const gltfSceneCache = new Map(); // url -> Promise<THREE.Object3D>
+function loadGLTFSceneCached(url) {
+  let cached = gltfSceneCache.get(url);
+  if (!cached) {
+    const loader = new GLTFLoader();
+    loader.setDRACOLoader(dracoLoader);
+    cached = new Promise((resolve, reject) => {
+      loader.load(url, (gltf) => resolve(gltf.scene), undefined, reject);
+    });
+    gltfSceneCache.set(url, cached);
+  }
+  return cached;
+}
+
 // マス数は本番の盤面(BOARD_SQUARES.length)に合わせてmount()の都度セットする
 // (将来のゲームモード別マス数拡張にもこの仕組みのまま追従できる)。
 let squareCount = 10;
@@ -783,14 +802,11 @@ function createTreePlaceholder(variant) {
 function loadStagePropModel(owner, placeholder, modelKey, generation) {
   const config = STAGE_PROP_MODELS[modelKey];
   if (!config) return;
-  const loader = new GLTFLoader();
-  loader.setDRACOLoader(dracoLoader);
-  loader.load(
-    config.url,
-    (gltf) => {
+  loadGLTFSceneCached(config.url)
+    .then((template) => {
       if (generation !== sceneGeneration) return;
       owner.remove(placeholder);
-      const model = gltf.scene;
+      const model = template.clone(true);
       model.scale.setScalar(config.scale);
       model.position.y = config.yOffset;
       model.traverse((node) => {
@@ -800,12 +816,10 @@ function loadStagePropModel(owner, placeholder, modelKey, generation) {
         }
       });
       owner.add(model);
-    },
-    undefined,
-    (err) => {
+    })
+    .catch((err) => {
       console.warn(`ステージ装飾(${modelKey})の読み込みに失敗、プレースホルダーのまま続行します`, err);
-    }
-  );
+    });
 }
 
 // 街灯・ベンチ・看板用の簡易プレースホルダー(実GLB読み込み完了までの仮表示)。
@@ -897,14 +911,11 @@ function placeGate(scene, modelKey, index, generation) {
 // loadStagePropModelと同じ差し替えパターンだが、STAGE_PROP_MODELSではなくWEDDING_COUPLE_MODELSの
 // configを直接渡す版(結婚マス装飾専用、モデルキーでのlookupを経由しない)。
 function loadWeddingFigureModel(owner, placeholder, config, generation) {
-  const loader = new GLTFLoader();
-  loader.setDRACOLoader(dracoLoader);
-  loader.load(
-    config.url,
-    (gltf) => {
+  loadGLTFSceneCached(config.url)
+    .then((template) => {
       if (generation !== sceneGeneration) return;
       owner.remove(placeholder);
-      const model = gltf.scene;
+      const model = template.clone(true);
       model.scale.setScalar(config.scale);
       model.position.y = config.yOffset;
       model.traverse((node) => {
@@ -914,12 +925,10 @@ function loadWeddingFigureModel(owner, placeholder, config, generation) {
         }
       });
       owner.add(model);
-    },
-    undefined,
-    (err) => {
+    })
+    .catch((err) => {
       console.warn(`結婚マス装飾(${config.url})の読み込みに失敗、プレースホルダーのまま続行します`, err);
-    }
-  );
+    });
 }
 
 // 結婚マス(marriageSquareIndex)の左右に新郎新婦を静的装飾として配置する
@@ -969,14 +978,11 @@ function createChurch(scene) {
 // loadStagePropModelと同じ差し替えパターンだが、STAGE_PROP_MODELSのキーlookupを経由せず
 // BRIDGE_MODELのconfigを直接渡す版(結婚マス装飾のloadWeddingFigureModelと同じ考え方)。
 function loadBridgeModel(owner, placeholder, generation) {
-  const loader = new GLTFLoader();
-  loader.setDRACOLoader(dracoLoader);
-  loader.load(
-    BRIDGE_MODEL.url,
-    (gltf) => {
+  loadGLTFSceneCached(BRIDGE_MODEL.url)
+    .then((template) => {
       if (generation !== sceneGeneration) return;
       owner.remove(placeholder);
-      const model = gltf.scene;
+      const model = template.clone(true);
       model.scale.setScalar(BRIDGE_MODEL.scale);
       model.position.y = BRIDGE_MODEL.yOffset;
       model.traverse((node) => {
@@ -986,12 +992,10 @@ function loadBridgeModel(owner, placeholder, generation) {
         }
       });
       owner.add(model);
-    },
-    undefined,
-    (err) => {
+    })
+    .catch((err) => {
       console.warn("橋(facility-bridge)の読み込みに失敗、プレースホルダーのまま続行します", err);
-    }
-  );
+    });
 }
 
 // computeBridgeGapIndexesで決めた位置に、道をまたぐ橋を配置する(ゲートと同じ「またぐ」構造)。
