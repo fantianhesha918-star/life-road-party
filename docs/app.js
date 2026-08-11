@@ -384,6 +384,41 @@ const App = {
     });
   },
 
+  // 通信対戦で、自分が操作していない他プレイヤー(人間・CPU問わず)の位置がFirestore経由で
+  // 変わったことを検知し、瞬間移動ではなくホップ演出付きで自分の画面にも反映する
+  // (通信モードでの3D同期強化、2026-08-11)。自分自身の手番、および自分がホストとして
+  // 駆動したCPUの手番は、駆動した時点でknownPositionsを先読み更新しておくことで、
+  // ここでの二重アニメーションを防いでいる(maybeRunOnlineCPUTurn参照)。
+  syncRemotePositions(room) {
+    if (!this.online) return;
+    const known = this.online.knownPositions;
+    Object.keys(room.players || {}).forEach((uid) => {
+      const newPos = room.players[uid].position;
+      const prevPos = known[uid];
+      // 自分(ホスト)がCPUの手番を駆動した際に先読み更新した値より古いスナップショット
+      // (Firestoreへの書き込みがまだ反映されていないハートビート等)は無視する。ここで
+      // known[uid]を巻き戻してしまうと、後から届く新しいスナップショットで再び「進んだ」と
+      // 誤検知し、同じ移動を二重にホップ演出してしまう(2026-08-11に実機テストで発覚・修正)。
+      if (prevPos !== undefined && newPos < prevPos) return;
+      // 自分自身/初見のプレイヤー/位置変化なしは演出せず基準位置として記録するだけ
+      if (uid === this.online.uid || prevPos === undefined || newPos === prevPos) {
+        known[uid] = newPos;
+        return;
+      }
+      if (this.online.remoteHoppingIds.has(uid)) return; // 既にこのプレイヤーの演出中
+      known[uid] = newPos;
+      this.online.remoteHoppingIds.add(uid);
+      this.online.remoteFocusPlayerId = uid; // カメラもこの演出中のプレイヤーを追う(sync3DBoard参照)
+      this.loadBoard3DModules().then(() => {
+        window.LifeRoadBoard3D.hopSteps(uid, prevPos, newPos, { stepDurationMs: HOP_STEP_MS }).then(() => {
+          this.online.remoteHoppingIds.delete(uid);
+          if (this.online && this.online.remoteFocusPlayerId === uid) this.online.remoteFocusPlayerId = null;
+          this.render();
+        });
+      });
+    });
+  },
+
   // ---- ターンハブ(演出+選択肢メニュー) ----
 
   showHubView(view) {
@@ -811,6 +846,9 @@ const App = {
       turnPopup: null,
       lastTurnUid: null,
       drivingCPU: false, // CPUの手番進行(ホストのみ)の二重発火防止フラグ
+      knownPositions: {}, // playerId -> 直近の位置。他プレイヤーの移動をリモート検知してホップ演出するための記録
+      remoteHoppingIds: new Set(), // 現在リモート追いつきホップ演出中のplayerId(二重発火防止)
+      remoteFocusPlayerId: null, // リモート追いつき演出中、カメラをそのプレイヤーへ向けるための対象id
     };
     this.hub = { view: "menu", spinNumber: null, itemMessage: null };
     this.saveOnlineRoomRef();
@@ -819,6 +857,7 @@ const App = {
     this.online.unsubscribe = window.Room.subscribeRoom(roomCode, (room) => {
       if (!this.online) return;
       this.online.room = room;
+      this.syncRemotePositions(room);
       // 自分の手番結果を楽観表示中の場合、サーバーが確定させたのを確認できたら
       // 以後はサーバー状態(room)をそのまま使う。就職選択待ち(pendingChoice)の間は
       // 他の参加者のハートビート更新等で誤って消さないよう保持し続ける。
@@ -1005,6 +1044,9 @@ const App = {
         const fromPos = turnPlayer.position;
         const result = applyRoll(localState, roll);
         const toPos = turnPlayer.position;
+        // 自分(ホスト)がこの後すぐアニメーションさせるため、syncRemotePositions側の
+        // リモート追いつき演出が二重発火しないよう先に基準位置を更新しておく。
+        if (this.online) this.online.knownPositions[playerId] = toPos;
         this.runHopSteps(playerId, fromPos, toPos, () => {
           if (!this.online) return;
           this.pushOnlineLog(result.entries);
@@ -1136,7 +1178,11 @@ const App = {
     // 「mountがまだ済んでいない間にホップが始まる」競合が起こりうる。mount()内部の初期フォーカスは
     // 呼び出し時点のcurrentTurnIndexしか見ないため、mount直後にも下のfocusCameraで
     // hoppingPlayerId優先の対象へ必ず合わせ直す(2ターン目以降は既にmount済みなのでこの経路は通らない)。
-    const focusId = this.hoppingPlayerId || state.players[state.currentTurnIndex].id;
+    // オンラインでは、自分が操作していない他プレイヤーの移動をリモートで追いつき演出中
+    // (syncRemotePositions参照)の間は、そのプレイヤーへカメラを向ける(次の手番プレイヤーの
+    // 静止画へ先に切り替わってしまい、動いている本人を映せない不具合を防ぐため)。
+    const remoteFocusId = this.mode === "online" && this.online ? this.online.remoteFocusPlayerId : null;
+    const focusId = this.hoppingPlayerId || remoteFocusId || state.players[state.currentTurnIndex].id;
     this.loadBoard3DModules()
       .then(() => {
         // 非同期読み込み完了までの間に画面遷移していたら何もしない
