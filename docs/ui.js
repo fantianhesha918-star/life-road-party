@@ -291,6 +291,9 @@ function renderOnlineMenuScreen(error, busy, lastRoom) {
   const onlineModeOptions = GAME_MODES
     .map((m) => `<option value="${m.squareCount}" ${m.id === "short" ? "selected" : ""}>${m.label}</option>`)
     .join("");
+  const cpuCountOptions = [0, 1, 2, 3, 4, 5]
+    .map((n) => `<option value="${n}" ${n === 0 ? "selected" : ""}>CPU ${n}人</option>`)
+    .join("");
   return `
     <section class="screen screen-online-menu">
       <h2>通信対戦</h2>
@@ -315,6 +318,10 @@ function renderOnlineMenuScreen(error, busy, lastRoom) {
           <span>マス数(モード)</span>
           <select id="online-mode-select">${onlineModeOptions}</select>
         </label>
+        <label class="field">
+          <span>CPU人数(友達が少ない時に混ぜられます)</span>
+          <select id="online-cpu-count-select">${cpuCountOptions}</select>
+        </label>
         <button class="btn btn-primary" ${busy ? "disabled" : ""} onclick="App.createOnlineRoom()">部屋を作る</button>
       </div>
 
@@ -338,7 +345,7 @@ function renderOnlineLobbyScreen(room, roomCode, myUid) {
   );
   const rows = players
     .map(([uid, p]) => {
-      const tags = [uid === room.hostUid ? "ホスト" : null, uid === myUid ? "あなた" : null]
+      const tags = [uid === room.hostUid ? "ホスト" : null, uid === myUid ? "あなた" : null, p.isCPU ? "CPU" : null]
         .filter(Boolean)
         .join("・");
       const visual = p.avatar || { color: "#999999", speciesEmoji: null, costumeImage: null };

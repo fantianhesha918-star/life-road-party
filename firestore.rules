@@ -26,12 +26,17 @@ service cloud.firestore {
       // 「衝突しない新規部屋コードであること」は暗黙に保証される(既存コードと衝突
       // した場合はそもそもcreateではなくupdate扱いとなり、下のupdateルールを満たさ
       // ない限り拒否される)。衝突時の再試行はクライアント側(room.js)で行う。
+      // players.size()は「ホスト1人」の他に、ホストが部屋作成時に選んだCPU人数ぶんの
+      // エントリを許容する(CPU混在対応、2026-08-11〜)。CPUエントリ自体の内容(isCPU:true
+      // であること等)はルール側では検証しない(Firestoreルール言語はマップ値への汎用的な
+      // 全件検証をサポートしないため)。個人情報を持たない設計・書き込みは手番プレイヤー
+      // のみという既存の信頼境界の範囲内として許容する。
       function isValidNewRoom() {
         let d = request.resource.data;
         return d.hostUid == myUid()
           && d.status == "lobby"
           && d.maxPlayers is int && d.maxPlayers >= 2 && d.maxPlayers <= 6
-          && d.players.size() == 1
+          && d.players.size() >= 1 && d.players.size() <= d.maxPlayers
           && (myUid() in d.players)
           && d.players[myUid()].nickname is string
           && d.players[myUid()].nickname.size() >= 1
@@ -64,7 +69,10 @@ service cloud.firestore {
           && afterPlayers[myUid()].nickname.size() <= 10;
       }
 
-      // 対戦中: 今の手番のプレイヤーだけが盤面を進められる(ホストが開始する遷移も含む)
+      // 対戦中: 今の手番のプレイヤーだけが盤面を進められる(ホストが開始する遷移も含む)。
+      // 今の手番がCPUの場合は、実際にサインインしたユーザーがいないため、代わりに
+      // ホストのブラウザが手番を進める(CPU混在対応、2026-08-11〜。詳細はapp.jsの
+      // maybeRunOnlineCPUTurn参照。ホスト以外がCPUを代行する仕組みは今回のスコープ外)。
       function isTurnUpdate() {
         let wasLobby = resource.data.status == "lobby";
         let hostStartingGame = wasLobby
@@ -74,7 +82,11 @@ service cloud.firestore {
         let isCurrentTurnPlayer = resource.data.status == "playing"
           && resource.data.currentTurnPlayerUid == myUid();
 
-        return hostStartingGame || isCurrentTurnPlayer;
+        let hostDrivingCPU = resource.data.status == "playing"
+          && resource.data.players[resource.data.currentTurnPlayerUid].isCPU == true
+          && myUid() == resource.data.hostUid;
+
+        return hostStartingGame || isCurrentTurnPlayer || hostDrivingCPU;
       }
     }
   }

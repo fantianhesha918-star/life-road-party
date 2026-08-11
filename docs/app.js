@@ -37,6 +37,7 @@ function roomToEngineState(room) {
       id: uid,
       name: p.nickname || `プレイヤー${i + 1}`,
       isCPU: !!p.isCPU,
+      personality: p.personality || null,
       color,
       avatar: ensureSpeciesId(p.avatar || { color, speciesEmoji: null, costumeImage: null }, color),
       position: typeof p.position === "number" ? p.position : 0,
@@ -713,15 +714,18 @@ const App = {
     const nicknameInput = document.getElementById("online-nickname-input");
     const maxPlayersSelect = document.getElementById("online-maxplayers-select");
     const modeSelect = document.getElementById("online-mode-select");
+    const cpuCountSelect = document.getElementById("online-cpu-count-select");
     const nickname = ((nicknameInput && nicknameInput.value) || "プレイヤー").trim().slice(0, 10) || "プレイヤー";
     const maxPlayers = parseInt((maxPlayersSelect && maxPlayersSelect.value) || "4", 10);
     const squareCount = parseInt((modeSelect && modeSelect.value) || "100", 10);
+    // ホスト自身の1枠は必ず確保する(CPU人数がmaxPlayersと同数以上にならないようクランプ)
+    const cpuCount = Math.min(parseInt((cpuCountSelect && cpuCountSelect.value) || "0", 10), maxPlayers - 1);
 
     this.onlineError = null;
     this.onlineBusy = true;
     this.render();
     this.loadFirebaseModules()
-      .then(() => window.Room.createRoom({ nickname, maxPlayers, squareCount }))
+      .then(() => window.Room.createRoom({ nickname, maxPlayers, squareCount, cpuCount }))
       .then(({ roomCode, uid }) => this.enterOnlineRoom(roomCode, uid, nickname))
       .catch((err) => this.handleOnlineError(err));
   },
@@ -806,6 +810,7 @@ const App = {
       lastReward: null,
       turnPopup: null,
       lastTurnUid: null,
+      drivingCPU: false, // CPUの手番進行(ホストのみ)の二重発火防止フラグ
     };
     this.hub = { view: "menu", spinNumber: null, itemMessage: null };
     this.saveOnlineRoomRef();
@@ -871,6 +876,7 @@ const App = {
         LifeRoadAudio.playBgmJingle("goal");
       }
     }
+    this.maybeRunOnlineCPUTurn();
     this.render();
   },
 
@@ -932,6 +938,102 @@ const App = {
     const patch = engineStateToRoomPatch(localState, this.online.room);
     this.render();
     window.Room.writeTurnResult(this.online.roomCode, patch).catch((err) => this.handleOnlineError(err));
+  },
+
+  // CPUの手番はサインインしたユーザーがいないため、ホストのブラウザだけが代わりに進める
+  // (firestore.rulesのisTurnUpdate側でもホスト以外からの書き込みは拒否される)。
+  isAuthorizedToDriveCPU() {
+    return !!(this.online && this.online.room && this.online.uid === this.online.room.hostUid);
+  },
+
+  // オンライン対戦でCPUの手番になったら、一人プレイのmaybeRunCPUTurn/commitCPURoll/
+  // runCPUChoiceと同じ流れでロール・選択を自動進行し、結果をcommitOnlineTurnで書き込む。
+  // syncOnlineScreen()(Firestoreの部屋更新のたびに呼ばれる)から毎回呼ばれる。
+  // forcedStateを渡すのは、pendingChoice発生時に自分自身を継続呼び出しする場合のみ
+  // (このときはガード判定を再実行せず、そのまま処理を続ける)。
+  maybeRunOnlineCPUTurn(forcedState) {
+    if (!this.online || !this.online.room || this.online.room.status !== "playing") return;
+    if (!this.isAuthorizedToDriveCPU()) return;
+
+    let localState = forcedState;
+    if (!localState) {
+      // 二重発火防止に加え、自分(人間)の手番がまだFirestoreへ確定していない間
+      // (ホップ中・楽観表示中)はCPUの手番判定に割り込まない。localTurnStateは
+      // 人間の手番の楽観状態と共有しているため、ここで読むと競合してしまう
+      // (人間が手番中に別イベントでsyncOnlineScreenが再発火し、その途中経過を
+      // 誤ってCPUの手番として処理してしまう不具合があったため、この分岐にした)。
+      if (this.online.drivingCPU || this.hopping || this.online.localTurnState) return;
+      const room = this.online.room;
+      const turnPlayerDoc = room.players[room.currentTurnPlayerUid];
+      if (!turnPlayerDoc || !turnPlayerDoc.isCPU) return;
+      localState = roomToEngineState(room);
+    }
+
+    if (localState.pendingChoice) {
+      const choosingPlayer = localState.players.find((p) => p.id === localState.pendingChoice.playerId);
+      if (!choosingPlayer || !choosingPlayer.isCPU) return;
+      this.online.drivingCPU = true;
+      setTimeout(() => {
+        if (!this.online) return;
+        const idx = cpuDecideOption(localState.pendingChoice, choosingPlayer.personality);
+        const result = resolveChoice(localState, localState.pendingChoice.playerId, idx);
+        this.pushOnlineLog(result.entries);
+        this.online.reveal = {
+          ...result.reveal,
+          visual: choosingPlayer.avatar || { color: choosingPlayer.color, speciesEmoji: null, costumeImage: null },
+          interactive: false,
+        };
+        this.render();
+        setTimeout(() => {
+          this.online.drivingCPU = false;
+          if (!this.online) return;
+          this.online.reveal = null;
+          this.commitOnlineTurn(localState);
+        }, CPU_REVEAL_MS);
+      }, CPU_PRE_CHOICE_MS);
+      return;
+    }
+
+    const turnPlayer = currentPlayer(localState);
+    if (!turnPlayer || !turnPlayer.isCPU) return;
+    this.online.drivingCPU = true;
+    setTimeout(() => {
+      if (!this.online) return;
+      this.runRouletteAnimation((roll) => {
+        if (!this.online) return;
+        const playerId = turnPlayer.id;
+        const fromPos = turnPlayer.position;
+        const result = applyRoll(localState, roll);
+        const toPos = turnPlayer.position;
+        this.runHopSteps(playerId, fromPos, toPos, () => {
+          if (!this.online) return;
+          this.pushOnlineLog(result.entries);
+          this.showMoneyToasts(result.entries, playerId, localState.players);
+          if (!result.pendingChoice && result.reveal) {
+            this.online.reveal = {
+              ...result.reveal,
+              visual: turnPlayer.avatar || { color: turnPlayer.color, speciesEmoji: null, costumeImage: null },
+              interactive: false,
+            };
+            this.render();
+            setTimeout(() => {
+              this.online.drivingCPU = false;
+              if (!this.online) return;
+              this.online.reveal = null;
+              this.commitOnlineTurn(localState);
+            }, CPU_REVEAL_MS);
+            return;
+          }
+          this.online.drivingCPU = false;
+          this.render();
+          if (result.pendingChoice) {
+            this.maybeRunOnlineCPUTurn(localState);
+            return;
+          }
+          this.commitOnlineTurn(localState);
+        });
+      });
+    }, CPU_PRE_ROLL_MS);
   },
 
   pushOnlineLog(entries) {

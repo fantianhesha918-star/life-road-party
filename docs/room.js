@@ -37,14 +37,57 @@ function currentAvatarVisual() {
   return window.LifeRoadProfile.getAvatarVisual(profile.equipped);
 }
 
+// CPUプレイヤーのエントリを組み立てる(一人プレイのapp.js startGame()のCPU構築と同じ発想:
+// 動物種をランダムに割り当て、性格プリセットも付与する)。
+function buildCPUPlayer(seatIndex) {
+  const species = window.LifeRoadShop.SPECIES_ITEMS[Math.floor(Math.random() * window.LifeRoadShop.SPECIES_ITEMS.length)];
+  const colors = window.LifeRoadData.TOKEN_COLORS;
+  return {
+    nickname: `CPU${seatIndex}`,
+    seatIndex,
+    isCPU: true,
+    personality: window.LifeRoadCPU.pickRandomPersonality(),
+    avatar: {
+      color: colors[seatIndex % colors.length],
+      speciesId: species.id,
+      speciesEmoji: species.emoji,
+      costumeImage: null,
+    },
+    position: 0,
+    money: window.LifeRoadData.START_MONEY,
+    job: null,
+    finished: false,
+    lastSeenAt: serverTimestamp(),
+  };
+}
+
 // 部屋を新規作成する。部屋コードが偶然重複した場合は数回リトライする。
-async function createRoom({ nickname, maxPlayers, squareCount }) {
+// cpuCountを指定すると、ホストに続けてCPUプレイヤーをその場でplayersに追加する
+// (CPUの手番は、対戦開始後ホストのブラウザだけが進める。詳細はapp.jsのmaybeRunOnlineCPUTurn参照)。
+async function createRoom({ nickname, maxPlayers, squareCount, cpuCount }) {
   const user = await window.FirebaseCtx.ensureSignedIn();
   const uid = user.uid;
+  const count = cpuCount || 0;
 
   let lastError = null;
   for (let attempt = 0; attempt < CREATE_RETRY_LIMIT; attempt++) {
     const roomCode = generateRoomCode();
+    const players = {
+      [uid]: {
+        nickname,
+        seatIndex: 0,
+        isCPU: false,
+        avatar: currentAvatarVisual(),
+        position: 0,
+        money: window.LifeRoadData.START_MONEY,
+        job: null,
+        finished: false,
+        lastSeenAt: serverTimestamp(),
+      },
+    };
+    for (let i = 1; i <= count; i++) {
+      players[`cpu${i}`] = buildCPUPlayer(i);
+    }
     const data = {
       createdAt: serverTimestamp(),
       lastActionAt: serverTimestamp(),
@@ -57,19 +100,7 @@ async function createRoom({ nickname, maxPlayers, squareCount }) {
       turnOrder: [],
       currentTurnIndex: 0,
       currentTurnPlayerUid: null,
-      players: {
-        [uid]: {
-          nickname,
-          seatIndex: 0,
-          isCPU: false,
-          avatar: currentAvatarVisual(),
-          position: 0,
-          money: window.LifeRoadData.START_MONEY,
-          job: null,
-          finished: false,
-          lastSeenAt: serverTimestamp(),
-        },
-      },
+      players,
     };
     try {
       await setDoc(roomRef(roomCode), data);
