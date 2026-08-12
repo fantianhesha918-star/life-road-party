@@ -150,6 +150,38 @@ const SNACK_STAGE_MODELS = {
   },
 };
 
+// 方角ゾーン(見本の北西=駅、北=オフィス、東=学校/病院/集合住宅、南=教会/住宅、西=公園)の
+// 建物・小物。本編(board3d.js)で使用中の素材・scale/yOffsetをそのまま再利用する
+// (2026-08-12、Box3実測をやり直さず本編の実測値を流用。値は board3d.js の STAGE_PROP_MODELS 参照)。
+const SNACK_ZONE_MODELS = {
+  "building-station": { url: new URL("./models/building-station.glb", import.meta.url).href, scale: 1.15, yOffset: 0.775 },
+  "building-office": { url: new URL("./models/building-office.glb", import.meta.url).href, scale: 1.3, yOffset: 1.3 },
+  "building-shop": { url: new URL("./models/building-shop.glb", import.meta.url).href, scale: 1.061, yOffset: 0.9 },
+  "building-school": { url: new URL("./models/building-school.glb", import.meta.url).href, scale: 1.2, yOffset: 0.905 },
+  "building-hospital": { url: new URL("./models/building-hospital.glb", import.meta.url).href, scale: 1.15, yOffset: 1.116 },
+  "building-apartment": { url: new URL("./models/building-apartment.glb", import.meta.url).href, scale: 1.2, yOffset: 1.2 },
+  "building-house": { url: new URL("./models/building-house.glb", import.meta.url).href, scale: 1.269, yOffset: 1.1 },
+  "facility-church": { url: new URL("./models/facility-church.glb", import.meta.url).href, scale: 0.525, yOffset: 0.525 },
+  "facility-park": { url: new URL("./models/facility-park.glb", import.meta.url).href, scale: 1.3, yOffset: 0.803 },
+  "tree-round": { url: new URL("./models/tree-round.glb", import.meta.url).href, scale: 0.802, yOffset: 0.8 },
+  "tree-conifer": { url: new URL("./models/tree-conifer.glb", import.meta.url).href, scale: 0.95, yOffset: 0.95 },
+  "prop-streetlamp": { url: new URL("./models/prop-streetlamp.glb", import.meta.url).href, scale: 0.9, yOffset: 0.9 },
+  "prop-bench": { url: new URL("./models/prop-bench.glb", import.meta.url).href, scale: 0.55, yOffset: 0.42 },
+  "prop-signboard": { url: new URL("./models/prop-signboard.glb", import.meta.url).href, scale: 0.45, yOffset: 0.373 },
+  "gate-start": { url: new URL("./models/gate-start.glb", import.meta.url).href, scale: 1.5, yOffset: 1.288 },
+};
+// ゾーンごとに巡回配置する建物候補(stationゾーンは駅を専用配置するため対象外)
+const SNACK_ZONE_BUILDING_THEMES = {
+  office: ["building-office", "building-shop"],
+  school: ["building-school", "building-hospital", "building-apartment"],
+  church: ["facility-church", "building-house"],
+  park: ["facility-park"],
+};
+const SNACK_TREE_MODEL_KEYS = ["tree-round", "tree-conifer"];
+const SNACK_STREET_PROP_MODEL_KEYS = ["prop-streetlamp", "prop-bench", "prop-signboard"];
+// ゾーン内の建物・木・小物同士が近すぎる場合に間引く最小距離(本編のSTAGE_PROP_MIN_CROSS_GAP_DISTと同じ考え方)
+const SNACK_ZONE_PROP_MIN_GAP = 2.4;
+
 // snack-data.jsのnodeType別の色分け(2D版のイメージに寄せた簡易配色)
 const SNACK_NODE_TYPE_COLORS = {
   start: 0xfff3cd,
@@ -200,9 +232,11 @@ function loadGroundTexture(width, depth) {
   return texture;
 }
 
-// 外周ループを"start"ノードからnextNodeIds(outer側)を辿って順序復元する
+// zoneNameのループを、startIdからnextNodeIds(同じzone側)を辿って順序復元する
 // (id命名規則に依存せず、データが多少組み替わっても壊れないようにするため)。
-function computeOuterLoopPoints(startId) {
+// 外周・内周とも同じ手法で閉ループの点列を作れる(2026-08-12、内周も見本通りそれ自体が
+// 閉じたループになったため、従来の「分岐→合流の一本道」専用関数から汎用化した)。
+function computeLoopPoints(startId, zoneName) {
   const start = nodeMap.get(startId);
   const points = [];
   let cur = start;
@@ -210,33 +244,27 @@ function computeOuterLoopPoints(startId) {
   while (cur && !seen.has(cur.id)) {
     points.push(nodeVec3(cur));
     seen.add(cur.id);
-    const nextOuterId = cur.nextNodeIds.find((id) => nodeMap.get(id) && nodeMap.get(id).zone === "outer");
-    cur = nextOuterId ? nodeMap.get(nextOuterId) : null;
+    const nextId = cur.nextNodeIds.find((id) => nodeMap.get(id) && nodeMap.get(id).zone === zoneName);
+    cur = nextId ? nodeMap.get(nextId) : null;
   }
   return points;
 }
 
-// 分岐ノード(外周→内周)からnextNodeIdsを辿り、内周を通って外周へ合流するまでの点列を作る。
-function computeInnerShortcutPoints() {
-  const branchNode = [...nodeMap.values()].find(
-    (n) => n.zone === "outer" && n.nextNodeIds.some((id) => nodeMap.get(id) && nodeMap.get(id).zone === "inner")
-  );
-  if (!branchNode) return null;
-  const firstInnerId = branchNode.nextNodeIds.find((id) => nodeMap.get(id) && nodeMap.get(id).zone === "inner");
-  const points = [nodeVec3(branchNode)];
-  let cur = nodeMap.get(firstInnerId);
-  let mergeNode = null;
-  while (cur) {
-    points.push(nodeVec3(cur));
-    const next = nodeMap.get(cur.nextNodeIds[0]);
-    if (!next || next.zone !== "inner") {
-      mergeNode = next;
-      break;
-    }
-    cur = next;
-  }
-  if (mergeNode) points.push(nodeVec3(mergeNode));
-  return points;
+// 外周⇔内周を結ぶ接続区間(4方向の入口+4方向の出口、計8本)の両端点列を作る。
+// 入口: 外周の分岐ノード→対応する内周ノード(有料)。出口: 内周ノード→合流する外周ノード(無料)。
+function computeConnectorSegments() {
+  const segments = [];
+  nodeMap.forEach((node) => {
+    if (node.zone !== "outer") return;
+    const innerNextId = node.nextNodeIds.find((id) => nodeMap.get(id) && nodeMap.get(id).zone === "inner");
+    if (innerNextId) segments.push([nodeVec3(node), nodeVec3(nodeMap.get(innerNextId))]);
+  });
+  nodeMap.forEach((node) => {
+    if (node.zone !== "inner") return;
+    const outerNextId = node.nextNodeIds.find((id) => nodeMap.get(id) && nodeMap.get(id).zone === "outer");
+    if (outerNextId) segments.push([nodeVec3(node), nodeVec3(nodeMap.get(outerNextId))]);
+  });
+  return segments;
 }
 
 // board3d.jsのcreateRoadRibbonと同じ考え方(接線の法線方向に道幅ぶん左右へ広げてリボン化)を
@@ -284,6 +312,85 @@ function buildRibbon(points, closed) {
   return mesh;
 }
 
+// 地面を矩形ではなく楕円形にし(見本の「フェルト製の島」らしい輪郭に近づける)、
+// テクスチャが正しくタイル表示されるよう、ShapeGeometryの既定UV(0〜1に正規化)ではなく
+// ワールド座標ベースのUVを手動で割り当てる(loadGroundTextureのrepeat.set(width/3,depth/3)と
+// 揃えるため、同じ/3の係数を使う)。
+function createIslandGroundGeometry(radiusX, radiusZ) {
+  const shape = new THREE.Shape();
+  const segments = 64;
+  for (let i = 0; i <= segments; i++) {
+    const angle = (i / segments) * Math.PI * 2;
+    const x = Math.cos(angle) * radiusX;
+    const y = Math.sin(angle) * radiusZ;
+    if (i === 0) shape.moveTo(x, y);
+    else shape.lineTo(x, y);
+  }
+  const geometry = new THREE.ShapeGeometry(shape, segments);
+  const pos = geometry.attributes.position;
+  const uv = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) {
+    uv[i * 2] = pos.getX(i) / 3;
+    uv[i * 2 + 1] = pos.getY(i) / 3;
+  }
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  return geometry;
+}
+
+// 島の側面(台座)用の縦グラデーションテクスチャ(芝生の緑→クリーム→キャメル→こげ茶)。
+// Codex連携チャットが用意していたterrain-island-edge.pngは実ファイルが見つからなかったため、
+// createDiceFaceTextureと同じCanvas手続き生成で代替する(2026-08-12)。
+function createIslandSkirtTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 8;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+  const gradient = ctx.createLinearGradient(0, 0, 0, 128);
+  gradient.addColorStop(0, "#6fa84f");
+  gradient.addColorStop(0.28, "#e7d9ad");
+  gradient.addColorStop(0.62, "#c99a5b");
+  gradient.addColorStop(1, "#6b4a2c");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 8, 128);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+// 地面の楕円の縁から下方向・外方向へ傾斜する帯状メッシュ(buildRibbonと同じ考え方の
+// リング状ジオメトリ)。マップ全体を「厚みのあるフェルト土台」に見せる。
+function createIslandEdgeSkirt(centerX, centerZ, radiusX, radiusZ, depth) {
+  const segments = 64;
+  const outerScale = 1.06;
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+  for (let i = 0; i <= segments; i++) {
+    const angle = (i / segments) * Math.PI * 2;
+    const topX = centerX + Math.cos(angle) * radiusX;
+    const topZ = centerZ + Math.sin(angle) * radiusZ;
+    const botX = centerX + Math.cos(angle) * radiusX * outerScale;
+    const botZ = centerZ + Math.sin(angle) * radiusZ * outerScale;
+    positions.push(topX, -0.5, topZ, botX, -0.5 - depth, botZ);
+    uvs.push(0, 0, 0, 1);
+  }
+  for (let i = 0; i < segments; i++) {
+    const a = i * 2;
+    const b = i * 2 + 1;
+    const c = (i + 1) * 2;
+    const d = (i + 1) * 2 + 1;
+    indices.push(a, c, b, b, c, d);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ map: createIslandSkirtTexture() }));
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
 function loadDecorationModel(owner, config) {
   const generation = sceneGeneration;
   loadGLTFSceneCached(config.url)
@@ -305,16 +412,24 @@ function loadDecorationModel(owner, config) {
     });
 }
 
+// ノードの位置を中心から外側へoffset分押し出した位置にownerを配置する共通ヘルパー
+// (中心を向く方角に応じてrotation.yも設定する。既存の各種装飾配置で繰り返していたパターン)。
+function placeOutwardDecoration(pos, centerX, centerZ, offset, config) {
+  const dir = new THREE.Vector3(pos.x - centerX, 0, pos.z - centerZ).normalize();
+  const group = new THREE.Group();
+  group.position.set(pos.x + dir.x * offset, 0, pos.z + dir.z * offset);
+  group.rotation.y = Math.atan2(-dir.x, -dir.z);
+  scene.add(group);
+  loadDecorationModel(group, config);
+  return group.position;
+}
+
 function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
   const jobNode = nodes.find((n) => n.nodeType === "job");
+  const zonePropPositions = [];
   if (jobNode) {
     const pos = nodePositions.get(jobNode.id);
-    const dir = new THREE.Vector3(pos.x - centerX, 0, pos.z - centerZ).normalize();
-    const group = new THREE.Group();
-    group.position.set(pos.x + dir.x * 1.7, 0, pos.z + dir.z * 1.7);
-    group.rotation.y = Math.atan2(-dir.x, -dir.z);
-    scene.add(group);
-    loadDecorationModel(group, SNACK_STAGE_MODELS.jobCenter);
+    zonePropPositions.push(placeOutwardDecoration(pos, centerX, centerZ, 1.7, SNACK_STAGE_MODELS.jobCenter));
   }
 
   // 中央広場(円形タイル+肉球噴水)。CREDITS.mdの用途通り、マップの中心にまとめて設置する。
@@ -329,15 +444,10 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
 
   const flowerNodes = nodes
     .filter((n) => n.zone === "outer" && n.nodeType === "normal" && !n.snackSpawnCandidate)
-    .slice(0, 3);
+    .slice(0, 6);
   flowerNodes.forEach((n) => {
     const pos = nodePositions.get(n.id);
-    const dir = new THREE.Vector3(pos.x - centerX, 0, pos.z - centerZ).normalize();
-    const group = new THREE.Group();
-    group.position.set(pos.x + dir.x * 1.3, 0, pos.z + dir.z * 1.3);
-    group.rotation.y = Math.atan2(-dir.x, -dir.z);
-    scene.add(group);
-    loadDecorationModel(group, SNACK_STAGE_MODELS.flowerbed);
+    zonePropPositions.push(placeOutwardDecoration(pos, centerX, centerZ, 1.3, SNACK_STAGE_MODELS.flowerbed));
   });
 
   const hillCount = 6;
@@ -352,39 +462,77 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
     loadDecorationModel(group, SNACK_STAGE_MODELS.distantHill);
   }
 
-  const shopNode = nodes.find((n) => n.nodeType === "shop");
-  if (shopNode) {
-    const pos = nodePositions.get(shopNode.id);
-    const dir = new THREE.Vector3(pos.x - centerX, 0, pos.z - centerZ).normalize();
-    const group = new THREE.Group();
-    group.position.set(pos.x + dir.x * 1.6, 0, pos.z + dir.z * 1.6);
-    group.rotation.y = Math.atan2(-dir.x, -dir.z);
-    scene.add(group);
-    loadDecorationModel(group, SNACK_STAGE_MODELS.shopKiosk);
-  }
+  nodes
+    .filter((n) => n.nodeType === "shop")
+    .forEach((n) => {
+      const pos = nodePositions.get(n.id);
+      zonePropPositions.push(placeOutwardDecoration(pos, centerX, centerZ, 1.6, SNACK_STAGE_MODELS.shopKiosk));
+    });
 
-  const branchNode = nodes.find((n) => n.nodeType === "branch");
-  if (branchNode) {
-    const pos = nodePositions.get(branchNode.id);
-    const dir = new THREE.Vector3(pos.x - centerX, 0, pos.z - centerZ).normalize();
-    const group = new THREE.Group();
-    group.position.set(pos.x + dir.x * 1.4, 0, pos.z + dir.z * 1.4);
-    group.rotation.y = Math.atan2(-dir.x, -dir.z);
-    scene.add(group);
-    loadDecorationModel(group, SNACK_STAGE_MODELS.routeSignpost);
-  }
+  nodes
+    .filter((n) => n.nodeType === "branch")
+    .forEach((n) => {
+      const pos = nodePositions.get(n.id);
+      zonePropPositions.push(placeOutwardDecoration(pos, centerX, centerZ, 1.4, SNACK_STAGE_MODELS.routeSignpost));
+    });
 
   nodes
     .filter((n) => n.nodeType === "item-box")
     .forEach((n) => {
       const pos = nodePositions.get(n.id);
-      const dir = new THREE.Vector3(pos.x - centerX, 0, pos.z - centerZ).normalize();
-      const group = new THREE.Group();
-      group.position.set(pos.x + dir.x * 1.0, 0, pos.z + dir.z * 1.0);
-      group.rotation.y = Math.atan2(-dir.x, -dir.z);
-      scene.add(group);
-      loadDecorationModel(group, SNACK_STAGE_MODELS.itemBox);
+      zonePropPositions.push(placeOutwardDecoration(pos, centerX, centerZ, 1.0, SNACK_STAGE_MODELS.itemBox));
     });
+
+  // 駅ゾーン(北西): 見本の「北西=駅、スタート地点」に合わせ、駅とスタートゲートを配置。
+  const startNode = nodes.find((n) => n.nodeType === "start");
+  if (startNode) {
+    const pos = nodePositions.get(startNode.id);
+    zonePropPositions.push(placeOutwardDecoration(pos, centerX, centerZ, 2.4, SNACK_ZONE_MODELS["building-station"]));
+    zonePropPositions.push(placeOutwardDecoration(pos, centerX, centerZ, 1.2, SNACK_ZONE_MODELS["gate-start"]));
+  }
+
+  // 方角ゾーン別の建物・木・道沿いの小物を巡回配置する(見本の「北=オフィス/ショップ、
+  // 東=学校/病院/集合住宅、南=教会/住宅、西=公園」というゾーン分けを再現)。
+  // 既に専用装飾を置いたノード(job/shop/branch/item-box/start)は対象から外す。
+  const themeCounters = {};
+  const decoratedTypes = new Set(["job", "shop", "branch", "item-box", "start"]);
+  const zoneEligibleNodes = nodes.filter((n) => n.zone === "outer" && !decoratedTypes.has(n.nodeType));
+
+  function tryPlaceZoneProp(pos, offset, modelKey) {
+    const config = SNACK_ZONE_MODELS[modelKey];
+    if (!config) return;
+    const dir = new THREE.Vector3(pos.x - centerX, 0, pos.z - centerZ).normalize();
+    const worldPos = pos.clone().addScaledVector(dir, offset);
+    const conflict = zonePropPositions.some((p) => p.distanceTo(worldPos) < SNACK_ZONE_PROP_MIN_GAP);
+    if (conflict) return;
+    const group = new THREE.Group();
+    group.position.copy(worldPos);
+    group.rotation.y = Math.atan2(-dir.x, -dir.z);
+    scene.add(group);
+    loadDecorationModel(group, config);
+    zonePropPositions.push(worldPos);
+  }
+
+  zoneEligibleNodes.forEach((n, idx) => {
+    const pos = nodePositions.get(n.id);
+    const zoneName = n.buildingZone;
+    if (zoneName === "park") {
+      // 公園ゾーンは施設1つ+木を多めに配置し、緑豊かな見た目にする
+      if (idx % 3 === 0) tryPlaceZoneProp(pos, 2.1, "facility-park");
+      tryPlaceZoneProp(pos, 1.6, SNACK_TREE_MODEL_KEYS[idx % SNACK_TREE_MODEL_KEYS.length]);
+    } else if (zoneName === "station") {
+      // 駅・ゲートは上で個別配置済みのため、街灯等の小物のみ巡回配置する
+    } else if (idx % 2 === 0) {
+      const themeModels = SNACK_ZONE_BUILDING_THEMES[zoneName];
+      if (themeModels) {
+        const used = themeCounters[zoneName] || 0;
+        themeCounters[zoneName] = used + 1;
+        tryPlaceZoneProp(pos, 1.9, themeModels[used % themeModels.length]);
+      }
+    }
+    const streetKey = SNACK_STREET_PROP_MODEL_KEYS[idx % SNACK_STREET_PROP_MODEL_KEYS.length];
+    tryPlaceZoneProp(pos, 0.7, streetKey);
+  });
 }
 
 // 発動中の罠(node.activeTrap)を持つノードにだけplaced-trap-marker.glbを表示する。
@@ -648,22 +796,29 @@ function buildScene(nodes, players, activeSnackNodeId) {
   const halfX = (maxX - minX) / 2;
   const halfZ = (maxZ - minZ) / 2;
 
-  const groundWidth = halfX * 2 * 1.9 + 8;
-  const groundDepth = halfZ * 2 * 1.9 + 8;
+  const groundRadiusX = halfX * 1.35 + 4;
+  const groundRadiusZ = halfZ * 1.35 + 4;
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(groundWidth, groundDepth),
-    new THREE.MeshStandardMaterial({ map: loadGroundTexture(groundWidth, groundDepth) })
+    createIslandGroundGeometry(groundRadiusX, groundRadiusZ),
+    new THREE.MeshStandardMaterial({ map: loadGroundTexture(groundRadiusX * 2, groundRadiusZ * 2) })
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(centerX, -0.5, centerZ);
   ground.receiveShadow = true;
   scene.add(ground);
+  scene.add(createIslandEdgeSkirt(centerX, centerZ, groundRadiusX, groundRadiusZ, 3.2));
+  const groundWidth = groundRadiusX * 2;
+  const groundDepth = groundRadiusZ * 2;
 
   const startNode = nodes.find((n) => n.nodeType === "start") || nodes[0];
-  const outerPoints = computeOuterLoopPoints(startNode.id);
+  const outerPoints = computeLoopPoints(startNode.id, "outer");
   scene.add(buildRibbon(outerPoints, true));
-  const innerPoints = computeInnerShortcutPoints();
-  if (innerPoints) scene.add(buildRibbon(innerPoints, false));
+  const firstInnerNode = nodes.find((n) => n.zone === "inner");
+  if (firstInnerNode) {
+    const innerPoints = computeLoopPoints(firstInnerNode.id, "inner");
+    scene.add(buildRibbon(innerPoints, true));
+  }
+  computeConnectorSegments().forEach((segment) => scene.add(buildRibbon(segment, false)));
 
   nodeMarkers = [];
   nodes.forEach((n) => {

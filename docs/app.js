@@ -1535,6 +1535,10 @@ const App = {
         const itemId = window.LifeRoadSnackCPU.cpuDecideItemToUse(this.snack.state, player);
         if (itemId) useSnackItem(this.snack.state, player.id, itemId);
         this.runSnackDiceAnimation(player.id, (roll) => {
+          // commitSnackRoll(人間側)と同様、演出終了時に必ずhub.viewを戻す
+          // (2026-08-12発見・修正: CPU側だけこのリセットが抜けており、CPUの手番後
+          // hub.viewが"spinning"のまま固まって以降ずっと操作不能になるバグがあった)。
+          this.snack.hub = { view: "menu" };
           const result = rollSnackAndMove(this.snack.state, roll);
           this.pushSnackLog(result.entries);
           this.saveSnackGame();

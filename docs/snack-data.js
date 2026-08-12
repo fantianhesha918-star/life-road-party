@@ -70,63 +70,109 @@ const SNACK_ITEMS = [
 ];
 const SNACK_ITEM_SLOT_LIMIT = 3;
 
-// ==================== ノードグラフ(外周24+内周8=32ノード) ====================
-// 外周はぐるりと1周する安全ルート、内周は8番ノード(分岐点)から20番ノードへ抜ける
-// 有料の近道(通行料はSNACK_BRANCH_TOLL)。内周は一方通行のショートカットとして扱う
-// (本格版のような外周⇄内周を複数箇所で行き来する構造ではなく、試作では
-// 「1箇所の分岐で近道するか選び、抜けた先で外周へ合流する」というシンプルな形にする)。
+// ==================== ノードグラフ(外周48+内周16=64ノード) ====================
+// Codex連携チャットが試作着手前に用意していたマップ見本(map-stage1-animal-town-ring-park.png)・
+// 引き継ぎ書(ClaudeCode向け_マップ制作引き継ぎ.md)に沿って、外周48+内周16ノード・
+// 4方向の外周⇄内周接続に作り直したもの(2026-08-12、初版は見本を参照せず外周24+内周8・
+// 分岐1箇所の簡易版で実装していたことが判明し、見た目を見本相当に近づけるため再設計した)。
+// 内周は一方通行の近道ではなく、それ自体が閉じたループ(外周と同心円の内側の輪)。
+// 4箇所の分岐点(SNACK_BRANCH_OUTER_INDEXES)で内周へ入ると通行料(SNACK_BRANCH_TOLL)がかかり、
+// 内周を進んだ先の4箇所(出口は入口から2ノード先、SNACK_INNER_EXIT_OFFSET)で外周へ無料で
+// 戻れる(戻る際は入口から3ノード先の外周ノードへ合流し、近道した分だけ進む)。
 
-const SNACK_OUTER_TYPES = [
-  "start", "normal", "job", "coin", "normal", "payday", "shop", "normal",
-  "branch", "income", "normal", "choice", "normal", "rest", "coin", "expense",
-  "normal", "item-box", "payday", "normal", "normal", "normal", "item-box", "coin",
+const SNACK_OUTER_COUNT = 48;
+const SNACK_INNER_COUNT = 16;
+const SNACK_BRANCH_OUTER_INDEXES = [6, 18, 30, 42]; // 内周への入口(4方向、各90度おき)
+const SNACK_INNER_ENTRY_INDEXES = [0, 4, 8, 12]; // 対応する内周側の入口(SNACK_BRANCH_OUTER_INDEXESと同じ並び順)
+const SNACK_INNER_EXIT_OFFSET = 2; // 入口から何ノード進んだ内周ノードに外周への出口を用意するか
+const SNACK_OUTER_REJOIN_OFFSET = 3; // 出口が外周へ合流する際、対応する入口から何ノード先へ合流するか
+
+// マスの種類(見本の「北西=駅、北=オフィス/ショップ、東=学校/病院/集合住宅、南=教会/住宅、
+// 西=公園」という方角ゾーン)とは別に、3D側の建物配置だけに使う見た目専用の分類。
+// ゲームロジック(snack-engine.js/snack-cpu.js)はこの値を一切参照しない。
+const SNACK_OUTER_ZONES = [
+  { name: "station", from: 44, to: 3 }, // 北西: 駅・スタート地点(wrap)
+  { name: "office", from: 4, to: 11 }, // 北: 就職センター・ショップA
+  { name: "school", from: 12, to: 21 }, // 東: 学校・病院・集合住宅
+  { name: "church", from: 22, to: 33 }, // 南: 教会・住宅・ショップB
+  { name: "park", from: 34, to: 43 }, // 西: 公園
 ];
-const SNACK_INNER_TYPES = ["normal", "normal", "expense", "normal", "item-box", "expense", "normal", "normal"];
 
-// おやつ出現候補(6箇所、最低4ノード以上離す)
-const SNACK_CANDIDATE_OUTER_INDEXES = [1, 4, 7, 12, 21];
-const SNACK_CANDIDATE_INNER_INDEXES = [3];
+function snackOuterZoneForIndex(i) {
+  const zone = SNACK_OUTER_ZONES.find((z) => (z.from <= z.to ? i >= z.from && i <= z.to : i >= z.from || i <= z.to));
+  return zone ? zone.name : "station";
+}
 
-const SNACK_BRANCH_OUTER_INDEX = 8; // 内周への入口(分岐+有料ゲート)
-const SNACK_MERGE_OUTER_INDEX = 20; // 内周から外周へ合流する地点
+// 外周のマス種別(index→種別の上書き。指定の無いindexは"normal")。
+// 現行(24ノード)の構成比を48ノードへ比例拡大しつつ、見本のゾーン配置
+// (北=ショップA、南=ショップB、就職センターは北)に寄せて配置した。
+const SNACK_OUTER_TYPE_OVERRIDES = {
+  0: "start",
+  6: "branch", 18: "branch", 30: "branch", 42: "branch",
+  8: "job",
+  10: "shop", 26: "shop",
+  5: "payday", 17: "payday", 29: "payday", 41: "payday",
+  2: "coin", 14: "coin", 20: "coin", 25: "coin", 37: "coin", 45: "coin",
+  9: "income", 33: "income",
+  13: "choice", 38: "choice",
+  21: "rest", 40: "rest",
+  24: "expense", 44: "expense",
+  3: "item-box", 16: "item-box", 28: "item-box", 39: "item-box",
+};
+// 内周のマス種別パターン(元の8ノード版のパターンを2周させて16ノード分にする)
+const SNACK_INNER_TYPE_PATTERN = ["normal", "normal", "expense", "normal", "item-box", "expense", "normal", "normal"];
+
+// おやつ出現候補(見本の「外周8・内周2」に合わせ、5ゾーンへ均等に散らした)
+const SNACK_CANDIDATE_OUTER_INDEXES = [1, 7, 12, 19, 23, 31, 35, 43];
+const SNACK_CANDIDATE_INNER_INDEXES = [3, 11];
 
 function buildSnackStageNodes() {
   const nodes = [];
-  const outerCount = SNACK_OUTER_TYPES.length;
-  const rx = 9;
-  const rz = 6.5;
-  for (let i = 0; i < outerCount; i++) {
-    const theta = -Math.PI / 2 + (i / outerCount) * Math.PI * 2;
-    const isCandidate = SNACK_CANDIDATE_OUTER_INDEXES.includes(i);
+  const rx = 15.5;
+  const rz = 11.5;
+  for (let i = 0; i < SNACK_OUTER_COUNT; i++) {
+    const theta = -Math.PI / 2 + (i / SNACK_OUTER_COUNT) * Math.PI * 2;
+    const branchPos = SNACK_BRANCH_OUTER_INDEXES.indexOf(i);
+    const nextNodeIds = [`outer${(i + 1) % SNACK_OUTER_COUNT}`];
+    if (branchPos !== -1) nextNodeIds.push(`inner${SNACK_INNER_ENTRY_INDEXES[branchPos]}`);
     nodes.push({
       id: `outer${i}`,
       position: { x: Math.cos(theta) * rx, z: Math.sin(theta) * rz },
       zone: "outer",
-      nodeType: SNACK_OUTER_TYPES[i],
-      nextNodeIds: i === SNACK_BRANCH_OUTER_INDEX ? [`outer${(i + 1) % outerCount}`, "inner0"] : [`outer${(i + 1) % outerCount}`],
-      tollCost: i === SNACK_BRANCH_OUTER_INDEX ? SNACK_BRANCH_TOLL : 0,
-      snackSpawnCandidate: isCandidate,
+      buildingZone: snackOuterZoneForIndex(i),
+      nodeType: SNACK_OUTER_TYPE_OVERRIDES[i] || "normal",
+      nextNodeIds,
+      tollCost: branchPos !== -1 ? SNACK_BRANCH_TOLL : 0,
+      snackSpawnCandidate: SNACK_CANDIDATE_OUTER_INDEXES.includes(i),
       trap: false,
     });
   }
 
-  const innerCount = SNACK_INNER_TYPES.length;
-  const from = nodes.find((n) => n.id === `outer${SNACK_BRANCH_OUTER_INDEX}`).position;
-  const to = nodes.find((n) => n.id === `outer${SNACK_MERGE_OUTER_INDEX}`).position;
-  for (let i = 0; i < innerCount; i++) {
-    // 分岐点→合流点を結ぶ滑らかな弧(中心側へわずかに膨らませ、外周とは別ルートに見せる)
-    const t = (i + 1) / (innerCount + 1);
-    const bowZ = Math.sin(t * Math.PI) * 2.5;
-    const isCandidate = SNACK_CANDIDATE_INNER_INDEXES.includes(i);
+  // 内周は外周と同心円の内側の輪。入口(SNACK_INNER_ENTRY_INDEXES)の角度が対応する
+  // 外周の分岐点(SNACK_BRANCH_OUTER_INDEXES)と揃うよう、開始角をπ/4だけずらしてある
+  // (外周index6の角度=-π/4、内周index0の角度もこの式なら-π/4になり、接続の道が
+  // 短い直線で結べる。詳細はsnack-board3d.jsの接続リボン描画コメント参照)。
+  const innerRx = rx * 0.55;
+  const innerRz = rz * 0.55;
+  const exitInnerIndexes = SNACK_INNER_ENTRY_INDEXES.map((k) => (k + SNACK_INNER_EXIT_OFFSET) % SNACK_INNER_COUNT);
+  for (let i = 0; i < SNACK_INNER_COUNT; i++) {
+    const theta = -Math.PI / 4 + (i / SNACK_INNER_COUNT) * Math.PI * 2;
+    const nextNodeIds = [`inner${(i + 1) % SNACK_INNER_COUNT}`];
+    const exitPos = exitInnerIndexes.indexOf(i);
+    let tollCost = 0;
+    if (exitPos !== -1) {
+      const rejoinOuter = (SNACK_BRANCH_OUTER_INDEXES[exitPos] + SNACK_OUTER_REJOIN_OFFSET) % SNACK_OUTER_COUNT;
+      nextNodeIds.push(`outer${rejoinOuter}`);
+    }
     nodes.push({
       id: `inner${i}`,
-      position: { x: from.x + (to.x - from.x) * t, z: from.z + (to.z - from.z) * t + bowZ },
+      position: { x: Math.cos(theta) * innerRx, z: Math.sin(theta) * innerRz },
       zone: "inner",
-      nodeType: SNACK_INNER_TYPES[i],
-      nextNodeIds: i === innerCount - 1 ? [`outer${SNACK_MERGE_OUTER_INDEX}`] : [`inner${i + 1}`],
-      tollCost: 0,
-      snackSpawnCandidate: isCandidate,
-      trap: i === 1, // 内周の1箇所だけ罠を仕掛けやすい(危険な近道、という位置づけ)
+      nodeType: SNACK_INNER_TYPE_PATTERN[i % SNACK_INNER_TYPE_PATTERN.length],
+      nextNodeIds,
+      tollCost,
+      snackSpawnCandidate: SNACK_CANDIDATE_INNER_INDEXES.includes(i),
+      trap: i === 6 || i === 14, // 内周の2箇所を罠を仕掛けやすい危険な近道の位置づけに(元は1箇所を比例拡大)
     });
   }
 
