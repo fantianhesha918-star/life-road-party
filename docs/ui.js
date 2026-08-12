@@ -716,7 +716,9 @@ function renderMoneyToasts(toasts) {
 function renderPauseMenuModal(mode) {
   const desc = mode === "online"
     ? "ルームから退室します。他のプレイヤーの対戦はそのまま続きます。"
-    : "進行状況を保存してタイトルに戻ります。続きは「続きから再開する」で再開できます。";
+    : mode === "snack"
+      ? "進行状況を保存してタイトルに戻ります。続きは「おやつ集めモードの続きから」で再開できます。"
+      : "進行状況を保存してタイトルに戻ります。続きは「続きから再開する」で再開できます。";
   return `
     <div class="modal-backdrop pause-menu-modal">
       <div class="modal">
@@ -847,17 +849,33 @@ function renderSnackLogModal(entries) {
   `;
 }
 
+// プレイヤー情報(名前・所持コイン・おやつ数)を画面四隅に表示する(2026-08-12、マリオパーティの
+// 常時ステータス表示を参考に、単一プレイヤーの縦積みHUDから変更)。players[0]は必ず人間
+// (startSnackGameのconfigs順)なので左上=自分、以降CPUを右上→左下→右下の順に配置する。
+// 5人以上になることは無い(setup画面のCPU選択が最大3人=計4人)前提の簡易実装。
+const SNACK_CORNER_POSITIONS = ["topleft", "topright", "bottomleft", "bottomright"];
+
 function renderSnackHUD(state, me) {
-  const roundsLeft = state.totalRounds - state.round + 1;
-  const turnPlayer = state.players[state.currentTurnIndex];
+  const roundsLeft = Math.max(0, state.totalRounds - state.round + 1);
+  const corners = state.players
+    .slice(0, SNACK_CORNER_POSITIONS.length)
+    .map((p, i) => {
+      const visual = p.avatar || { color: "#e4572e", speciesEmoji: null, costumeImage: null };
+      const isActive = p.id === state.players[state.currentTurnIndex].id;
+      return `
+        <div class="snack-corner snack-corner-${SNACK_CORNER_POSITIONS[i]}${isActive ? " snack-corner-active" : ""}">
+          ${renderAvatarBadge(visual, 30)}
+          <div class="snack-corner-info">
+            <span class="snack-corner-name">${escapeHtml(p.name)}${p.isCPU ? "(CPU)" : ""}</span>
+            <span class="snack-corner-stats">🍪${p.snacks} 🪙${p.matchCoins}</span>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
   return `
-    <div class="snack-hud">
-      <div class="snack-hud-row">🍪 <strong>${me.snacks}</strong>個</div>
-      <div class="snack-hud-row">🪙 <strong>${me.matchCoins}</strong>コイン</div>
-      <div class="snack-hud-row">🎒 ${me.items.length}/${SNACK_ITEM_SLOT_LIMIT}</div>
-      <div class="snack-hud-row">⏳ 残り${Math.max(0, roundsLeft)}ラウンド</div>
-      <div class="snack-hud-row">👤 ${escapeHtml(turnPlayer.name)}の番</div>
-    </div>
+    <div class="snack-round-badge">⏳ 残り${roundsLeft}ラウンド ・ 🎒${me.items.length}/${SNACK_ITEM_SLOT_LIMIT}</div>
+    <div class="snack-corner-hud">${corners}</div>
   `;
 }
 
@@ -1034,7 +1052,7 @@ function renderSnackShopModal(me) {
   `;
 }
 
-function renderSnackGameScreen(snack, humanId) {
+function renderSnackGameScreen(snack, humanId, pauseMenuOpen) {
   const state = snack.state;
   const turnPlayer = state.players[state.currentTurnIndex];
   const isHumanTurn = turnPlayer.id === humanId;
@@ -1052,7 +1070,7 @@ function renderSnackGameScreen(snack, humanId) {
       ${renderSnackStopChoiceModal(state, isHumanTurn)}
       ${snack.hub && snack.hub.view === "shop" ? renderSnackShopModal(me) : ""}
       ${snack.logOpen ? renderSnackLogModal(snack.log) : ""}
-      <button class="btn" onclick="App.goTitle()">☰ タイトルへ戻る</button>
+      ${pauseMenuOpen ? renderPauseMenuModal("snack") : ""}
     </section>
   `;
 }

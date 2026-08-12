@@ -467,6 +467,11 @@ const App = {
   // 「タイトルに戻る」確定。soloは進行状況を保存してから戻る(continueGameで再開できる)。
   // onlineは自分のルーム参照を消して退室する(他プレイヤーの対戦はそのまま続く)。
   confirmPauseToTitle() {
+    if (this.screen === "snack-game") {
+      this.saveSnackGame();
+      this.goTitle();
+      return;
+    }
     if (this.mode === "online") {
       this.leaveOnlineRoom();
       return;
@@ -1156,7 +1161,7 @@ const App = {
     } else if (this.screen === "snack-setup") {
       view.innerHTML = renderSnackSetupScreen();
     } else if (this.screen === "snack-game" && this.snack) {
-      view.innerHTML = renderSnackGameScreen(this.snack, this.snackHumanId);
+      view.innerHTML = renderSnackGameScreen(this.snack, this.snackHumanId, this.pauseMenuOpen);
     } else if (this.screen === "snack-result" && this.snack) {
       view.innerHTML = renderSnackResultScreen(this.snack.state, this.snackHumanId);
     }
@@ -1174,6 +1179,8 @@ const App = {
       state = this.state;
     } else if (this.screen === "online-game" && this.online && this.online.room) {
       state = this.online.localTurnState || roomToEngineState(this.online.room);
+    } else if (this.screen === "snack-game" && this.snack) {
+      state = this.snack.state;
     }
     titleEl.innerHTML = state ? renderHeaderTurnContent(state, this.hoppingPlayerId) : "アニマルライフ";
     const pauseBtn = document.getElementById("app-header-pause");
@@ -1397,7 +1404,17 @@ const App = {
       });
   },
 
-  commitSnackRoll(roll) {
+  // snack-engine.jsの移動結果に含まれるpath(通過ノードIdの配列)を、3D側で1マスずつ
+  // 逐次ホップさせる(2026-08-12追加、ユーザー要望により本編board3d.jsと同じ「マスごとの
+  // 逐次ホップ」に統一。以前は移動元→移動先を結ぶ1回のホップに簡略化していた)。
+  // 3D未マウント時(理論上は起きない想定だが念のため)は何もせず即座に戻る。
+  async playSnackMovementHop(playerId, path) {
+    if (!path || !path.length) return;
+    if (!this.snackBoard3dMounted || !window.LifeRoadSnackBoard3D) return;
+    await window.LifeRoadSnackBoard3D.hopPath(playerId, path);
+  },
+
+  async commitSnackRoll(roll) {
     this.snack.hub = { view: "menu" };
     const state = this.snack.state;
     const player = currentSnackPlayer(state);
@@ -1405,28 +1422,31 @@ const App = {
     const result = rollSnackAndMove(state, roll);
     this.pushSnackLog(result.entries);
     this.saveSnackGame();
+    await this.playSnackMovementHop(player.id, result.path);
     this.render();
     this.afterSnackAction();
   },
 
-  snackChooseBranch(nextNodeId) {
+  async snackChooseBranch(nextNodeId) {
     if (!this.snack.state.pendingBranch) return;
     const player = this.snack.state.players.find((p) => p.id === this.snack.state.pendingBranch.playerId);
     if (player.id !== this.snackHumanId) return;
     const result = resolveSnackBranch(this.snack.state, nextNodeId);
     this.pushSnackLog(result.entries);
     this.saveSnackGame();
+    await this.playSnackMovementHop(player.id, result.path);
     this.render();
     this.afterSnackAction();
   },
 
-  snackChooseSnackPurchase(buy) {
+  async snackChooseSnackPurchase(buy) {
     if (!this.snack.state.pendingSnackChoice) return;
     const player = this.snack.state.players.find((p) => p.id === this.snack.state.pendingSnackChoice.playerId);
     if (player.id !== this.snackHumanId) return;
     const result = resolveSnackChoice(this.snack.state, buy);
     this.pushSnackLog(result.entries);
     this.saveSnackGame();
+    await this.playSnackMovementHop(player.id, result.path);
     this.render();
     this.afterSnackAction();
   },
@@ -1487,12 +1507,13 @@ const App = {
     if (state.pendingBranch) {
       const player = state.players.find((p) => p.id === state.pendingBranch.playerId);
       if (!player.isCPU) return;
-      setTimeout(() => {
+      setTimeout(async () => {
         if (!this.snack || !this.snack.state.pendingBranch) return;
         const choice = window.LifeRoadSnackCPU.cpuChooseSnackBranch(this.snack.state, player);
         const result = resolveSnackBranch(this.snack.state, choice);
         this.pushSnackLog(result.entries);
         this.saveSnackGame();
+        await this.playSnackMovementHop(player.id, result.path);
         this.render();
         this.afterSnackAction();
       }, 700);
@@ -1501,11 +1522,12 @@ const App = {
     if (state.pendingSnackChoice) {
       const player = state.players.find((p) => p.id === state.pendingSnackChoice.playerId);
       if (!player.isCPU) return;
-      setTimeout(() => {
+      setTimeout(async () => {
         if (!this.snack || !this.snack.state.pendingSnackChoice) return;
         const result = resolveSnackChoice(this.snack.state, window.LifeRoadSnackCPU.cpuDecideSnackPurchase());
         this.pushSnackLog(result.entries);
         this.saveSnackGame();
+        await this.playSnackMovementHop(player.id, result.path);
         this.render();
         this.afterSnackAction();
       }, 700);
@@ -1534,7 +1556,7 @@ const App = {
         if (currentSnackPlayer(this.snack.state).id !== player.id) return;
         const itemId = window.LifeRoadSnackCPU.cpuDecideItemToUse(this.snack.state, player);
         if (itemId) useSnackItem(this.snack.state, player.id, itemId);
-        this.runSnackDiceAnimation(player.id, (roll) => {
+        this.runSnackDiceAnimation(player.id, async (roll) => {
           // commitSnackRoll(人間側)と同様、演出終了時に必ずhub.viewを戻す
           // (2026-08-12発見・修正: CPU側だけこのリセットが抜けており、CPUの手番後
           // hub.viewが"spinning"のまま固まって以降ずっと操作不能になるバグがあった)。
@@ -1542,6 +1564,7 @@ const App = {
           const result = rollSnackAndMove(this.snack.state, roll);
           this.pushSnackLog(result.entries);
           this.saveSnackGame();
+          await this.playSnackMovementHop(player.id, result.path);
           this.render();
           this.afterSnackAction();
         });

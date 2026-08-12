@@ -837,6 +837,96 @@ body {
   color: var(--danger);
 }
 
+/* おやつ集めモード: プレイヤー情報を4人ぶん画面四隅に表示する(2026-08-12、マリオパーティ風の
+   「常に全員の状況が見える」レイアウトを狙って、単一プレイヤーの縦積みHUDから変更)。
+   pointer-eventsはhud自体none、カードは操作不要のため子要素も特に有効化しない。 */
+.snack-corner-hud {
+  position: fixed;
+  inset: 0;
+  max-width: 480px;
+  margin: 0 auto;
+  z-index: 12;
+  pointer-events: none;
+}
+
+.snack-corner {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  border: 2px solid transparent;
+  max-width: 47%;
+}
+
+.snack-corner-topleft {
+  top: 60px;
+  left: 8px;
+}
+
+.snack-corner-topright {
+  top: 60px;
+  right: 8px;
+  flex-direction: row-reverse;
+  padding: 5px 5px 5px 10px;
+}
+
+.snack-corner-bottomleft {
+  bottom: 68px;
+  left: 8px;
+}
+
+.snack-corner-bottomright {
+  bottom: 68px;
+  right: 8px;
+  flex-direction: row-reverse;
+  padding: 5px 5px 5px 10px;
+}
+
+.snack-corner-active {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(46, 125, 107, 0.28), 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.snack-corner-info {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  min-width: 0;
+}
+
+.snack-corner-name {
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.snack-corner-stats {
+  font-size: 0.68rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.snack-round-badge {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  white-space: nowrap;
+}
+
 /* 通常時のターンハブ(menu)は、毎ターン表示されるためマップを隠さない
    細い横並びバーとして画面最下部に常設する(サブ画面はturn-hub-modalの大きいカードのまま)。 */
 .hub-bar {

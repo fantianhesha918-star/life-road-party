@@ -12,7 +12,10 @@ const ROAD_TEXTURE_URL = new URL("./images/road-path.jpg", import.meta.url).href
 
 const ROAD_HALF_WIDTH = 0.9;
 const HOP_HEIGHT = 0.5;
-const HOP_DURATION_MS = 450;
+const HOP_DURATION_MS = 450; // syncPlayersが差分から直接1回ホップさせるフォールバック用
+// 1マスずつの逐次ホップ(hopPath)専用の短めの時間。旧来の「移動元→移動先を1回で結ぶ」演出用
+// のHOP_DURATION_MSのまま複数マスに使うと合計時間が長くなりすぎるため別定数にした(2026-08-12)。
+const HOP_STEP_DURATION_MS = 260;
 // カメラはすごろく本編(board3d.js)と同じ「静止時=ジオラマ風の見下ろし/移動中=進行方向の
 // 真後ろから追う三人称視点」の2段構成にする(2026-08-11、ユーザー指示で本編と統一)。
 // ループ型マップでも、追従先はあくまで現在の手番プレイヤー1人なので同じ値をそのまま使える。
@@ -69,6 +72,16 @@ const SPECIES_MODEL_MAP = {
     scale: 0.469,
     yOffset: 0.446,
   },
+};
+
+// マス土台モデル(masu-base.glb)。本編(board3d.js)と全く同じ無地モデル・scale・yOffsetを
+// 再利用し、マテリアル色だけマスの種類ごとに上書きする(2026-08-12、平らな色付き円盤の
+// プレースホルダーから本編と同じ3D土台へ差し替え。マス間隔が本編のSQUARE_SPACING=2.2相当に
+// なるよう合わせたこととあわせて、見た目のクオリティを本編と揃える狙い)。
+const SNACK_MASU_BASE_MODEL = {
+  url: new URL("./models/masu-base.glb", import.meta.url).href,
+  scale: 0.85,
+  yOffset: -0.14,
 };
 
 // フェーズ1で使う専用の景観素材6点。scale/yOffsetは_measure_snack_models.html(Playwright+Box3実測)
@@ -182,20 +195,23 @@ const SNACK_STREET_PROP_MODEL_KEYS = ["prop-streetlamp", "prop-bench", "prop-sig
 // ゾーン内の建物・木・小物同士が近すぎる場合に間引く最小距離(本編のSTAGE_PROP_MIN_CROSS_GAP_DISTと同じ考え方)
 const SNACK_ZONE_PROP_MIN_GAP = 2.4;
 
-// snack-data.jsのnodeType別の色分け(2D版のイメージに寄せた簡易配色)
+// snack-data.jsのnodeType別の色分け。2026-08-12、ユーザー要望により「お金が増える=青・
+// 減る=赤・特殊な選択/イベント=緑」の3系統がひと目で分かる配色に変更(coin/payday/incomeは
+// 収入系で青、expenseは支出系で赤、job/branch/choiceは特殊な分岐・選択系で緑に統一。
+// start/rest/shop/item-boxはお金の増減系ではないため、用途が分かる独立した色を維持)。
 const SNACK_NODE_TYPE_COLORS = {
   start: 0xfff3cd,
-  normal: 0xf9f1dc,
-  job: 0xe8f0fe,
-  coin: 0xfff0b3,
-  payday: 0xe6f4ea,
-  shop: 0xffe0b3,
-  branch: 0xd9a066,
-  income: 0xd7f5df,
-  choice: 0xfff0e0,
+  normal: 0xf3ede0,
+  job: 0xbdeecb,
+  coin: 0xbfe0fb,
+  payday: 0xbfe0fb,
+  shop: 0xffd9a6,
+  branch: 0xbdeecb,
+  income: 0xbfe0fb,
+  choice: 0xbdeecb,
   rest: 0xffffff,
-  expense: 0xfdeaea,
-  "item-box": 0xe0d7fb,
+  expense: 0xf7b8b8,
+  "item-box": 0xdcc9f7,
 };
 
 const textureLoader = new THREE.TextureLoader();
@@ -409,6 +425,36 @@ function loadDecorationModel(owner, config) {
     })
     .catch((err) => {
       console.warn("おやつ集めモード: 装飾モデルの読み込みに失敗", config.url, err);
+    });
+}
+
+// masu-base.glbは全ノード共通の形状なので1回だけ読み込み、ノードの数だけクローンして
+// マテリアル色だけノードの種類ごとに変える(本編board3d.jsのloadMasuBaseInstancesと同じ手法)。
+// 読み込み完了後、buildScene側が用意した仮のプレースホルダー(nodeMarkers)を実モデルに差し替える。
+function loadSnackMasuBaseInstances(nodes) {
+  const generation = sceneGeneration;
+  loadGLTFSceneCached(SNACK_MASU_BASE_MODEL.url)
+    .then((template) => {
+      if (generation !== sceneGeneration) return;
+      nodes.forEach((n, i) => {
+        if (nodeMarkers[i]) scene.remove(nodeMarkers[i]);
+        const instance = template.clone(true);
+        instance.traverse((node) => {
+          if (node.isMesh) {
+            node.material = node.material.clone();
+            node.material.color.setHex(SNACK_NODE_TYPE_COLORS[n.nodeType] ?? 0xf9f1dc);
+            node.receiveShadow = true;
+          }
+        });
+        instance.scale.setScalar(SNACK_MASU_BASE_MODEL.scale);
+        const pos = nodePositions.get(n.id);
+        instance.position.set(pos.x, SNACK_MASU_BASE_MODEL.yOffset, pos.z);
+        scene.add(instance);
+        nodeMarkers[i] = instance;
+      });
+    })
+    .catch((err) => {
+      console.warn("おやつ集めモード: マス土台モデルの読み込みに失敗、プレースホルダーのまま続行します", err);
     });
 }
 
@@ -688,10 +734,10 @@ function faceDirection(entry, fromPos, toPos) {
   entry.group.rotation.y = Math.atan2(dx, dz);
 }
 
-// 移動元→移動先ノードのワールド座標を直線+放物線アーチで結ぶ簡易ホップ演出。
-// (snack-engine.jsは1手番の移動を同期的に一括処理し、途中で通ったノードの列を
-// 外部へ公開していないため、board3d.jsのようなマスごとの逐次ホップは行わず、
-// 最終的な移動先だけを1回のホップで表現する簡易版にしている)
+// 移動元→移動先ノードのワールド座標を直線+放物線アーチで結ぶホップ演出。
+// hop.onDoneがあれば完了時にそれを呼ぶ(hopPathが1マスずつ連結するのに使う)。
+// onDoneが無い場合(syncPlayersが差分から直接1回ホップさせるフォールバック経路)は、
+// ここで従来通りisMovingを片付ける。
 function updateHopForEntry(entry, now) {
   if (!entry.hop) return;
   const hop = entry.hop;
@@ -706,9 +752,39 @@ function updateHopForEntry(entry, now) {
     entry.currentNodeId = hop.toNodeId;
     entry.group.position.y = 0;
     entry.group.scale.set(1, 1, 1);
+    const onDone = hop.onDone;
     entry.hop = null;
-    if (entry.playerId === focusPlayerId) isMoving = false;
+    if (onDone) {
+      onDone();
+    } else if (entry.playerId === focusPlayerId) {
+      isMoving = false;
+    }
   }
+}
+
+function hopToNode(entry, fromPos, toPos, toNodeId, durationMs) {
+  return new Promise((resolve) => {
+    faceDirection(entry, fromPos, toPos);
+    entry.hop = { from: fromPos, to: toPos, toNodeId, startTime: performance.now(), durationMs, onDone: resolve };
+  });
+}
+
+// snack-engine.jsの移動結果に含まれるpath(通過したノードIdの配列)を1マスずつ順番に
+// ホップさせる(本編board3d.jsのhopStepsと同じ考え方、2026-08-12追加)。
+// pathが空(分岐選択のみ等で移動が発生しなかった手番)なら何もしない。
+async function hopPath(playerId, pathNodeIds) {
+  const entry = characters.get(playerId);
+  if (!entry || !pathNodeIds || !pathNodeIds.length) return;
+  const isFocus = playerId === focusPlayerId;
+  if (isFocus) isMoving = true;
+  let fromPos = nodePositions.get(entry.currentNodeId) || entry.group.position.clone();
+  for (const nodeId of pathNodeIds) {
+    const toPos = nodePositions.get(nodeId);
+    if (!toPos) break;
+    await hopToNode(entry, fromPos, toPos, nodeId, HOP_STEP_DURATION_MS);
+    fromPos = toPos;
+  }
+  if (isFocus) isMoving = false;
 }
 
 function syncPlayers(players, activeSnackNodeId) {
@@ -820,6 +896,7 @@ function buildScene(nodes, players, activeSnackNodeId) {
   }
   computeConnectorSegments().forEach((segment) => scene.add(buildRibbon(segment, false)));
 
+  // masu-base.glb読み込み完了までの間だけ見せる仮のプレースホルダー(本編board3d.jsと同じ手法)。
   nodeMarkers = [];
   nodes.forEach((n) => {
     const marker = new THREE.Mesh(
@@ -832,6 +909,7 @@ function buildScene(nodes, players, activeSnackNodeId) {
     scene.add(marker);
     nodeMarkers.push(marker);
   });
+  loadSnackMasuBaseInstances(nodes);
 
   placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ);
   createMascotEntry(activeSnackNodeId);
@@ -1041,4 +1119,4 @@ function dispose() {
   diceMesh = null;
 }
 
-window.LifeRoadSnackBoard3D = { mount, dispose, syncPlayers, focusCamera, playDiceRoll };
+window.LifeRoadSnackBoard3D = { mount, dispose, syncPlayers, focusCamera, playDiceRoll, hopPath };

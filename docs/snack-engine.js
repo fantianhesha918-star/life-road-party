@@ -156,10 +156,13 @@ function resolveStopEvent(state, player, node, entries) {
   }
 }
 
-function stepOntoNode(state, player, nodeId, entries) {
+// path: 呼び出し元が用意した配列に、通過したノードIdを順番に積んでいく(3D側が1マスずつの
+// ホップ演出を再生するために使う。ゲームロジック自体はpathの有無に関わらず同じ挙動)。
+function stepOntoNode(state, player, nodeId, entries, path) {
   player.currentNodeId = nodeId;
   player.remainingSteps -= 1;
   player.totalStepsWalked += 1;
+  if (path) path.push(nodeId);
   const node = findSnackNode(nodeId);
   applyTrapIfAny(state, player, node, entries);
   processPassEvent(state, player, node, entries);
@@ -177,32 +180,33 @@ function stepOntoNode(state, player, nodeId, entries) {
   }
 }
 
-function continueSnackMovement(state, player, entries) {
+function continueSnackMovement(state, player, entries, path) {
   while (player.remainingSteps > 0 && !state.pendingBranch && !state.pendingSnackChoice && !state.pendingStopChoice) {
     const node = findSnackNode(player.currentNodeId);
     if (node.nextNodeIds.length > 1) {
       state.pendingBranch = { playerId: player.id, nodeId: node.id };
       return;
     }
-    stepOntoNode(state, player, node.nextNodeIds[0], entries);
+    stepOntoNode(state, player, node.nextNodeIds[0], entries, path);
   }
 }
 
-function wrapUpSnackAction(state, player, entries) {
+function wrapUpSnackAction(state, player, entries, path) {
   const pending = state.pendingBranch ? "branch" : state.pendingSnackChoice ? "snack" : state.pendingStopChoice ? "choice" : null;
-  return { entries, pending, movementDone: !pending && player.remainingSteps === 0 };
+  return { entries, pending, movementDone: !pending && player.remainingSteps === 0, path: path || [] };
 }
 
 function rollSnackAndMove(state, roll) {
   const player = currentSnackPlayer(state);
   const entries = [];
+  const path = [];
   player.turnRolled = true;
   const extra = player.pendingExtraDice || 0;
   player.pendingExtraDice = 0;
   player.remainingSteps = roll + extra;
   if (extra) entries.push({ type: "info", text: `追加サイコロの効果で+${extra}` });
-  continueSnackMovement(state, player, entries);
-  return wrapUpSnackAction(state, player, entries);
+  continueSnackMovement(state, player, entries, path);
+  return wrapUpSnackAction(state, player, entries, path);
 }
 
 function resolveSnackBranch(state, chosenNextNodeId) {
@@ -211,15 +215,16 @@ function resolveSnackBranch(state, chosenNextNodeId) {
   const branchNode = findSnackNode(nodeId);
   if (!branchNode.nextNodeIds.includes(chosenNextNodeId)) throw new Error("invalid branch choice");
   const entries = [];
+  const path = [];
   state.pendingBranch = null;
   if (chosenNextNodeId !== branchNode.nextNodeIds[0] && branchNode.tollCost > 0) {
     const toll = Math.min(branchNode.tollCost, player.matchCoins);
     player.matchCoins -= toll;
     entries.push({ type: "money", text: `近道の通行料 -${toll}`, delta: -toll });
   }
-  stepOntoNode(state, player, chosenNextNodeId, entries);
-  continueSnackMovement(state, player, entries);
-  return wrapUpSnackAction(state, player, entries);
+  stepOntoNode(state, player, chosenNextNodeId, entries, path);
+  continueSnackMovement(state, player, entries, path);
+  return wrapUpSnackAction(state, player, entries, path);
 }
 
 function resolveSnackChoice(state, buy) {
@@ -227,6 +232,7 @@ function resolveSnackChoice(state, buy) {
   const player = state.players.find((p) => p.id === playerId);
   const node = findSnackNode(nodeId);
   const entries = [];
+  const path = [];
   state.pendingSnackChoice = null;
   if (buy) {
     player.matchCoins -= SNACK_SNACK_PRICE;
@@ -239,9 +245,9 @@ function resolveSnackChoice(state, buy) {
   if (player.remainingSteps === 0) {
     resolveStopEvent(state, player, node, entries);
   } else {
-    continueSnackMovement(state, player, entries);
+    continueSnackMovement(state, player, entries, path);
   }
-  return wrapUpSnackAction(state, player, entries);
+  return wrapUpSnackAction(state, player, entries, path);
 }
 
 function resolveSnackStopChoice(state, optionIndex) {

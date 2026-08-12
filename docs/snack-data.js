@@ -128,8 +128,10 @@ const SNACK_CANDIDATE_INNER_INDEXES = [3, 11];
 
 function buildSnackStageNodes() {
   const nodes = [];
-  const rx = 15.5;
-  const rz = 11.5;
+  // 本編(board3d.js)のSQUARE_SPACING=2.2相当のマス間隔になるよう半径を設定
+  // (2026-08-12、旧値だとマス間隔が本編より広く間延びして見えたため調整)。
+  const rx = 17;
+  const rz = 12.5;
   for (let i = 0; i < SNACK_OUTER_COUNT; i++) {
     const theta = -Math.PI / 2 + (i / SNACK_OUTER_COUNT) * Math.PI * 2;
     const branchPos = SNACK_BRANCH_OUTER_INDEXES.indexOf(i);
@@ -152,8 +154,8 @@ function buildSnackStageNodes() {
   // 外周の分岐点(SNACK_BRANCH_OUTER_INDEXES)と揃うよう、開始角をπ/4だけずらしてある
   // (外周index6の角度=-π/4、内周index0の角度もこの式なら-π/4になり、接続の道が
   // 短い直線で結べる。詳細はsnack-board3d.jsの接続リボン描画コメント参照)。
-  const innerRx = rx * 0.55;
-  const innerRz = rz * 0.55;
+  const innerRx = rx * 0.4;
+  const innerRz = rz * 0.4;
   const exitInnerIndexes = SNACK_INNER_ENTRY_INDEXES.map((k) => (k + SNACK_INNER_EXIT_OFFSET) % SNACK_INNER_COUNT);
   for (let i = 0; i < SNACK_INNER_COUNT; i++) {
     const theta = -Math.PI / 4 + (i / SNACK_INNER_COUNT) * Math.PI * 2;
