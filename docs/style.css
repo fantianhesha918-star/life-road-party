@@ -1117,7 +1117,7 @@ body {
   background-size: 100% 100%;
   background-repeat: no-repeat;
   padding: 8px 16px 8px 8px;
-  min-height: 56px;
+  min-height: 60px;
   cursor: pointer;
   text-align: left;
 }
@@ -1148,6 +1148,7 @@ body {
 .snack-choice-text {
   display: flex;
   flex-direction: column;
+  gap: 2px;
   min-width: 0;
   flex: 1;
 }
@@ -1155,6 +1156,7 @@ body {
 .snack-choice-label {
   font-size: 0.82rem;
   font-weight: 700;
+  line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1162,6 +1164,7 @@ body {
 
 .snack-choice-sublabel {
   font-size: 0.68rem;
+  line-height: 1.2;
   color: var(--muted);
 }
 
