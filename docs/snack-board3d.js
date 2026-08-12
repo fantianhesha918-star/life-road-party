@@ -74,16 +74,6 @@ const SPECIES_MODEL_MAP = {
   },
 };
 
-// マス土台モデル(masu-base.glb)。本編(board3d.js)と全く同じ無地モデル・scale・yOffsetを
-// 再利用し、マテリアル色だけマスの種類ごとに上書きする(2026-08-12、平らな色付き円盤の
-// プレースホルダーから本編と同じ3D土台へ差し替え。マス間隔が本編のSQUARE_SPACING=2.2相当に
-// なるよう合わせたこととあわせて、見た目のクオリティを本編と揃える狙い)。
-const SNACK_MASU_BASE_MODEL = {
-  url: new URL("./models/masu-base.glb", import.meta.url).href,
-  scale: 0.85,
-  yOffset: -0.14,
-};
-
 // フェーズ1で使う専用の景観素材6点。scale/yOffsetは_measure_snack_models.html(Playwright+Box3実測)
 // で全モデルがx軸(またはz軸)基準でおよそ幅2に正規化されていることを確認し、狙いの実寸
 // (下記コメントの目標値)になるよう逆算した(2026-08-11)。素材自体はCodex連携チャットが
@@ -195,26 +185,130 @@ const SNACK_STREET_PROP_MODEL_KEYS = ["prop-streetlamp", "prop-bench", "prop-sig
 // ゾーン内の建物・木・小物同士が近すぎる場合に間引く最小距離(本編のSTAGE_PROP_MIN_CROSS_GAP_DISTと同じ考え方)
 const SNACK_ZONE_PROP_MIN_GAP = 2.4;
 
-// snack-data.jsのnodeType別の色分け。2026-08-12、ユーザー要望により「お金が増える=青・
-// 減る=赤・特殊な選択/イベント=緑」の3系統がひと目で分かる配色に変更(coin/payday/incomeは
-// 収入系で青、expenseは支出系で赤、job/branch/choiceは特殊な分岐・選択系で緑に統一。
-// start/rest/shop/item-boxはお金の増減系ではないため、用途が分かる独立した色を維持)。
-const SNACK_NODE_TYPE_COLORS = {
-  start: 0xfff3cd,
-  normal: 0xf3ede0,
-  job: 0xbdeecb,
-  coin: 0xbfe0fb,
-  payday: 0xbfe0fb,
-  shop: 0xffd9a6,
-  branch: 0xbdeecb,
-  income: 0xbfe0fb,
-  choice: 0xbdeecb,
-  rest: 0xffffff,
-  expense: 0xf7b8b8,
-  "item-box": 0xdcc9f7,
-};
-
 const textureLoader = new THREE.TextureLoader();
+
+// ==================== 通常マス2.5D(共通シリンダー土台+種類別PNGインポスター) ====================
+// 2026-08-13、Codexの「通常マス2.5D実装仕様書」により正式採用。個別3Dモデル化やマテリアル色分け
+// (旧SNACK_NODE_TYPE_COLORS)ではなく、全マス共通のクリーム色シリンダー土台(InstancedMesh、
+// 1ジオメトリ・1マテリアルを共有)+種類別の透過PNGを貼ったカメラ追従インポスターで16種類を表現する。
+const SPACE_METRICS = {
+  diameter: 1.0,
+  baseHeight: 0.16,
+  visualWidth: 1.12,
+  visualLift: 0.015,
+};
+// 旧プレースホルダー円柱(高さ0.14、中心y=-0.38)の上面(-0.31)を踏襲し、キャラクター(y=0基準)
+// との相対位置が変わらないようにする土台上面の基準高さ。実機確認の上で微調整すること。
+const SPACE_GROUND_Y = -0.31;
+
+// ロジック側のnodeType(snack-data.js)と表示用PNGファイル名を直結させないための対応表
+// (仕様書11章)。snack-data.jsで実際に使われているnodeTypeは12種のみ(仕様書側は16種、
+// event/paidGate/warp/family/investmentは現行データに存在しない予備枠)。branchは「分岐」の
+// 意味でjunction画像、item-boxはitem画像、startは既存のgate-start.glbで既に区別済みのため
+// normal画像へフォールバックする。
+const SPACE_VISUAL_MAP = {
+  start: "space-normal.png",
+  normal: "space-normal.png",
+  job: "space-job.png",
+  coin: "space-coin.png",
+  payday: "space-payday.png",
+  shop: "space-shop.png",
+  branch: "space-junction.png",
+  income: "space-income.png",
+  choice: "space-choice.png",
+  rest: "space-rest.png",
+  expense: "space-expense.png",
+  "item-box": "space-item.png",
+};
+const SPACE_IMAGE_BASE = new URL("./images/snack-spaces/", import.meta.url).href;
+const spaceTextureCache = new Map(); // ファイル名 -> Promise<Texture>(同じ種類のマスでTexture/Materialを共有する)
+
+function loadSpaceTexture(fileName) {
+  if (spaceTextureCache.has(fileName)) return spaceTextureCache.get(fileName);
+  const promise = new Promise((resolve, reject) => {
+    textureLoader.load(
+      SPACE_IMAGE_BASE + fileName,
+      (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.minFilter = THREE.LinearMipmapLinearFilter;
+        tex.anisotropy = 4;
+        resolve(tex);
+      },
+      undefined,
+      reject
+    );
+  });
+  spaceTextureCache.set(fileName, promise);
+  return promise;
+}
+
+let spaceBaseMesh = null; // 全マス共通のクリーム色シリンダー土台(InstancedMesh)
+let spaceImpostors = []; // [{ nodeId, mesh }]
+let lastImpostorCameraPos = new THREE.Vector3();
+let impostorsInitialized = false;
+
+// 各ノードへ、共通シリンダー土台(1個のInstancedMeshをノード数ぶんインスタンス化)と、
+// 種類別PNGを貼ったカメラ追従インポスター(仕様書5章のupdateSpaceImpostor例に準拠、
+// 水平回転はカメラ方位へ追従・垂直角度は固定)を生成する。PNG読込失敗時は通常マスへ
+// フォールバックし進行を止めない(仕様書9章)。
+function buildSpaceGroups(nodes) {
+  const geometry = new THREE.CylinderGeometry(SPACE_METRICS.diameter / 2, SPACE_METRICS.diameter / 2, SPACE_METRICS.baseHeight, 24);
+  const material = new THREE.MeshStandardMaterial({ color: 0xead7b6, roughness: 0.88, metalness: 0 });
+  spaceBaseMesh = new THREE.InstancedMesh(geometry, material, nodes.length);
+  spaceBaseMesh.receiveShadow = true;
+  spaceBaseMesh.castShadow = false;
+  const dummy = new THREE.Object3D();
+  nodes.forEach((n, i) => {
+    const pos = nodePositions.get(n.id);
+    dummy.position.set(pos.x, SPACE_GROUND_Y - SPACE_METRICS.baseHeight / 2, pos.z);
+    dummy.updateMatrix();
+    spaceBaseMesh.setMatrixAt(i, dummy.matrix);
+  });
+  spaceBaseMesh.instanceMatrix.needsUpdate = true;
+  scene.add(spaceBaseMesh);
+
+  spaceImpostors = [];
+  const planeGeo = new THREE.PlaneGeometry(SPACE_METRICS.visualWidth, SPACE_METRICS.visualWidth);
+  nodes.forEach((n) => {
+    const fileName = SPACE_VISUAL_MAP[n.nodeType] || "space-normal.png";
+    const impostorMaterial = new THREE.MeshBasicMaterial({
+      transparent: true,
+      alphaTest: 0.03,
+      depthTest: true,
+      depthWrite: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+    });
+    const mesh = new THREE.Mesh(planeGeo, impostorMaterial);
+    const pos = nodePositions.get(n.id);
+    mesh.position.set(pos.x, SPACE_GROUND_Y + SPACE_METRICS.visualLift, pos.z);
+    mesh.rotation.set(-Math.PI * 0.34, 0, 0);
+    scene.add(mesh);
+    spaceImpostors.push({ nodeId: n.id, mesh });
+    loadSpaceTexture(fileName)
+      .then((tex) => {
+        impostorMaterial.map = tex;
+        impostorMaterial.needsUpdate = true;
+      })
+      .catch((err) => {
+        console.warn("おやつ集めモード: マス表示画像の読み込みに失敗、種類なしのまま続行します", fileName, err);
+      });
+  });
+  impostorsInitialized = false;
+}
+
+// カメラが一定量動いた時だけ全マスのインポスター向きを再計算する(仕様書9章、標準プレイ中は
+// 毎フレーム全マス一括更新しない、という指示に対応)。
+function updateSpaceImpostors() {
+  if (!camera || !spaceImpostors.length) return;
+  if (impostorsInitialized && camera.position.distanceToSquared(lastImpostorCameraPos) < 0.01) return;
+  lastImpostorCameraPos.copy(camera.position);
+  impostorsInitialized = true;
+  spaceImpostors.forEach(({ mesh }) => {
+    const cameraYaw = Math.atan2(camera.position.x - mesh.position.x, camera.position.z - mesh.position.z);
+    mesh.rotation.set(-Math.PI * 0.34, cameraYaw, 0);
+  });
+}
 
 // P1〜P4固定色。snack-data.jsのSNACK_PLAYER_COLORSと値を一致させること。ES module(このファイル)
 // はclassic script側の`const`宣言をグローバル経由で参照できないため(windowにも乗らない)、
@@ -230,7 +324,6 @@ let camera = null;
 let characters = new Map(); // playerId -> entry
 let nodeMap = new Map(); // nodeId -> node
 let nodePositions = new Map(); // nodeId -> THREE.Vector3
-let nodeMarkers = [];
 let mascotState = null; // { nodeId, entry: { group, model, baseY } }
 let focusPlayerId = null;
 let isMoving = false; // 追従対象(focusPlayerId)が現在ホップ移動中かどうか
@@ -454,36 +547,6 @@ function loadDecorationModel(owner, config) {
     })
     .catch((err) => {
       console.warn("おやつ集めモード: 装飾モデルの読み込みに失敗", config.url, err);
-    });
-}
-
-// masu-base.glbは全ノード共通の形状なので1回だけ読み込み、ノードの数だけクローンして
-// マテリアル色だけノードの種類ごとに変える(本編board3d.jsのloadMasuBaseInstancesと同じ手法)。
-// 読み込み完了後、buildScene側が用意した仮のプレースホルダー(nodeMarkers)を実モデルに差し替える。
-function loadSnackMasuBaseInstances(nodes) {
-  const generation = sceneGeneration;
-  loadGLTFSceneCached(SNACK_MASU_BASE_MODEL.url)
-    .then((template) => {
-      if (generation !== sceneGeneration) return;
-      nodes.forEach((n, i) => {
-        if (nodeMarkers[i]) scene.remove(nodeMarkers[i]);
-        const instance = template.clone(true);
-        instance.traverse((node) => {
-          if (node.isMesh) {
-            node.material = node.material.clone();
-            node.material.color.setHex(SNACK_NODE_TYPE_COLORS[n.nodeType] ?? 0xf9f1dc);
-            node.receiveShadow = true;
-          }
-        });
-        instance.scale.setScalar(SNACK_MASU_BASE_MODEL.scale);
-        const pos = nodePositions.get(n.id);
-        instance.position.set(pos.x, SNACK_MASU_BASE_MODEL.yOffset, pos.z);
-        scene.add(instance);
-        nodeMarkers[i] = instance;
-      });
-    })
-    .catch((err) => {
-      console.warn("おやつ集めモード: マス土台モデルの読み込みに失敗、プレースホルダーのまま続行します", err);
     });
 }
 
@@ -1136,20 +1199,7 @@ function buildScene(nodes, players, activeSnackNodeId) {
   }
   computeConnectorSegments().forEach((segment) => scene.add(buildRibbon(segment, false)));
 
-  // masu-base.glb読み込み完了までの間だけ見せる仮のプレースホルダー(本編board3d.jsと同じ手法)。
-  nodeMarkers = [];
-  nodes.forEach((n) => {
-    const marker = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.42, 0.42, 0.14, 16),
-      new THREE.MeshStandardMaterial({ color: SNACK_NODE_TYPE_COLORS[n.nodeType] ?? 0xf9f1dc })
-    );
-    const pos = nodePositions.get(n.id);
-    marker.position.set(pos.x, -0.38, pos.z);
-    marker.receiveShadow = true;
-    scene.add(marker);
-    nodeMarkers.push(marker);
-  });
-  loadSnackMasuBaseInstances(nodes);
+  buildSpaceGroups(nodes);
 
   placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ);
   createMascotEntry(activeSnackNodeId);
@@ -1304,6 +1354,7 @@ function animate() {
   updatePlayerRings();
   updateDiceAnim(now);
   updateCamera();
+  updateSpaceImpostors();
   renderer.render(scene, camera);
 }
 
@@ -1356,7 +1407,9 @@ function dispose() {
   scene = null;
   camera = null;
   characters = new Map();
-  nodeMarkers = [];
+  spaceBaseMesh = null;
+  spaceImpostors = [];
+  impostorsInitialized = false;
   mascotState = null;
   trapMarkerEntries = new Map();
   playerRings = new Map();
