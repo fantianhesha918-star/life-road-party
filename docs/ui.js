@@ -849,25 +849,113 @@ function renderSnackLogModal(entries) {
   `;
 }
 
-// プレイヤー情報(名前・所持コイン・おやつ数)を画面四隅に表示する(2026-08-12、マリオパーティの
-// 常時ステータス表示を参考に、単一プレイヤーの縦積みHUDから変更)。players[0]は必ず人間
-// (startSnackGameのconfigs順)なので左上=自分、以降CPUを右上→左下→右下の順に配置する。
-// 5人以上になることは無い(setup画面のCPU選択が最大3人=計4人)前提の簡易実装。
+// P1〜P4固定色+4隅HUD+ポップアップ式ターン進行UI(2026-08-12、Codex連携チャットの確定仕様書
+// 「ClaudeCode向け_おやつ集めモード統合仕様書.md」に基づく全面刷新)。
+// 下部固定メニューバー(旧.hub-bar)は廃止し、3Dマップを全画面表示した上で、
+// App.snack.phase(状態マシン、app.js参照)に応じた単一のポップアップだけを重ねる構成にした。
 const SNACK_CORNER_POSITIONS = ["topleft", "topright", "bottomleft", "bottomright"];
+const SNACK_ACTION_ICONS = {
+  dice: "images/snack/action-dice.png",
+  item: "images/snack/action-item.png",
+  log: "images/snack/action-log.png",
+  map: "images/snack/action-map.png",
+  next: "images/snack/action-next.png",
+};
 
-function renderSnackHUD(state, me) {
+function snackColorVars(seatNumber) {
+  const c = snackPlayerColor(seatNumber);
+  return `--p-color:${c.main};--p-color-dark:${c.dark}`;
+}
+
+function renderSnackMedallion(seatNumber) {
+  const c = snackPlayerColor(seatNumber);
+  return `<div class="snack-medallion" style="${snackColorVars(seatNumber)}"><span class="snack-medallion-label">${c.label}</span><span class="snack-medallion-mark">${c.mark}</span></div>`;
+}
+
+// ポップアップ内の選択肢1行(popup-choice-button.png)。disabled時はタップ不可+理由文を表示する
+// (バグB対応: 近道の通行料が足りない場合にここでボタンを無効化する)。
+function renderSnackChoiceRow({ iconSrc, iconEmoji, label, sublabel, onclick, disabled, disabledReason, primary }) {
+  const icon = iconSrc
+    ? `<img class="snack-choice-icon" src="${iconSrc}" alt="" />`
+    : `<span class="snack-choice-icon snack-choice-icon-emoji">${iconEmoji || ""}</span>`;
+  const cls = ["snack-choice-row", primary ? "snack-choice-row-primary" : "", disabled ? "snack-choice-row-disabled" : ""].filter(Boolean).join(" ");
+  const sub = disabled && disabledReason
+    ? `<span class="snack-choice-sublabel snack-choice-shortfall">${escapeHtml(disabledReason)}</span>`
+    : sublabel
+      ? `<span class="snack-choice-sublabel">${escapeHtml(sublabel)}</span>`
+      : "";
+  return `
+    <button class="${cls}" ${disabled ? "disabled" : ""} onclick="${disabled ? "" : onclick}">
+      ${icon}
+      <span class="snack-choice-text">
+        <span class="snack-choice-label">${escapeHtml(label)}</span>
+        ${sub}
+      </span>
+      <span class="snack-choice-arrow">›</span>
+    </button>
+  `;
+}
+
+// 選択肢一覧ポップアップ(popup-choice-frame.png)。ターン開始メニュー/アイテム一覧/
+// ルート選択/購入確認/次の行動など、選択が必要な全phaseで共通に使う。
+function renderSnackPopupChoice({ phaseKey, seatNumber, title, subtitle, rowsHtml, closable, onClose }) {
+  return `
+    <div class="modal-backdrop snack-popup-backdrop">
+      <div class="snack-popup-choice snack-popup-anim" style="${seatNumber ? snackColorVars(seatNumber) : ""}" data-key="${phaseKey}">
+        ${seatNumber ? renderSnackMedallion(seatNumber) : ""}
+        ${title ? `<h3 class="snack-popup-title">${escapeHtml(title)}</h3>` : ""}
+        ${subtitle ? `<p class="snack-popup-subtitle">${escapeHtml(subtitle)}</p>` : ""}
+        <div class="snack-popup-list">${rowsHtml}</div>
+        ${closable ? `<button class="snack-popup-close" onclick="${onClose}">✕</button>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+// 結果表示ポップアップ(popup-result-frame.png)。行動結果・アイテム使用確認など
+// 「1つの内容+次への案内」を見せるphaseで使う。
+function renderSnackPopupResult({ phaseKey, seatNumber, title, bodyHtml, footerHtml }) {
+  return `
+    <div class="modal-backdrop snack-popup-backdrop">
+      <div class="snack-popup-result snack-popup-anim" style="${seatNumber ? snackColorVars(seatNumber) : ""}" data-key="${phaseKey}">
+        ${title ? `<h3 class="snack-popup-title">${escapeHtml(title)}</h3>` : ""}
+        <div class="snack-popup-result-body">${bodyHtml}</div>
+        ${footerHtml ? `<div class="snack-popup-footer">${footerHtml}</div>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function snackNextButton(label, onclick) {
+  return `<button class="snack-next-btn" onclick="${onclick}"><img src="${SNACK_ACTION_ICONS.next}" alt=""/><span>${escapeHtml(label)}</span></button>`;
+}
+
+// ==================== 4隅HUD(player-status-hud.png、P1〜P4固定色) ====================
+
+function renderSnackHUD(state, humanId) {
   const roundsLeft = Math.max(0, state.totalRounds - state.round + 1);
-  const corners = state.players
+  const me = state.players.find((p) => p.id === humanId);
+  const ranking = getSnackRanking(state);
+  const currentId = currentSnackPlayer(state).id;
+  const cards = state.players
+    .slice()
+    .sort((a, b) => a.seatNumber - b.seatNumber)
     .slice(0, SNACK_CORNER_POSITIONS.length)
-    .map((p, i) => {
+    .map((p) => {
       const visual = p.avatar || { color: "#e4572e", speciesEmoji: null, costumeImage: null };
-      const isActive = p.id === state.players[state.currentTurnIndex].id;
+      const isActive = p.id === currentId;
+      const color = snackPlayerColor(p.seatNumber);
+      const rank = ranking.findIndex((r) => r.id === p.id) + 1;
+      const corner = SNACK_CORNER_POSITIONS[p.seatNumber - 1] || "topleft";
       return `
-        <div class="snack-corner snack-corner-${SNACK_CORNER_POSITIONS[i]}${isActive ? " snack-corner-active" : ""}">
-          ${renderAvatarBadge(visual, 30)}
-          <div class="snack-corner-info">
-            <span class="snack-corner-name">${escapeHtml(p.name)}${p.isCPU ? "(CPU)" : ""}</span>
-            <span class="snack-corner-stats">🍪${p.snacks} 🪙${p.matchCoins}</span>
+        <div class="snack-hud-corner snack-hud-corner-${corner}">
+          <div class="snack-hud-card${isActive ? " snack-hud-active" : ""}" style="${snackColorVars(p.seatNumber)}">
+            <div class="snack-hud-face">${renderAvatarBadge(visual, 40)}</div>
+            <div class="snack-hud-rank">${rank}</div>
+            <div class="snack-hud-name">${escapeHtml(p.name)}${p.isCPU ? "(CPU)" : ""}</div>
+            <div class="snack-hud-snacks">🍪${p.snacks}</div>
+            <div class="snack-hud-coins">🪙${p.matchCoins}</div>
+            <div class="snack-hud-seat-badge">${color.label}${color.mark}</div>
           </div>
         </div>
       `;
@@ -875,200 +963,366 @@ function renderSnackHUD(state, me) {
     .join("");
   return `
     <div class="snack-round-badge">⏳ 残り${roundsLeft}ラウンド ・ 🎒${me.items.length}/${SNACK_ITEM_SLOT_LIMIT}</div>
-    <div class="snack-corner-hud">${corners}</div>
+    <div class="snack-hud-layer">${cards}</div>
   `;
 }
 
-function renderSnackItemList(player, usable) {
-  if (!player.items.length) return `<p class="lead">アイテムは持っていません</p>`;
-  const rows = player.items
-    .map((itemId) => {
-      const item = SNACK_ITEMS.find((it) => it.id === itemId);
-      if (!item) return "";
-      const actionHtml = usable ? `<button class="btn btn-offer" onclick="App.snackUseItem('${item.id}')">使う</button>` : "";
+// ==================== マップ紹介フライスルー ====================
+
+function renderSnackMapIntroOverlay() {
+  return `
+    <div class="snack-intro-overlay">
+      <button class="snack-intro-skip" onclick="App.snackSkipMapIntro()">スキップ ›</button>
+    </div>
+  `;
+}
+
+// ==================== 行動順決めサイコロ ====================
+
+function renderSnackOrderRollPopup(snack, state, humanId) {
+  const or = snack.orderRoll;
+  const rows = or.ids
+    .map((id) => {
+      const p = state.players.find((pp) => pp.id === id);
+      const rolled = Object.prototype.hasOwnProperty.call(or.rolls, id);
+      const value = rolled ? or.rolls[id] : "?";
       return `
-        <li class="player-row">
-          ${renderItemIcon(item, 28)}
-          <span class="p-name">${escapeHtml(item.name)}</span>
-          ${actionHtml}
+        <li class="snack-order-row" style="${snackColorVars(p.seatNumber)}">
+          <span class="snack-order-seat">${snackPlayerColor(p.seatNumber).label}</span>
+          <span class="p-name">${escapeHtml(p.name)}${p.isCPU ? "(CPU)" : ""}</span>
+          <span class="snack-order-value">${value}</span>
         </li>
       `;
     })
     .join("");
-  return `<ul class="player-list">${rows}</ul>`;
-}
-
-function renderSnackHub(state, humanId, hub, showEndTurn) {
-  const view = (hub && hub.view) || "menu";
-  const me = state.players.find((p) => p.id === humanId);
-  if (view === "spinning") {
-    // 出目の表示自体は3Dマップ側(snack-board3d.jsのplayDiceRoll、頭上で回転→ジャンプで停止)が
-    // 担当するため、ここは操作を止めるための軽い案内のみ表示する。
-    return `
-      <div class="turn-hub-modal">
-        <div class="roulette-display">
-          <p class="lead">🎲 サイコロを振っています…</p>
-        </div>
-      </div>
-    `;
-  }
-  if (view === "items") {
-    return `
-      <div class="turn-hub-modal">
-        <div class="turn-hub-card">
-          <h3>アイテムを使う</h3>
-          ${renderSnackItemList(me, true)}
-          <button class="btn" onclick="App.showSnackHubView('menu')">戻る</button>
-        </div>
-      </div>
-    `;
-  }
+  const nextUnrolledId = or.ids.find((id) => !Object.prototype.hasOwnProperty.call(or.rolls, id));
+  const isHumanTurn = nextUnrolledId === humanId;
+  const footer = isHumanTurn
+    ? snackNextButton("サイコロを振る", "App.snackRollForOrder()")
+    : nextUnrolledId
+      ? `<p class="lead">${escapeHtml(state.players.find((p) => p.id === nextUnrolledId).name)}が振っています…</p>`
+      : "";
   return `
-    <div class="hub-bar">
-      ${showEndTurn ? `<button class="hub-bar-btn" onclick="App.snackShowShop()"><span class="hub-bar-icon">🏪</span><span class="hub-bar-label">ショップ</span></button>` : ""}
-      ${!showEndTurn ? `<button class="hub-bar-btn hub-bar-btn-primary" onclick="App.snackRoll()"><span class="hub-bar-icon">🎲</span><span class="hub-bar-label">サイコロ</span></button>` : ""}
-      <button class="hub-bar-btn" onclick="App.showSnackHubView('items')"><span class="hub-bar-icon">🎒</span><span class="hub-bar-label">アイテム</span></button>
-      <button class="hub-bar-btn" onclick="App.snackToggleLog()"><span class="hub-bar-icon">📜</span><span class="hub-bar-label">ログ</span></button>
-      ${showEndTurn ? `<button class="hub-bar-btn hub-bar-btn-primary" onclick="App.snackEndTurn()"><span class="hub-bar-icon">➡️</span><span class="hub-bar-label">つぎへ</span></button>` : ""}
+    <div class="modal-backdrop snack-popup-backdrop">
+      <div class="snack-popup-choice snack-popup-anim" data-key="${snack.phase}">
+        <h3 class="snack-popup-title">${or.isTie ? "同点の振り直し！" : "順番を決めよう！"}</h3>
+        <ul class="snack-order-list">${rows}</ul>
+        <div class="snack-popup-footer">${footer}</div>
+      </div>
     </div>
   `;
 }
 
-function renderSnackBranchModal(state, isHumanTurn) {
-  if (!state.pendingBranch) return "";
-  const branchNode = findSnackNode(state.pendingBranch.nodeId);
-  const player = state.players.find((p) => p.id === state.pendingBranch.playerId);
-  if (!isHumanTurn) {
-    return `
-      <div class="modal-backdrop">
-        <div class="modal">
-          <div class="modal-telop">
-            <h3>分かれ道</h3>
-            <p>${escapeHtml(player.name)}が考え中…</p>
-          </div>
-        </div>
+function renderSnackOrderResultPopup(snack, state) {
+  const rows = snack.orderRoll.finalOrder
+    .map((id, i) => {
+      const p = state.players.find((pp) => pp.id === id);
+      return `
+        <li class="snack-order-row" style="${snackColorVars(p.seatNumber)}">
+          <span class="snack-order-rank">${i + 1}番</span>
+          <span class="snack-order-seat">${snackPlayerColor(p.seatNumber).label}</span>
+          <span class="p-name">${escapeHtml(p.name)}${p.isCPU ? "(CPU)" : ""}</span>
+        </li>
+      `;
+    })
+    .join("");
+  return `
+    <div class="modal-backdrop snack-popup-backdrop">
+      <div class="snack-popup-choice snack-popup-anim" data-key="ORDER_RESULT">
+        <h3 class="snack-popup-title">行動順が決まりました！</h3>
+        <ul class="snack-order-list">${rows}</ul>
       </div>
-    `;
-  }
-  const buttons = branchNode.nextNodeIds
+    </div>
+  `;
+}
+
+// ==================== ラウンド・ターン切替テロップ ====================
+
+function renderSnackRoundIntroTelop(snack) {
+  const ri = snack.roundIntro;
+  return `
+    <div class="snack-telop-backdrop snack-telop-backdrop-dark" onclick="App.snackSkipTelop()">
+      <div class="snack-telop-card snack-round-intro">
+        <h2 class="snack-telop-title">${ri.isFinal ? "最終ラウンド！" : `第${ri.round}ラウンド！`}</h2>
+        <p class="snack-telop-sub">残り${Math.max(0, snack.state.totalRounds - snack.state.round + 1)}ラウンド</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderSnackPlayerIntroTelop(snack, state) {
+  const player = state.players.find((p) => p.id === snack.playerIntro.playerId);
+  const visual = player.avatar || { color: "#e4572e", speciesEmoji: null, costumeImage: null };
+  const color = snackPlayerColor(player.seatNumber);
+  return `
+    <div class="snack-telop-backdrop" onclick="App.snackSkipTelop()">
+      <div class="snack-telop-card snack-player-intro" style="${snackColorVars(player.seatNumber)}">
+        ${renderAvatarBadge(visual, 56)}
+        <p class="snack-telop-seat">${color.label} ${color.mark}</p>
+        <h2 class="snack-telop-title">${escapeHtml(player.name)}${player.isCPU ? "(CPU)" : ""}のターン！</h2>
+      </div>
+    </div>
+  `;
+}
+
+// ==================== ターン中のポップアップ(サイコロ/アイテム/マップ/ログ) ====================
+
+function renderSnackTurnMenuPopup(state, humanId) {
+  const player = state.players.find((p) => p.id === humanId);
+  const rows = [
+    renderSnackChoiceRow({ iconSrc: SNACK_ACTION_ICONS.dice, label: "サイコロを振る", sublabel: "移動する", onclick: "App.snackRoll()", primary: true }),
+    renderSnackChoiceRow({ iconSrc: SNACK_ACTION_ICONS.item, label: "アイテム", sublabel: `所持 ${player.items.length}/${SNACK_ITEM_SLOT_LIMIT}`, onclick: "App.snackOpenItemSelect()" }),
+    renderSnackChoiceRow({ iconSrc: SNACK_ACTION_ICONS.map, label: "マップ確認", onclick: "App.snackOpenMapOverview()" }),
+    renderSnackChoiceRow({ iconSrc: SNACK_ACTION_ICONS.log, label: "ログを見る", onclick: "App.snackToggleLog()" }),
+  ].join("");
+  return renderSnackPopupChoice({ phaseKey: "TURN_MENU", seatNumber: player.seatNumber, title: `${escapeHtml(player.name)}のターン`, rowsHtml: rows });
+}
+
+function renderSnackNextActionPopup(state, humanId) {
+  const player = state.players.find((p) => p.id === humanId);
+  const rows = [
+    renderSnackChoiceRow({ iconSrc: SNACK_ACTION_ICONS.next, label: "ショップへ入る", onclick: "App.snackOpenShop()" }),
+    renderSnackChoiceRow({ iconSrc: SNACK_ACTION_ICONS.item, label: "アイテムを確認する", sublabel: `所持 ${player.items.length}/${SNACK_ITEM_SLOT_LIMIT}`, onclick: "App.snackOpenItemSelect()" }),
+    renderSnackChoiceRow({ iconSrc: SNACK_ACTION_ICONS.map, label: "マップを確認する", onclick: "App.snackOpenMapOverview()" }),
+    renderSnackChoiceRow({ iconSrc: SNACK_ACTION_ICONS.log, label: "ログを見る", onclick: "App.snackToggleLog()" }),
+    renderSnackChoiceRow({ iconSrc: SNACK_ACTION_ICONS.next, label: "ターンを終了する", onclick: "App.snackEndTurn()", primary: true }),
+  ].join("");
+  return renderSnackPopupChoice({ phaseKey: "NEXT_ACTION", seatNumber: player.seatNumber, title: "次の行動を選んでください", rowsHtml: rows });
+}
+
+function renderSnackItemSelectPopup(state, humanId) {
+  const player = state.players.find((p) => p.id === humanId);
+  const rows = player.items.length
+    ? player.items
+        .map((itemId) => {
+          const item = SNACK_ITEMS.find((it) => it.id === itemId);
+          if (!item) return "";
+          return renderSnackChoiceRow({ iconEmoji: item.emoji, label: item.name, onclick: `App.snackOpenItemConfirm('${item.id}')` });
+        })
+        .join("")
+    : `<p class="lead">アイテムは持っていません</p>`;
+  return renderSnackPopupChoice({ phaseKey: "ITEM_SELECT", seatNumber: player.seatNumber, title: "アイテム", rowsHtml: rows, closable: true, onClose: "App.snackCloseItemSelect()" });
+}
+
+const SNACK_ITEM_EFFECT_DESCRIPTIONS = {
+  extraDice: (item) => `次のサイコロの出目に+${item.value}`,
+  trap: () => "少し先に足止めの罠を仕掛ける",
+  hint: () => "次のおやつが外周側か内周側かを教えてくれる",
+  guard: () => "妨害を1回防いでくれる",
+};
+
+function renderSnackItemConfirmPopup(state, humanId, itemId) {
+  const player = state.players.find((p) => p.id === humanId);
+  const item = SNACK_ITEMS.find((it) => it.id === itemId);
+  if (!item) return "";
+  const desc = (SNACK_ITEM_EFFECT_DESCRIPTIONS[item.effect] || (() => ""))(item);
+  const body = `
+    <div class="snack-item-confirm">
+      ${renderItemIcon(item, 56)}
+      <p class="snack-item-confirm-name">${escapeHtml(item.name)}</p>
+      <p class="snack-item-confirm-desc">${escapeHtml(desc)}</p>
+    </div>
+  `;
+  return renderSnackPopupResult({
+    phaseKey: "ITEM_CONFIRM",
+    seatNumber: player.seatNumber,
+    title: "使いますか？",
+    bodyHtml: body,
+    footerHtml: `${snackNextButton("使う", "App.snackConfirmUseItem()")}<button class="btn" onclick="App.snackCancelItemConfirm()">やめる</button>`,
+  });
+}
+
+function renderSnackShopPopup(state, humanId) {
+  const me = state.players.find((p) => p.id === humanId);
+  const cards = SNACK_ITEMS.map((it) => {
+    const canBuy = me.items.length < SNACK_ITEM_SLOT_LIMIT && me.matchCoins >= it.price;
+    const actionHtml = `<button class="btn btn-offer shop-card-btn" ${canBuy ? "" : "disabled"} onclick="App.snackBuyShopItem('${it.id}')">${buyButtonLabel(it.price, me.matchCoins)}</button>`;
+    return renderShopCard({ iconHtml: renderItemIcon(it, 44), name: escapeHtml(it.name), badgeHtml: "", actionHtml, cardClass: !canBuy ? "shop-card-cant-afford" : "" });
+  }).join("");
+  const body = `<p class="coin-display">🪙 所持コイン: ${me.matchCoins}(アイテム所持 ${me.items.length}/${SNACK_ITEM_SLOT_LIMIT})</p><div class="shop-grid">${cards}</div>`;
+  return renderSnackPopupChoice({ phaseKey: "SHOP_SELECT", seatNumber: me.seatNumber, title: "🏪 ショップ", rowsHtml: body, closable: true, onClose: "App.snackCloseShop()" });
+}
+
+// ==================== 移動中の分岐・おやつ購入・停止イベント選択 ====================
+// pending*は常に現在の手番プレイヤー自身のものであり、CPUの分はここへ来る前に
+// maybeRunSnackCPUTurnが自動解決するため、これらは人間の手番でのみ描画される。
+
+function renderSnackRouteSelectPopup(state) {
+  const player = currentSnackPlayer(state);
+  const branchNode = findSnackNode(state.pendingBranch.nodeId);
+  const rows = branchNode.nextNodeIds
     .map((nid, i) => {
       const isShortcut = i === 1;
-      const label = isShortcut ? `近道(内周)へ進む(通行料 ${branchNode.tollCost}コイン)` : "そのまま外周を進む";
-      return `<button class="btn btn-offer" onclick="App.snackChooseBranch('${nid}')">${label}</button>`;
+      if (!isShortcut) {
+        return renderSnackChoiceRow({ iconEmoji: "➡️", label: "そのまま外周を進む", onclick: `App.snackChooseBranch('${nid}')`, primary: true });
+      }
+      const afford = canAffordSnackToll(player, branchNode);
+      return renderSnackChoiceRow({
+        iconEmoji: "🌀",
+        label: "近道(内周)へ進む",
+        sublabel: afford ? `通行料 ${branchNode.tollCost}コイン` : null,
+        onclick: `App.snackChooseBranch('${nid}')`,
+        disabled: !afford,
+        disabledReason: !afford ? `あと${branchNode.tollCost - player.matchCoins}コイン足りません` : null,
+      });
     })
     .join("");
-  return `
-    <div class="modal-backdrop">
-      <div class="modal">
-        <div class="modal-telop">
-          <h3>分かれ道</h3>
-          <p>外周をそのまま進むか、近道の内周へ入るか選んでください。</p>
-        </div>
-        <p class="coin-display">🪙 所持コイン: ${state.players.find((p) => p.id === state.pendingBranch.playerId).matchCoins}</p>
-        ${buttons}
-      </div>
-    </div>
-  `;
+  return renderSnackPopupChoice({ phaseKey: "ROUTE_SELECT", seatNumber: player.seatNumber, title: "分かれ道", subtitle: `所持コイン: ${player.matchCoins}`, rowsHtml: rows });
 }
 
-function renderSnackSnackChoiceModal(state, isHumanTurn) {
-  if (!state.pendingSnackChoice) return "";
-  const player = state.players.find((p) => p.id === state.pendingSnackChoice.playerId);
-  if (!isHumanTurn) {
-    return `
-      <div class="modal-backdrop">
-        <div class="modal">
-          <div class="modal-telop">
-            <h3>🍪 おやつ発見！</h3>
-            <p>${escapeHtml(player.name)}が考え中…</p>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-  return `
-    <div class="modal-backdrop">
-      <div class="modal">
-        <div class="modal-telop">
-          <h3>🍪 おやつ発見！</h3>
-          <p>${SNACK_SNACK_PRICE}コインで、おやつを手に入れますか？(所持コイン: ${player.matchCoins})</p>
-        </div>
-        <button class="btn btn-offer" onclick="App.snackChooseSnackPurchase(true)">買う(-${SNACK_SNACK_PRICE})</button>
-        <button class="btn btn-offer" onclick="App.snackChooseSnackPurchase(false)">見送る</button>
-      </div>
-    </div>
-  `;
+function renderSnackPurchaseConfirmPopup(state) {
+  const player = currentSnackPlayer(state);
+  const afford = player.matchCoins >= SNACK_SNACK_PRICE;
+  const rows = [
+    renderSnackChoiceRow({
+      iconEmoji: "🍪",
+      label: `買う(-${SNACK_SNACK_PRICE})`,
+      onclick: "App.snackChooseSnackPurchase(true)",
+      primary: true,
+      disabled: !afford,
+      disabledReason: !afford ? `あと${SNACK_SNACK_PRICE - player.matchCoins}コイン足りません` : null,
+    }),
+    renderSnackChoiceRow({ iconEmoji: "🚶", label: "見送る", onclick: "App.snackChooseSnackPurchase(false)" }),
+  ].join("");
+  return renderSnackPopupChoice({ phaseKey: "SNACK_PURCHASE_CONFIRM", seatNumber: player.seatNumber, title: "🍪 おやつ発見！", subtitle: `所持コイン: ${player.matchCoins}`, rowsHtml: rows });
 }
 
-function renderSnackStopChoiceModal(state, isHumanTurn) {
-  if (!state.pendingStopChoice) return "";
+function renderSnackStopChoicePopup(state) {
+  const player = currentSnackPlayer(state);
   const pc = state.pendingStopChoice;
-  const player = state.players.find((p) => p.id === pc.playerId);
-  if (!isHumanTurn) {
-    return `
-      <div class="modal-backdrop">
-        <div class="modal">
-          <div class="modal-telop">
-            <h3>${escapeHtml(pc.title)}</h3>
-            <p>${escapeHtml(player.name)}が考え中…</p>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-  const optionButtons = pc.options
-    .map((o, i) => `<button class="btn btn-offer" onclick="App.snackChooseStopOption(${i})">${escapeHtml(o.label)}</button>`)
+  const rows = pc.options
+    .map((o, i) => renderSnackChoiceRow({ iconEmoji: "🎯", label: o.label, onclick: `App.snackChooseStopOption(${i})` }))
     .join("");
+  return renderSnackPopupChoice({ phaseKey: "STOP_CHOICE", seatNumber: player.seatNumber, title: pc.title, subtitle: pc.prompt, rowsHtml: rows });
+}
+
+// ==================== 行動結果ポップアップ(行動者+効果を明示表示) ====================
+
+function renderSnackActionResultPopup(snack) {
+  const actor = snack.lastActionActor;
+  const entries = snack.lastActionEntries || [];
+  const rows = entries.length
+    ? entries
+        .map((e) => {
+          const cls = e.type === "money" ? (e.delta > 0 ? "snack-result-positive" : "snack-result-negative") : e.type === "snack" ? "snack-result-snack" : "";
+          return `<li class="${cls}">${escapeHtml(e.text)}</li>`;
+        })
+        .join("")
+    : `<li>とくに変化はなかった</li>`;
+  const body = `
+    ${actor ? `<p class="snack-result-actor">${escapeHtml(actor.name)}${actor.isCPU ? "(CPU)" : ""}の行動</p>` : ""}
+    <ul class="snack-result-list">${rows}</ul>
+  `;
+  return renderSnackPopupResult({
+    phaseKey: "ACTION_RESULT",
+    seatNumber: actor ? actor.seatNumber : null,
+    title: "行動結果",
+    bodyHtml: body,
+    footerHtml: snackNextButton("次へ", "App.snackDismissActionResult()"),
+  });
+}
+
+// ==================== マップ全体表示・ズーム確認 ====================
+
+function renderSnackMapViewOverlay(snack, state) {
+  const isZoom = snack.phase === "MAP_ZOOM";
+  const hint = isZoom && !state.mapZoomHintShown
+    ? `<div class="snack-map-pan-hint"><img src="images/snack/map-pan-hint.png" alt=""/><p>ドラッグしてマップを動かせます</p></div>`
+    : "";
   return `
-    <div class="modal-backdrop">
-      <div class="modal">
-        <div class="modal-telop">
-          <h3>${escapeHtml(pc.title)}</h3>
-          <p>${escapeHtml(pc.prompt)}</p>
-        </div>
-        ${optionButtons}
+    <div class="snack-map-view-overlay">
+      <div class="snack-map-view-toolbar">
+        <button class="snack-map-view-btn${!isZoom ? " snack-map-view-btn-active" : ""}" onclick="App.snackOpenMapOverview()"><img src="images/snack/map-overview.png" alt="全体表示"/></button>
+        <button class="snack-map-view-btn${isZoom ? " snack-map-view-btn-active" : ""}" onclick="App.snackOpenMapZoom()"><img src="images/snack/map-zoom.png" alt="ズーム表示"/></button>
+        <button class="snack-map-view-back" onclick="App.snackCloseMapView()">戻る</button>
       </div>
+      ${hint}
     </div>
   `;
 }
 
-function renderSnackShopModal(me) {
-  const cards = SNACK_ITEMS
-    .map((it) => {
-      const canBuy = me.items.length < SNACK_ITEM_SLOT_LIMIT && me.matchCoins >= it.price;
-      const actionHtml = `<button class="btn btn-offer shop-card-btn" ${canBuy ? "" : "disabled"} onclick="App.snackBuyShopItem('${it.id}')">${buyButtonLabel(it.price, me.matchCoins)}</button>`;
-      return renderShopCard({ iconHtml: renderItemIcon(it, 44), name: escapeHtml(it.name), badgeHtml: "", actionHtml, cardClass: !canBuy ? "shop-card-cant-afford" : "" });
-    })
-    .join("");
+// ==================== CPUの手番中(非ブロッキング表示) ====================
+
+function renderSnackCPUTurnOverlay(snack, state) {
+  const player = currentSnackPlayer(state);
+  const color = snackPlayerColor(player.seatNumber);
+  const showLog = snack.lastActionActor && snack.lastActionActor.seatNumber === player.seatNumber;
+  const lines = showLog ? (snack.lastActionEntries || []).map((e) => `<li>${escapeHtml(e.text)}</li>`).join("") : "";
   return `
-    <div class="modal-backdrop">
-      <div class="modal">
-        <h3>🏪 ショップ(アイテム所持: ${me.items.length}/${SNACK_ITEM_SLOT_LIMIT})</h3>
-        <p class="coin-display">🪙 所持コイン: ${me.matchCoins}</p>
-        <div class="shop-grid">${cards}</div>
-        <button class="btn" onclick="App.showSnackHubView('menu')">閉じる</button>
-      </div>
+    <div class="snack-cpu-turn-overlay" style="${snackColorVars(player.seatNumber)}">
+      <p class="snack-cpu-turn-label">${color.label} ${escapeHtml(player.name)}が考え中…</p>
+      ${lines ? `<ul class="snack-cpu-turn-log">${lines}</ul>` : ""}
     </div>
   `;
 }
+
+// ==================== 画面全体の組み立て ====================
 
 function renderSnackGameScreen(snack, humanId, pauseMenuOpen) {
   const state = snack.state;
-  const turnPlayer = state.players[state.currentTurnIndex];
-  const isHumanTurn = turnPlayer.id === humanId;
-  const hasPending = !!(state.pendingBranch || state.pendingSnackChoice || state.pendingStopChoice);
-  const isCPUSpinning = !isHumanTurn && snack.hub && snack.hub.view === "spinning";
-  const me = state.players.find((p) => p.id === humanId);
-  const movementDone = !hasPending && turnPlayer.turnRolled && turnPlayer.remainingSteps === 0;
-  const showHub = (isHumanTurn && !hasPending) || isCPUSpinning;
+  let popupHtml = "";
+  switch (snack.phase) {
+    case "MAP_INTRO":
+      popupHtml = renderSnackMapIntroOverlay();
+      break;
+    case "ORDER_ROLL":
+    case "ORDER_TIE_ROLL":
+      popupHtml = renderSnackOrderRollPopup(snack, state, humanId);
+      break;
+    case "ORDER_RESULT":
+      popupHtml = renderSnackOrderResultPopup(snack, state);
+      break;
+    case "ROUND_INTRO":
+      popupHtml = renderSnackRoundIntroTelop(snack);
+      break;
+    case "PLAYER_INTRO":
+      popupHtml = renderSnackPlayerIntroTelop(snack, state);
+      break;
+    case "TURN_MENU":
+      popupHtml = renderSnackTurnMenuPopup(state, humanId);
+      break;
+    case "ITEM_SELECT":
+      popupHtml = renderSnackItemSelectPopup(state, humanId);
+      break;
+    case "ITEM_CONFIRM":
+      popupHtml = renderSnackItemConfirmPopup(state, humanId, snack.pendingItemId);
+      break;
+    case "SHOP_SELECT":
+      popupHtml = renderSnackShopPopup(state, humanId);
+      break;
+    case "ROLLING":
+      popupHtml = `<div class="snack-rolling-overlay"><p class="lead">🎲 サイコロを振っています…</p></div>`;
+      break;
+    case "ROUTE_SELECT":
+      popupHtml = renderSnackRouteSelectPopup(state);
+      break;
+    case "SNACK_PURCHASE_CONFIRM":
+      popupHtml = renderSnackPurchaseConfirmPopup(state);
+      break;
+    case "STOP_CHOICE":
+      popupHtml = renderSnackStopChoicePopup(state);
+      break;
+    case "ACTION_RESULT":
+      popupHtml = renderSnackActionResultPopup(snack);
+      break;
+    case "NEXT_ACTION":
+      popupHtml = renderSnackNextActionPopup(state, humanId);
+      break;
+    case "MAP_OVERVIEW":
+    case "MAP_ZOOM":
+      popupHtml = renderSnackMapViewOverlay(snack, state);
+      break;
+    case "CPU_TURN":
+      popupHtml = renderSnackCPUTurnOverlay(snack, state);
+      break;
+    case "MOVING":
+    default:
+      popupHtml = "";
+  }
   return `
     <section class="screen screen-game screen-snack-game">
-      ${renderSnackHUD(state, me)}
-      ${showHub ? renderSnackHub(state, humanId, snack.hub, movementDone && isHumanTurn) : ""}
-      ${renderSnackBranchModal(state, isHumanTurn)}
-      ${renderSnackSnackChoiceModal(state, isHumanTurn)}
-      ${renderSnackStopChoiceModal(state, isHumanTurn)}
-      ${snack.hub && snack.hub.view === "shop" ? renderSnackShopModal(me) : ""}
+      ${renderSnackHUD(state, humanId)}
+      ${popupHtml}
       ${snack.logOpen ? renderSnackLogModal(snack.log) : ""}
       ${pauseMenuOpen ? renderPauseMenuModal("snack") : ""}
     </section>

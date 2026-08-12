@@ -11,6 +11,12 @@ const CPU_REVEAL_MS = 2200; // CPUの結果カード(テロップ)を見せて�
 const TURN_POPUP_MS = 1500; // 手番切り替えポップアップの表示時間
 const MONEY_TOAST_MS = 2600; // 所持金変動トーストの表示時間
 
+// おやつ集めモードの演出パイプライン(行動順決めサイコロ・ラウンド/ターンテロップ等)で使う
+// Promiseベースの待機ヘルパー。setTimeoutをawaitできる形にするだけの小さなユーティリティ。
+function snackDelay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // 3D種選択(speciesId)の実装より前に保存されたセーブ・オンライン部屋データにはavatarに
 // speciesIdが無い場合がある。無いままだと board3d.js が3Dモデルを一切読み込まず、
 // createCharacterPlaceholder()の色付きカプセル(プレイヤー色そのまま)で止まってしまうため、
@@ -1257,13 +1263,22 @@ const App = {
       });
   },
 
-  // おやつ集めモード用3D盤面の同期(sync3DBoard()から画面がsnack-gameのときだけ呼ばれる)。
-  syncSnackBoard3D() {
+  // おやつ集めモード用3D盤面のmount()が「一度だけ」実行されることを保証する共有Promise。
+  // 2026-08-12: render()を短時間に連続で呼ぶ場面(ゲーム開始直後、MAP_INTRO演出開始のため
+  // すぐにもう一度render()する等)が増えたため、初回mount()完了前に複数回syncSnackBoard3D()が
+  // 呼ばれ、それぞれが独立に「まだマウントされていない」と判断してmount()を多重にキューイング
+  // してしまう競合が発生した(mount()はcameraMode等を毎回リセットするため、マップ紹介演出の
+  // 最中に別のmount()が割り込むとカメラ演出が即座に壊れる不具合があった)。
+  // さらに、playSnackMapIntro()が独自にloadSnackBoard3DModules()だけを待って
+  // playMapIntro()を呼んでいたため、mount()未完了(camera/scene未生成)のままplayMapIntro()が
+  // 呼ばれて即座に終了してしまう(=マップ紹介がスキップされたように見える)別の競合もあった。
+  // syncSnackBoard3D()とplaySnackMapIntro()の両方がこの同じPromiseを共有して待つことで、
+  // 「mount()が確実に一度だけ・完了してから次に進む」ことを保証する。
+  ensureSnackBoard3DMounted() {
+    if (this.snackBoard3dMounted) return Promise.resolve();
+    if (this._snackBoard3dMountPromise) return this._snackBoard3dMountPromise;
     const snack = this.snack.state;
-    const player = snack.players[snack.currentTurnIndex];
-    if (!player) return;
-    const focusId = player.id;
-    this.loadSnackBoard3DModules()
+    this._snackBoard3dMountPromise = this.loadSnackBoard3DModules()
       .then(() => {
         // 非同期読み込み完了までの間に画面遷移していたら何もしない
         if (this.screen !== "snack-game" || !this.snack) return;
@@ -1275,20 +1290,47 @@ const App = {
             activeSnackNodeId: snack.activeSnackNodeId,
           });
           this.snackBoard3dMounted = true;
-        } else {
-          window.LifeRoadSnackBoard3D.syncPlayers(snack.players, snack.activeSnackNodeId);
         }
-        window.LifeRoadSnackBoard3D.focusCamera(focusId);
       })
       .catch((err) => {
         console.error("おやつ集めモード3D盤面の読み込みに失敗", err);
+      })
+      .then(() => {
+        this._snackBoard3dMountPromise = null;
       });
+    return this._snackBoard3dMountPromise;
   },
 
-  // ==================== おやつ集めモード(フェーズ1試作) ====================
+  // おやつ集めモード用3D盤面の同期(sync3DBoard()から画面がsnack-gameのときだけ呼ばれる)。
+  syncSnackBoard3D() {
+    const snack = this.snack.state;
+    const player = snack.players[snack.currentTurnIndex];
+    if (!player) return;
+    const focusId = player.id;
+    this.ensureSnackBoard3DMounted().then(() => {
+      if (this.screen !== "snack-game" || !this.snack || !this.snackBoard3dMounted) return;
+      window.LifeRoadSnackBoard3D.syncPlayers(snack.players, snack.activeSnackNodeId);
+      window.LifeRoadSnackBoard3D.focusCamera(focusId);
+    });
+  },
+
+  // ==================== おやつ集めモード ====================
   // 既存の人生ゲームモード(this.state等)とは完全に別の状態(this.snack)で管理する。
   // 保存タイミングは、Codexレビュー対応で見つけたバグ(reveal表示中に保存が遅れて中断時に
   // 巻き戻る)と同じ設計ミスを避けるため、state変更の直後に必ずsaveSnackGame()する。
+  //
+  // 2026-08-12(統合仕様書対応): 従来のthis.snack.hub(view: menu/spinning/items/shop の
+  // 4値のみのadhocな状態)を廃止し、this.snack.phaseによる明示的な状態マシンへ作り直した。
+  // 人間の手番は必ずPLAYER_INTRO→TURN_MENUを経由し、TURN_MENUは人間が「サイコロを振る」を
+  // 押すまでROLLINGへ遷移しない(CPUのみCPU_TURNから自動でロールへ進む)。この設計により、
+  // 「次の人間ターンで自動的にサイコロ演出が走って止まる」という不具合のクラスが構造的に
+  // 起こらなくなる(以前はCPU側のhub.viewリセット漏れという個別バグとしてパッチしていたが、
+  // 今回は状態マシンの設計そのもので再発を防ぐ)。
+  //
+  // phaseの一覧: MAP_INTRO, ORDER_ROLL, ORDER_TIE_ROLL, ORDER_RESULT, ROUND_INTRO,
+  // PLAYER_INTRO, TURN_MENU, ITEM_SELECT, ITEM_CONFIRM, SHOP_SELECT, ROLLING,
+  // ROUTE_SELECT, SNACK_PURCHASE_CONFIRM, STOP_CHOICE, MOVING, ACTION_RESULT,
+  // NEXT_ACTION, MAP_OVERVIEW, MAP_ZOOM, CPU_TURN, GAME_RESULT
 
   hasSnackSave() {
     return !!localStorage.getItem(SNACK_SAVE_KEY);
@@ -1318,11 +1360,12 @@ const App = {
       });
     }
     this.snackHumanId = "human";
-    this.snack = { state: createSnackState(configs), log: [{ type: "info", text: "おやつ集めモード開始！" }], hub: { view: "menu" }, logOpen: false };
+    this.snack = this.createSnackUiState(createSnackState(configs), [{ type: "info", text: "おやつ集めモード開始！" }]);
+    this.snack.phase = "MAP_INTRO";
     this.screen = "snack-game";
     this.saveSnackGame();
     this.render();
-    this.maybeRunSnackCPUTurn();
+    this.playSnackMapIntro();
   },
 
   continueSnackGame() {
@@ -1332,10 +1375,48 @@ const App = {
       return;
     }
     this.snackHumanId = saved.humanId;
-    this.snack = { state: saved.state, log: saved.log, hub: { view: "menu" }, logOpen: false };
+    this.snack = this.createSnackUiState(saved.state, saved.log);
     this.screen = "snack-game";
+    this.snack.phase = this.computeResumeSnackPhase();
     this.render();
-    this.maybeRunSnackCPUTurn();
+    if (this.snack.phase === "ORDER_ROLL") {
+      this.startSnackOrderRoll();
+    } else if (this.snack.phase === "CPU_TURN") {
+      this.maybeRunSnackCPUTurn();
+    }
+  },
+
+  // this.snackのUI側(演出・ポップアップ)フィールドをまとめて初期化する。
+  // phase以外はセーブ対象外(saveSnackGameは{state,log,humanId}のみ保存し、phaseは
+  // 再開のたびcomputeResumeSnackPhase()で安全な入力待ち状態へ正規化する、仕様15章)。
+  createSnackUiState(state, log) {
+    return {
+      state,
+      log,
+      phase: "TURN_MENU",
+      logOpen: false,
+      returnPhase: null,
+      lastActionActor: null,
+      lastActionEntries: [],
+      orderRoll: null,
+      playerIntro: null,
+      roundIntro: null,
+      pendingItemId: null,
+    };
+  },
+
+  // 演出中(MAP_INTRO/ORDER_ROLL系/ROLLING/MOVING等)にリロードされた場合でも、
+  // 決定済みデータ(turnOrderDecided/pending*/turnRolled)だけを見て直近の安全な
+  // 入力待ちphaseへ正規化する。順番決め未確定ならORDER_ROLLからやり直す(仕様6章)。
+  computeResumeSnackPhase() {
+    const state = this.snack.state;
+    if (!state.turnOrderDecided) return "ORDER_ROLL";
+    const player = currentSnackPlayer(state);
+    if (state.pendingBranch) return player.isCPU ? "CPU_TURN" : "ROUTE_SELECT";
+    if (state.pendingSnackChoice) return player.isCPU ? "CPU_TURN" : "SNACK_PURCHASE_CONFIRM";
+    if (state.pendingStopChoice) return player.isCPU ? "CPU_TURN" : "STOP_CHOICE";
+    if (player.isCPU) return "CPU_TURN";
+    return player.turnRolled ? "NEXT_ACTION" : "TURN_MENU";
   },
 
   pushSnackLog(entries) {
@@ -1362,38 +1443,173 @@ const App = {
     localStorage.removeItem(SNACK_SAVE_KEY);
   },
 
-  showSnackHubView(view) {
-    this.snack.hub = { view };
-    this.render();
-  },
-
-  snackShowShop() {
-    this.snack.hub = { view: "shop" };
-    this.render();
-  },
-
   snackToggleLog() {
     this.snack.logOpen = !this.snack.logOpen;
     LifeRoadAudio.playSe(this.snack.logOpen ? "modalOpen" : "modalClose");
     this.render();
   },
 
-  snackRoll() {
-    if (this.snack.hub.view === "spinning") return;
+  // ==================== マップ紹介フライスルー ====================
+
+  async playSnackMapIntro() {
+    this.snack.phase = "MAP_INTRO";
+    this.render();
+    try {
+      await this.ensureSnackBoard3DMounted();
+      if (window.LifeRoadSnackBoard3D && window.LifeRoadSnackBoard3D.playMapIntro) {
+        const intro = window.LifeRoadSnackBoard3D.playMapIntro();
+        this._snackIntroSkip = intro.requestSkip;
+        await intro.finished;
+        this._snackIntroSkip = null;
+      }
+    } catch (err) {
+      console.error("おやつ集めモード: マップ紹介の再生に失敗", err);
+    }
+    this.snack.state.mapIntroDone = true;
+    this.saveSnackGame();
+    this.startSnackOrderRoll();
+  },
+
+  snackSkipMapIntro() {
+    if (this._snackIntroSkip) this._snackIntroSkip();
+  },
+
+  // ==================== 行動順決めサイコロ ====================
+
+  startSnackOrderRoll() {
+    const ids = this.snack.state.players.map((p) => p.id);
+    this.runSnackOrderRollGroup(ids, false).then((order) => {
+      this.snack.phase = "ORDER_RESULT";
+      this.snack.orderRoll = { finalOrder: order };
+      this.render();
+      const token = (this._snackFlowToken = (this._snackFlowToken || 0) + 1);
+      snackDelay(1800).then(() => {
+        if (this._snackFlowToken !== token) return;
+        finalizeSnackTurnOrder(this.snack.state, order);
+        this.saveSnackGame();
+        this.beginSnackRound();
+      });
+    });
+  },
+
+  // idsグループ内の全員が1個ずつサイコロを振り(人間はタップ待ち、CPUは自動)、
+  // 同点者だけを再帰的に再抽選する(同点の中でさらに同点が出ても正しく解決する)。
+  async runSnackOrderRollGroup(ids, isTie) {
+    this.snack.phase = isTie ? "ORDER_TIE_ROLL" : "ORDER_ROLL";
+    this.snack.orderRoll = { ids, rolls: {}, isTie };
+    this.render();
+    for (const id of ids) {
+      const player = this.snack.state.players.find((p) => p.id === id);
+      if (player.id === this.snackHumanId) {
+        await this.waitForSnackOrderRollTap(id);
+      } else {
+        await snackDelay(600);
+        this.recordSnackOrderRoll(id, rollSnackDice());
+        this.render();
+        await snackDelay(500);
+      }
+    }
+    const byValue = new Map();
+    ids.forEach((id) => {
+      const v = this.snack.orderRoll.rolls[id];
+      if (!byValue.has(v)) byValue.set(v, []);
+      byValue.get(v).push(id);
+    });
+    const sortedValues = [...byValue.keys()].sort((a, b) => b - a);
+    let order = [];
+    for (const v of sortedValues) {
+      const group = byValue.get(v);
+      if (group.length === 1) {
+        order.push(group[0]);
+      } else {
+        const subOrder = await this.runSnackOrderRollGroup(group, true);
+        order = order.concat(subOrder);
+      }
+    }
+    return order;
+  },
+
+  waitForSnackOrderRollTap(id) {
+    return new Promise((resolve) => {
+      this._snackOrderRollResolve = async () => {
+        this._snackOrderRollResolve = null;
+        this.recordSnackOrderRoll(id, rollSnackDice());
+        this.render();
+        await snackDelay(600);
+        resolve();
+      };
+    });
+  },
+
+  snackRollForOrder() {
+    if (this._snackOrderRollResolve) this._snackOrderRollResolve();
+  },
+
+  recordSnackOrderRoll(id, value) {
+    this.snack.orderRoll.rolls[id] = value;
+    LifeRoadAudio.playSe("diceRoll");
+  },
+
+  // ==================== ラウンド・ターン切替テロップ ====================
+
+  beginSnackRound() {
+    this.snack.roundIntro = { round: this.snack.state.round, isFinal: this.snack.state.round === this.snack.state.totalRounds };
+    this.snack.phase = "ROUND_INTRO";
+    this.render();
+    const token = (this._snackFlowToken = (this._snackFlowToken || 0) + 1);
+    snackDelay(1800).then(() => {
+      if (this._snackFlowToken === token) this.beginSnackPlayerIntro();
+    });
+  },
+
+  beginSnackPlayerIntro() {
     const player = currentSnackPlayer(this.snack.state);
+    this.snack.playerIntro = { playerId: player.id };
+    this.snack.phase = "PLAYER_INTRO";
+    this.render();
+    if (this.snackBoard3dMounted && window.LifeRoadSnackBoard3D) window.LifeRoadSnackBoard3D.focusCamera(player.id);
+    const token = (this._snackFlowToken = (this._snackFlowToken || 0) + 1);
+    snackDelay(1400).then(() => {
+      if (this._snackFlowToken === token) this.enterSnackTurnPhaseFor(player);
+    });
+  },
+
+  // テロップ表示中のタップ早送り(仕様7章)。トークンを更新して保留中のタイマーを無効化してから、
+  // 次の段階の関数を直接呼ぶ。
+  snackSkipTelop() {
+    this._snackFlowToken = (this._snackFlowToken || 0) + 1;
+    if (this.snack.phase === "ROUND_INTRO") this.beginSnackPlayerIntro();
+    else if (this.snack.phase === "PLAYER_INTRO") this.enterSnackTurnPhaseFor(currentSnackPlayer(this.snack.state));
+  },
+
+  enterSnackTurnPhaseFor(player) {
+    if (player.isCPU) {
+      this.snack.phase = "CPU_TURN";
+      this.render();
+      this.maybeRunSnackCPUTurn();
+    } else {
+      this.snack.phase = "TURN_MENU";
+      this.render();
+    }
+  },
+
+  // ==================== サイコロ・移動 ====================
+
+  snackRoll() {
+    if (this.snack.phase !== "TURN_MENU") return;
+    const player = currentSnackPlayer(this.snack.state);
+    if (player.id !== this.snackHumanId) return;
+    this.snack.phase = "ROLLING";
+    this.render();
     this.runSnackDiceAnimation(player.id, (roll) => this.commitSnackRoll(roll));
   },
 
   // おやつ集めモード専用のサイコロ演出(頭上で回転→ジャンプで停止、マリオパーティ風)。
-  // 既存の共有runRouletteAnimation()は本編の1〜10ルーレット(rollDice())専用で、以前は
-  // これを流用していたため出目が1〜6のはずのサイコロが実質1〜10になってしまっていた
-  // (2026-08-11、この演出追加時に発見・修正)。出目自体はrollSnackDice()で先に確定させ、
-  // 3D側の演出(snack-board3d.jsのplayDiceRoll)はあくまで見た目でロジックには影響しない。
+  // 出目自体はrollSnackDice()で先に確定させ、3D側の演出(playDiceRoll)はあくまで見た目で
+  // ロジックには影響しない(オンライン対戦時の通信遅延不公平を避けるための既存方針)。
   runSnackDiceAnimation(playerId, onFinish) {
     const finalRoll = rollSnackDice();
     LifeRoadAudio.playSe("diceRoll");
-    this.snack.hub = { view: "spinning" };
-    this.render();
     this.loadSnackBoard3DModules()
       .then(() => window.LifeRoadSnackBoard3D.playDiceRoll(playerId, finalRoll))
       .catch((err) => {
@@ -1405,9 +1621,7 @@ const App = {
   },
 
   // snack-engine.jsの移動結果に含まれるpath(通過ノードIdの配列)を、3D側で1マスずつ
-  // 逐次ホップさせる(2026-08-12追加、ユーザー要望により本編board3d.jsと同じ「マスごとの
-  // 逐次ホップ」に統一。以前は移動元→移動先を結ぶ1回のホップに簡略化していた)。
-  // 3D未マウント時(理論上は起きない想定だが念のため)は何もせず即座に戻る。
+  // 逐次ホップさせる。3D未マウント時(理論上は起きない想定だが念のため)は何もせず戻る。
   async playSnackMovementHop(playerId, path) {
     if (!path || !path.length) return;
     if (!this.snackBoard3dMounted || !window.LifeRoadSnackBoard3D) return;
@@ -1415,51 +1629,129 @@ const App = {
   },
 
   async commitSnackRoll(roll) {
-    this.snack.hub = { view: "menu" };
     const state = this.snack.state;
     const player = currentSnackPlayer(state);
     if (player.id !== this.snackHumanId) return;
+    this.snack.phase = "MOVING";
+    this.render();
     const result = rollSnackAndMove(state, roll);
     this.pushSnackLog(result.entries);
     this.saveSnackGame();
     await this.playSnackMovementHop(player.id, result.path);
-    this.render();
-    this.afterSnackAction();
+    this.showSnackActionResult(player, result.entries);
   },
 
   async snackChooseBranch(nextNodeId) {
-    if (!this.snack.state.pendingBranch) return;
-    const player = this.snack.state.players.find((p) => p.id === this.snack.state.pendingBranch.playerId);
+    if (this.snack.phase !== "ROUTE_SELECT" || !this.snack.state.pendingBranch) return;
+    const player = currentSnackPlayer(this.snack.state);
     if (player.id !== this.snackHumanId) return;
+    this.snack.phase = "MOVING";
+    this.render();
     const result = resolveSnackBranch(this.snack.state, nextNodeId);
     this.pushSnackLog(result.entries);
     this.saveSnackGame();
     await this.playSnackMovementHop(player.id, result.path);
-    this.render();
-    this.afterSnackAction();
+    this.showSnackActionResult(player, result.entries);
   },
 
   async snackChooseSnackPurchase(buy) {
-    if (!this.snack.state.pendingSnackChoice) return;
-    const player = this.snack.state.players.find((p) => p.id === this.snack.state.pendingSnackChoice.playerId);
+    if (this.snack.phase !== "SNACK_PURCHASE_CONFIRM" || !this.snack.state.pendingSnackChoice) return;
+    const player = currentSnackPlayer(this.snack.state);
     if (player.id !== this.snackHumanId) return;
+    this.snack.phase = "MOVING";
+    this.render();
     const result = resolveSnackChoice(this.snack.state, buy);
     this.pushSnackLog(result.entries);
     this.saveSnackGame();
     await this.playSnackMovementHop(player.id, result.path);
-    this.render();
-    this.afterSnackAction();
+    this.showSnackActionResult(player, result.entries);
   },
 
   snackChooseStopOption(optionIndex) {
-    if (!this.snack.state.pendingStopChoice) return;
-    const player = this.snack.state.players.find((p) => p.id === this.snack.state.pendingStopChoice.playerId);
+    if (this.snack.phase !== "STOP_CHOICE" || !this.snack.state.pendingStopChoice) return;
+    const player = currentSnackPlayer(this.snack.state);
     if (player.id !== this.snackHumanId) return;
     const result = resolveSnackStopChoice(this.snack.state, optionIndex);
     this.pushSnackLog(result.entries);
     this.saveSnackGame();
+    this.showSnackActionResult(player, result.entries);
+  },
+
+  // ==================== 行動結果ポップアップ(バグC対応: 行動者+効果を明示表示) ====================
+
+  showSnackActionResult(player, entries) {
+    this.snack.lastActionActor = { name: player.name, seatNumber: player.seatNumber, isCPU: player.isCPU };
+    this.snack.lastActionEntries = entries || [];
+    this.snack.phase = "ACTION_RESULT";
     this.render();
+  },
+
+  // CPUの行動はタップ待ちにせず、CPU_TURN表示中の簡易読み上げ欄にだけ反映する
+  setSnackActionResult(player, entries) {
+    this.snack.lastActionActor = { name: player.name, seatNumber: player.seatNumber, isCPU: player.isCPU };
+    this.snack.lastActionEntries = entries || [];
+  },
+
+  snackDismissActionResult() {
+    if (this.snack.phase !== "ACTION_RESULT") return;
     this.afterSnackAction();
+  },
+
+  // ==================== アイテム・ショップ・マップ確認(ターンを消費しないポップアップ) ====================
+
+  snackOpenItemSelect() {
+    if (!["TURN_MENU", "NEXT_ACTION"].includes(this.snack.phase)) return;
+    this.snack.returnPhase = this.snack.phase;
+    this.snack.phase = "ITEM_SELECT";
+    this.render();
+  },
+
+  snackOpenItemConfirm(itemId) {
+    this.snack.pendingItemId = itemId;
+    this.snack.phase = "ITEM_CONFIRM";
+    this.render();
+  },
+
+  snackCancelItemConfirm() {
+    this.snack.pendingItemId = null;
+    this.snack.phase = "ITEM_SELECT";
+    this.render();
+  },
+
+  snackConfirmUseItem() {
+    const itemId = this.snack.pendingItemId;
+    const result = useSnackItem(this.snack.state, this.snackHumanId, itemId);
+    this.snack.pendingItemId = null;
+    if (result.ok) {
+      this.pushSnackLog(result.entries || []);
+      LifeRoadAudio.playSe("confirm");
+      this.saveSnackGame();
+      const player = currentSnackPlayer(this.snack.state);
+      this.showSnackActionResult(player, result.entries || []);
+    } else {
+      LifeRoadAudio.playSe("error");
+      this.snack.phase = this.snack.returnPhase || "TURN_MENU";
+      this.render();
+    }
+  },
+
+  snackCloseItemSelect() {
+    this.snack.phase = this.snack.returnPhase || "TURN_MENU";
+    this.snack.returnPhase = null;
+    this.render();
+  },
+
+  snackOpenShop() {
+    if (!["TURN_MENU", "NEXT_ACTION"].includes(this.snack.phase)) return;
+    this.snack.returnPhase = this.snack.phase;
+    this.snack.phase = "SHOP_SELECT";
+    this.render();
+  },
+
+  snackCloseShop() {
+    this.snack.phase = this.snack.returnPhase || "TURN_MENU";
+    this.snack.returnPhase = null;
+    this.render();
   },
 
   snackBuyShopItem(itemId) {
@@ -1469,49 +1761,73 @@ const App = {
     this.render();
   },
 
-  snackUseItem(itemId) {
-    const result = useSnackItem(this.snack.state, this.snackHumanId, itemId);
-    if (result.ok) {
-      this.pushSnackLog(result.entries || []);
-      LifeRoadAudio.playSe("confirm");
-      this.saveSnackGame();
-    } else {
-      LifeRoadAudio.playSe("error");
-    }
+  snackOpenMapOverview() {
+    if (["MAP_OVERVIEW", "MAP_ZOOM"].includes(this.snack.phase)) return;
+    this.snack.returnPhase = this.snack.phase;
+    this.snack.phase = "MAP_OVERVIEW";
     this.render();
+    if (this.snackBoard3dMounted && window.LifeRoadSnackBoard3D) window.LifeRoadSnackBoard3D.enterOverview();
   },
 
+  snackOpenMapZoom() {
+    if (!["MAP_OVERVIEW", "MAP_ZOOM"].includes(this.snack.phase)) this.snack.returnPhase = this.snack.phase;
+    this.snack.phase = "MAP_ZOOM";
+    this.render();
+    if (this.snackBoard3dMounted && window.LifeRoadSnackBoard3D) window.LifeRoadSnackBoard3D.enterZoom();
+    if (!this.snack.state.mapZoomHintShown) {
+      this.snack.state.mapZoomHintShown = true;
+      this.saveSnackGame();
+    }
+  },
+
+  snackCloseMapView() {
+    this.snack.phase = this.snack.returnPhase || "TURN_MENU";
+    this.snack.returnPhase = null;
+    this.render();
+    if (this.snackBoard3dMounted && window.LifeRoadSnackBoard3D) window.LifeRoadSnackBoard3D.exitMapView();
+  },
+
+  // ==================== 行動終了・ターン進行 ====================
+
   snackEndTurn() {
+    if (this.snack.phase !== "NEXT_ACTION") return;
     const player = currentSnackPlayer(this.snack.state);
     if (player.id !== this.snackHumanId) return;
     this.endSnackTurnAndContinue();
   },
 
   endSnackTurnAndContinue() {
+    const prevRound = this.snack.state.round;
     endSnackTurn(this.snack.state);
     this.saveSnackGame();
-    this.render();
     if (this.snack.state.status === "finished") {
       this.finishSnackGame();
       return;
     }
-    this.maybeRunSnackCPUTurn();
+    if (this.snack.state.round !== prevRound) {
+      this.beginSnackRound();
+    } else {
+      this.beginSnackPlayerIntro();
+    }
   },
 
   // 手番プレイヤーがCPUの場合、分岐/おやつ確認/選択イベント/ロールをApp側から自動進行する
   // (演出のタイミングを揃えるため、既存のmaybeRunCPUTurnと同様に短いsetTimeoutを挟む)。
+  // 先頭で「!player.isCPU なら即return」しているため、人間の手番でこの関数が何かを
+  // 自動実行することは無い(バグA=CPUターン後の進行停止の根本対策)。
   maybeRunSnackCPUTurn() {
     const state = this.snack && this.snack.state;
     if (!state || state.status !== "playing") return;
+    const player = currentSnackPlayer(state);
+    if (!player.isCPU) return;
 
     if (state.pendingBranch) {
-      const player = state.players.find((p) => p.id === state.pendingBranch.playerId);
-      if (!player.isCPU) return;
       setTimeout(async () => {
         if (!this.snack || !this.snack.state.pendingBranch) return;
         const choice = window.LifeRoadSnackCPU.cpuChooseSnackBranch(this.snack.state, player);
         const result = resolveSnackBranch(this.snack.state, choice);
         this.pushSnackLog(result.entries);
+        this.setSnackActionResult(player, result.entries);
         this.saveSnackGame();
         await this.playSnackMovementHop(player.id, result.path);
         this.render();
@@ -1520,12 +1836,11 @@ const App = {
       return;
     }
     if (state.pendingSnackChoice) {
-      const player = state.players.find((p) => p.id === state.pendingSnackChoice.playerId);
-      if (!player.isCPU) return;
       setTimeout(async () => {
         if (!this.snack || !this.snack.state.pendingSnackChoice) return;
         const result = resolveSnackChoice(this.snack.state, window.LifeRoadSnackCPU.cpuDecideSnackPurchase());
         this.pushSnackLog(result.entries);
+        this.setSnackActionResult(player, result.entries);
         this.saveSnackGame();
         await this.playSnackMovementHop(player.id, result.path);
         this.render();
@@ -1534,13 +1849,12 @@ const App = {
       return;
     }
     if (state.pendingStopChoice) {
-      const player = state.players.find((p) => p.id === state.pendingStopChoice.playerId);
-      if (!player.isCPU) return;
       setTimeout(() => {
         if (!this.snack || !this.snack.state.pendingStopChoice) return;
         const idx = LifeRoadCPU.cpuDecideOption(this.snack.state.pendingStopChoice, player.personality);
         const result = resolveSnackStopChoice(this.snack.state, idx);
         this.pushSnackLog(result.entries);
+        this.setSnackActionResult(player, result.entries);
         this.saveSnackGame();
         this.render();
         this.afterSnackAction();
@@ -1548,8 +1862,6 @@ const App = {
       return;
     }
 
-    const player = currentSnackPlayer(state);
-    if (!player.isCPU) return;
     if (!player.turnRolled) {
       setTimeout(() => {
         if (!this.snack || this.snack.state.status !== "playing") return;
@@ -1557,12 +1869,9 @@ const App = {
         const itemId = window.LifeRoadSnackCPU.cpuDecideItemToUse(this.snack.state, player);
         if (itemId) useSnackItem(this.snack.state, player.id, itemId);
         this.runSnackDiceAnimation(player.id, async (roll) => {
-          // commitSnackRoll(人間側)と同様、演出終了時に必ずhub.viewを戻す
-          // (2026-08-12発見・修正: CPU側だけこのリセットが抜けており、CPUの手番後
-          // hub.viewが"spinning"のまま固まって以降ずっと操作不能になるバグがあった)。
-          this.snack.hub = { view: "menu" };
           const result = rollSnackAndMove(this.snack.state, roll);
           this.pushSnackLog(result.entries);
+          this.setSnackActionResult(player, result.entries);
           this.saveSnackGame();
           await this.playSnackMovementHop(player.id, result.path);
           this.render();
@@ -1575,24 +1884,39 @@ const App = {
     setTimeout(() => this.endSnackTurnAndContinue(), 500);
   },
 
-  // ロール・分岐・おやつ確認・選択イベントのいずれかを解決した直後に必ず呼ぶ。
-  // ゲーム終了判定、CPU自動進行、および(CPUの移動が完了した場合の)自動ターン終了を行う。
+  // ロール・分岐・おやつ確認・選択イベントのいずれかを解決した直後に必ず呼ぶ(人間はACTION_RESULTの
+  // 「次へ」タップから、CPUはmaybeRunSnackCPUTurnから直接)。ゲーム終了判定、まだ解決していない
+  // pending(分岐/おやつ確認/選択イベント)への遷移、CPU自動進行、人間の次phase(まだロールして
+  // いなければTURN_MENU、ロール済みならNEXT_ACTION)を一箇所で決める単一の合流点。
   afterSnackAction() {
     const state = this.snack.state;
     if (state.status === "finished") {
       this.finishSnackGame();
       return;
     }
-    if (state.pendingBranch || state.pendingSnackChoice || state.pendingStopChoice) {
+    const player = currentSnackPlayer(state);
+    if (state.pendingBranch) return this.enterSnackPendingPhase("ROUTE_SELECT", player);
+    if (state.pendingSnackChoice) return this.enterSnackPendingPhase("SNACK_PURCHASE_CONFIRM", player);
+    if (state.pendingStopChoice) return this.enterSnackPendingPhase("STOP_CHOICE", player);
+    if (player.isCPU) {
+      this.snack.phase = "CPU_TURN";
+      this.render();
       this.maybeRunSnackCPUTurn();
       return;
     }
-    const player = currentSnackPlayer(state);
-    if (player.isCPU && player.turnRolled && player.remainingSteps === 0) {
-      this.endSnackTurnAndContinue();
-      return;
+    this.snack.phase = player.turnRolled ? "NEXT_ACTION" : "TURN_MENU";
+    this.render();
+  },
+
+  enterSnackPendingPhase(phase, player) {
+    if (player.isCPU) {
+      this.snack.phase = "CPU_TURN";
+      this.render();
+      this.maybeRunSnackCPUTurn();
+    } else {
+      this.snack.phase = phase;
+      this.render();
     }
-    this.maybeRunSnackCPUTurn();
   },
 
   finishSnackGame() {

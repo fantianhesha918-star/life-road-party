@@ -44,12 +44,20 @@ function createSnackState(playerConfigs) {
     pendingBranch: null, // { playerId, nodeId }
     pendingSnackChoice: null, // { playerId, nodeId }
     pendingStopChoice: null, // { playerId, title, prompt, options }
-    players: playerConfigs.map((p) => ({
+    // 行動順決めサイコロ・マップ紹介は新規開始時に1回だけ行う演出。再開時にやり直さないよう
+    // stateへ保存する(セーブは{state,log,humanId}を丸ごと保存する既存パターンにそのまま乗る)。
+    turnOrderDecided: false,
+    mapIntroDone: false,
+    mapZoomHintShown: false,
+    players: playerConfigs.map((p, i) => ({
       id: p.id,
       name: p.name,
       isCPU: !!p.isCPU,
       personality: p.personality || null,
       avatar: p.avatar || { color: "#e4572e", speciesEmoji: null, costumeImage: null },
+      // 座席番号(P1〜P4)。生成順=人間が常に1(既存の「先頭は人間」慣習を踏襲)。
+      // 行動順決めサイコロでplayers配列自体を並び替えても、この値は不変(仕様6章の要件)。
+      seatNumber: i + 1,
       currentNodeId: SNACK_START_NODE_ID,
       remainingSteps: 0,
       matchCoins: SNACK_START_COINS,
@@ -65,6 +73,16 @@ function createSnackState(playerConfigs) {
       turnRolled: false,
     })),
   };
+}
+
+// 行動順決めサイコロの結果を確定させる。playersを渡された順に並び替えるだけで、
+// currentTurnIndexベースの既存ターン進行ロジック(endSnackTurn等)は変更不要
+// (配列の物理順=プレイ順という前提を維持したまま、色/HUDはseatNumberで別管理する設計)。
+function finalizeSnackTurnOrder(state, orderedPlayerIds) {
+  const byId = new Map(state.players.map((p) => [p.id, p]));
+  state.players = orderedPlayerIds.map((id) => byId.get(id));
+  state.currentTurnIndex = 0;
+  state.turnOrderDecided = true;
 }
 
 function getSnackRanking(state) {
@@ -209,6 +227,10 @@ function rollSnackAndMove(state, roll) {
   return wrapUpSnackAction(state, player, entries, path);
 }
 
+function canAffordSnackToll(player, branchNode) {
+  return player.matchCoins >= branchNode.tollCost;
+}
+
 function resolveSnackBranch(state, chosenNextNodeId) {
   const { playerId, nodeId } = state.pendingBranch;
   const player = state.players.find((p) => p.id === playerId);
@@ -217,12 +239,20 @@ function resolveSnackBranch(state, chosenNextNodeId) {
   const entries = [];
   const path = [];
   state.pendingBranch = null;
-  if (chosenNextNodeId !== branchNode.nextNodeIds[0] && branchNode.tollCost > 0) {
-    const toll = Math.min(branchNode.tollCost, player.matchCoins);
-    player.matchCoins -= toll;
-    entries.push({ type: "money", text: `近道の通行料 -${toll}`, delta: -toll });
+  const isToll = chosenNextNodeId !== branchNode.nextNodeIds[0] && branchNode.tollCost > 0;
+  // 通行料が足りない場合は選択自体を拒否し既定ルートへフォールバックする(過少徴収しない、
+  // UI側(ルート選択ポップアップ)でも同じ判定でボタンを無効化するのが本来の入口だが、
+  // ここでも防御的にガードしておく)。
+  if (isToll && !canAffordSnackToll(player, branchNode)) {
+    entries.push({ type: "info", text: `コインが足りず近道へ入れなかった(あと${branchNode.tollCost - player.matchCoins}コイン)` });
+    stepOntoNode(state, player, branchNode.nextNodeIds[0], entries, path);
+  } else {
+    if (isToll) {
+      player.matchCoins -= branchNode.tollCost;
+      entries.push({ type: "money", text: `近道の通行料 -${branchNode.tollCost}`, delta: -branchNode.tollCost });
+    }
+    stepOntoNode(state, player, chosenNextNodeId, entries, path);
   }
-  stepOntoNode(state, player, chosenNextNodeId, entries, path);
   continueSnackMovement(state, player, entries, path);
   return wrapUpSnackAction(state, player, entries, path);
 }
@@ -234,11 +264,15 @@ function resolveSnackChoice(state, buy) {
   const entries = [];
   const path = [];
   state.pendingSnackChoice = null;
-  if (buy) {
+  // resolveSnackBranchの通行料と同種の見落とし(所持金不足でもマイナスまで購入できてしまう)を
+  // 防ぐ防御的ガード。UI側(購入確認ポップアップ)でも同じ判定でボタンを無効化する。
+  if (buy && player.matchCoins >= SNACK_SNACK_PRICE) {
     player.matchCoins -= SNACK_SNACK_PRICE;
     player.snacks += 1;
     entries.push({ type: "snack", text: "おやつを手に入れた！", delta: -SNACK_SNACK_PRICE });
     state.activeSnackNodeId = pickNewSnackLocation(node.id);
+  } else if (buy) {
+    entries.push({ type: "info", text: `コインが足りずおやつを買えなかった(あと${SNACK_SNACK_PRICE - player.matchCoins}コイン)` });
   } else {
     entries.push({ type: "info", text: "今回は見送った" });
   }

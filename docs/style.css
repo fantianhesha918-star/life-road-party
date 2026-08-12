@@ -837,10 +837,13 @@ body {
   color: var(--danger);
 }
 
-/* おやつ集めモード: プレイヤー情報を4人ぶん画面四隅に表示する(2026-08-12、マリオパーティ風の
-   「常に全員の状況が見える」レイアウトを狙って、単一プレイヤーの縦積みHUDから変更)。
-   pointer-eventsはhud自体none、カードは操作不要のため子要素も特に有効化しない。 */
-.snack-corner-hud {
+/* ==================== おやつ集めモード: ポップアップ式UI(2026-08-12全面刷新) ====================
+   固定メニューバーを廃止し、3Dマップを全画面表示した上へ、P1〜P4固定色の4隅HUDと
+   App.snack.phaseに応じた単一ポップアップだけを重ねる構成。P1〜P4の色は
+   snack-data.jsのSNACK_PLAYER_COLORSと一致させ、--p-color/--p-color-dark という
+   CSSカスタムプロパティ経由でui.js側から要素ごとに注入する(画像素材自体は中立色のまま)。 */
+
+.snack-hud-layer {
   position: fixed;
   inset: 0;
   max-width: 480px;
@@ -849,72 +852,137 @@ body {
   pointer-events: none;
 }
 
-.snack-corner {
+.snack-hud-corner {
   position: absolute;
+}
+
+.snack-hud-corner-topleft {
+  top: calc(env(safe-area-inset-top, 0px) + 60px);
+  left: calc(env(safe-area-inset-left, 0px) + 6px);
+}
+
+.snack-hud-corner-topright {
+  top: calc(env(safe-area-inset-top, 0px) + 60px);
+  right: calc(env(safe-area-inset-right, 0px) + 6px);
+}
+
+.snack-hud-corner-bottomleft {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+  left: calc(env(safe-area-inset-left, 0px) + 6px);
+}
+
+.snack-hud-corner-bottomright {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+  right: calc(env(safe-area-inset-right, 0px) + 6px);
+}
+
+.snack-hud-card {
+  position: relative;
+  width: 42vw;
+  max-width: 178px;
+  min-width: 132px;
+  aspect-ratio: 900 / 384;
+  background-image: url("images/snack/player-status-hud.png");
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  filter: brightness(0.82) saturate(0.85);
+  transition: transform 0.25s ease, filter 0.25s ease;
+}
+
+.snack-hud-card.snack-hud-active {
+  filter: none;
+  transform: scale(1.05);
+}
+
+.snack-hud-card.snack-hud-active::after {
+  content: "";
+  position: absolute;
+  inset: -4%;
+  border-radius: 999px;
+  box-shadow: 0 0 0 3px var(--p-color, var(--brand)), 0 0 10px 2px var(--p-color, var(--brand));
+  pointer-events: none;
+}
+
+.snack-hud-face {
+  position: absolute;
+  left: 20%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 27%;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid var(--p-color, var(--brand));
+  background: #fff;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 10px 5px 5px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-  border: 2px solid transparent;
-  max-width: 47%;
+  justify-content: center;
 }
 
-.snack-corner-topleft {
-  top: 60px;
-  left: 8px;
+.snack-hud-rank {
+  position: absolute;
+  left: 10%;
+  top: 22%;
+  transform: translate(-50%, -50%);
+  min-width: 14px;
+  text-align: center;
+  font-size: 0.6rem;
+  font-weight: 800;
+  color: var(--p-color-dark, var(--brand-dark));
 }
 
-.snack-corner-topright {
-  top: 60px;
-  right: 8px;
-  flex-direction: row-reverse;
-  padding: 5px 5px 5px 10px;
-}
-
-.snack-corner-bottomleft {
-  bottom: 68px;
-  left: 8px;
-}
-
-.snack-corner-bottomright {
-  bottom: 68px;
-  right: 8px;
-  flex-direction: row-reverse;
-  padding: 5px 5px 5px 10px;
-}
-
-.snack-corner-active {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 3px rgba(46, 125, 107, 0.28), 0 2px 8px rgba(0, 0, 0, 0.18);
-}
-
-.snack-corner-info {
+.snack-hud-name {
+  position: absolute;
+  left: 33%;
+  top: 36%;
+  width: 30%;
+  height: 24%;
   display: flex;
-  flex-direction: column;
-  line-height: 1.25;
-  min-width: 0;
-}
-
-.snack-corner-name {
-  font-size: 0.7rem;
+  align-items: center;
+  font-size: 0.58rem;
   font-weight: 700;
-  white-space: nowrap;
+  line-height: 1.1;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.snack-corner-stats {
-  font-size: 0.68rem;
-  color: var(--muted);
-  white-space: nowrap;
+.snack-hud-snacks,
+.snack-hud-coins {
+  position: absolute;
+  left: 75%;
+  width: 18%;
+  height: 15%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+.snack-hud-snacks {
+  top: 32%;
+}
+
+.snack-hud-coins {
+  top: 53%;
+}
+
+.snack-hud-seat-badge {
+  position: absolute;
+  right: 2%;
+  bottom: 2%;
+  font-size: 0.55rem;
+  font-weight: 800;
+  color: var(--p-color-dark, var(--brand-dark));
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 6px;
+  padding: 0 3px;
 }
 
 .snack-round-badge {
   position: fixed;
-  top: 60px;
+  top: calc(env(safe-area-inset-top, 0px) + 60px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 12;
@@ -925,6 +993,497 @@ body {
   font-weight: 700;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
   white-space: nowrap;
+}
+
+/* ---- ポップアップ共通(popup-choice-frame.png / popup-result-frame.png、9-slice表示) ---- */
+
+.snack-popup-backdrop {
+  align-items: center;
+  padding: 16px;
+}
+
+@keyframes snack-popup-in {
+  0% { opacity: 0; transform: scale(0.88); }
+  70% { opacity: 1; transform: scale(1.03); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.snack-popup-anim {
+  animation: snack-popup-in 0.22s cubic-bezier(0.2, 0.9, 0.35, 1.1);
+}
+
+.snack-popup-choice,
+.snack-popup-result {
+  position: relative;
+  width: min(92vw, 380px);
+  max-height: 82vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 30px 22px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-style: solid;
+  border-image-repeat: stretch;
+  color: var(--text);
+}
+
+.snack-popup-choice {
+  border-image-source: url("images/snack/popup-choice-frame.png");
+  border-image-slice: 180 145 180 145 fill;
+  border-image-width: 46px 36px;
+}
+
+.snack-popup-result {
+  border-image-source: url("images/snack/popup-result-frame.png");
+  border-image-slice: 220 fill;
+  border-image-width: 52px;
+  align-items: center;
+  text-align: center;
+}
+
+.snack-popup-title {
+  margin: 0;
+  text-align: center;
+  font-size: 1.02rem;
+}
+
+.snack-popup-subtitle {
+  margin: 0;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.snack-popup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.snack-popup-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.snack-popup-close {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  border: none;
+  background: rgba(0, 0, 0, 0.12);
+  color: var(--text);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.snack-medallion {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--p-color, var(--brand));
+  border: 3px solid var(--p-color-dark, var(--brand-dark));
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.65rem;
+  line-height: 1.1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+/* ---- 選択肢1行(popup-choice-button.png) ---- */
+
+.snack-choice-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  background-image: url("images/snack/popup-choice-button.png");
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  padding: 8px 16px 8px 8px;
+  min-height: 56px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.snack-choice-row-primary {
+  filter: drop-shadow(0 0 4px rgba(46, 125, 107, 0.5));
+}
+
+.snack-choice-row-disabled {
+  filter: grayscale(0.5) opacity(0.6);
+  cursor: not-allowed;
+}
+
+.snack-choice-icon {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.snack-choice-icon-emoji {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+}
+
+.snack-choice-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.snack-choice-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.snack-choice-sublabel {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.snack-choice-shortfall {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.snack-choice-arrow {
+  font-size: 1.1rem;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.snack-next-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: var(--brand);
+  color: #fff;
+  border-radius: 999px;
+  padding: 8px 20px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.snack-next-btn img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+/* ---- 行動結果・アイテム使用確認 ---- */
+
+.snack-result-actor {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.snack-result-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+
+.snack-result-positive {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.snack-result-negative {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.snack-result-snack {
+  color: #b8860b;
+  font-weight: 700;
+}
+
+.snack-item-confirm {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.snack-item-confirm-name {
+  margin: 0;
+  font-weight: 700;
+}
+
+.snack-item-confirm-desc {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+/* ---- マップ紹介フライスルー ---- */
+
+.snack-intro-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  pointer-events: none;
+}
+
+.snack-intro-skip {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 60px);
+  right: calc(env(safe-area-inset-right, 0px) + 10px);
+  pointer-events: auto;
+  border: none;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* ---- ラウンド・ターン交代テロップ ---- */
+
+.snack-telop-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 16;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.snack-telop-backdrop-dark {
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.snack-telop-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 16px;
+  padding: 18px 30px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+  animation: snack-popup-in 0.24s cubic-bezier(0.2, 0.9, 0.35, 1.1);
+}
+
+.snack-player-intro {
+  border: 3px solid var(--p-color, var(--brand));
+}
+
+.snack-telop-seat {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: var(--p-color-dark, var(--brand-dark));
+}
+
+.snack-telop-title {
+  margin: 0;
+  font-size: 1.3rem;
+  text-align: center;
+}
+
+.snack-telop-sub {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* ---- 行動順決めサイコロ ---- */
+
+.snack-order-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.snack-order-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.6);
+  border-left: 4px solid var(--p-color, var(--brand));
+}
+
+.snack-order-seat {
+  font-weight: 800;
+  color: var(--p-color-dark, var(--brand-dark));
+  min-width: 24px;
+}
+
+.snack-order-rank {
+  font-weight: 800;
+  min-width: 32px;
+}
+
+.snack-order-value {
+  margin-left: auto;
+  font-weight: 800;
+  font-size: 1.05rem;
+}
+
+/* ---- サイコロ演出中(3D側が主役、最小限の案内のみ) ---- */
+
+.snack-rolling-overlay {
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 14;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  padding: 8px 18px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+/* ---- マップ全体表示・ズーム確認 ---- */
+
+.snack-map-view-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 14;
+  pointer-events: none;
+}
+
+.snack-map-view-toolbar {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 60px);
+  right: calc(env(safe-area-inset-right, 0px) + 8px);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.snack-map-view-btn {
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 4px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+
+.snack-map-view-btn img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.snack-map-view-btn-active {
+  background: var(--brand);
+}
+
+.snack-map-view-back {
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 8px 14px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+
+.snack-map-pan-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 18%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  animation: snack-popup-in 0.3s ease;
+}
+
+.snack-map-pan-hint img {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.4));
+}
+
+.snack-map-pan-hint p {
+  margin: 0;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.72rem;
+}
+
+/* ---- CPUの手番中(非ブロッキング表示) ---- */
+
+.snack-cpu-turn-overlay {
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 14;
+  max-width: 82vw;
+  background: rgba(255, 255, 255, 0.92);
+  border-left: 4px solid var(--p-color, var(--brand));
+  border-radius: 12px;
+  padding: 8px 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.snack-cpu-turn-label {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--p-color-dark, var(--brand-dark));
+}
+
+.snack-cpu-turn-log {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
 }
 
 /* 通常時のターンハブ(menu)は、毎ターン表示されるためマップを隠さない

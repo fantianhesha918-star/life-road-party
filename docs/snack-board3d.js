@@ -216,6 +216,14 @@ const SNACK_NODE_TYPE_COLORS = {
 
 const textureLoader = new THREE.TextureLoader();
 
+// P1〜P4固定色。snack-data.jsのSNACK_PLAYER_COLORSと値を一致させること。ES module(このファイル)
+// はclassic script側の`const`宣言をグローバル経由で参照できないため(windowにも乗らない)、
+// SPECIES_MODEL_MAP等と同様に値をそのまま複製している。
+const SNACK_PLAYER_COLOR_HEX = [0x2f80ed, 0xeb5757, 0x9b51e0, 0x27ae60];
+function snackPlayerColorHex(seatNumber) {
+  return SNACK_PLAYER_COLOR_HEX[(seatNumber - 1 + SNACK_PLAYER_COLOR_HEX.length) % SNACK_PLAYER_COLOR_HEX.length];
+}
+
 let renderer = null;
 let scene = null;
 let camera = null;
@@ -230,10 +238,31 @@ let animationFrameId = null;
 let sceneGeneration = 0;
 const cameraCurrentPos = new THREE.Vector3();
 let trapMarkerEntries = new Map(); // nodeId -> THREE.Group(発動中の罠マーカー)
-let turnRingGroup = null;
+let playerRings = new Map(); // playerId -> { group, seatNumber }
 let diceMesh = null;
 let diceAnim = null; // { playerId, mesh, startTime, settled, resolve }
 const diceFaceTextureCache = {};
+
+// ---- マップ紹介フライスルー・全体表示・ズームで使うカメラモード ----
+// "follow"(通常の駒追従、既定) | "intro"(開始時のマップ紹介、専用rAFループが直接カメラを操作) |
+// "overview"(マップ全体固定俯瞰) | "zoom"(overview基準の拡大+ドラッグパン)
+let cameraMode = "follow";
+let mapBounds = null; // { centerX, centerZ, halfX, halfZ }
+let zoomState = { level: 1.9, panX: 0, panZ: 0 };
+let zoomPointerActive = false;
+let zoomLastX = 0;
+let zoomLastY = 0;
+
+function computeMapBounds() {
+  if (!nodePositions.size) return { centerX: 0, centerZ: 0, halfX: 10, halfZ: 10 };
+  const xs = [...nodePositions.values()].map((v) => v.x);
+  const zs = [...nodePositions.values()].map((v) => v.z);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minZ = Math.min(...zs);
+  const maxZ = Math.max(...zs);
+  return { centerX: (minX + maxX) / 2, centerZ: (minZ + maxZ) / 2, halfX: (maxX - minX) / 2 || 10, halfZ: (maxZ - minZ) / 2 || 10 };
+}
 
 function nodeVec3(node) {
   return new THREE.Vector3(node.position.x, 0, node.position.z);
@@ -608,13 +637,18 @@ function syncTrapMarkers() {
   });
 }
 
-// 現在の手番プレイヤーの足元に表示するリング。モデルが縦向き(Y軸方向に厚い円盤)のため
-// X軸-90°回転させて地面に寝かせる(loadDecorationModelの共通ロジックは使わず専用に実装)。
-function ensureTurnRing() {
-  if (turnRingGroup) return turnRingGroup;
-  turnRingGroup = new THREE.Group();
-  scene.add(turnRingGroup);
+// プレイヤーごとの足元リング。従来は「現在の手番プレイヤーだけ」に1個だけ表示していたが、
+// 2026-08-12(統合仕様書対応)、マップ全体表示・ズーム確認で「実物の3Dキャラ+足元リング色」を
+// そのままマーカー代わりに使う設計にしたため、全プレイヤー分を常時(控えめに)表示し、
+// 現在の手番プレイヤーだけ大きく強調する方式に変更した。色はP1〜P4固定色(座席番号ベース)。
+function ensurePlayerRing(playerId, seatNumber) {
+  if (playerRings.has(playerId)) return playerRings.get(playerId);
+  const group = new THREE.Group();
+  scene.add(group);
+  const record = { group, seatNumber };
+  playerRings.set(playerId, record);
   const generation = sceneGeneration;
+  const colorHex = snackPlayerColorHex(seatNumber);
   loadGLTFSceneCached(SNACK_STAGE_MODELS.turnRing.url)
     .then((template) => {
       if (generation !== sceneGeneration) return;
@@ -623,22 +657,35 @@ function ensureTurnRing() {
       model.rotation.x = -Math.PI / 2;
       model.position.y = 0.03;
       model.traverse((node) => {
-        if (node.isMesh) node.receiveShadow = true;
+        if (node.isMesh) {
+          node.receiveShadow = true;
+          node.material = node.material.clone();
+          node.material.color.setHex(colorHex);
+          node.material.emissive = new THREE.Color(colorHex);
+          node.material.emissiveIntensity = 0.15;
+        }
       });
-      turnRingGroup.add(model);
+      group.add(model);
     })
     .catch((err) => {
-      console.warn("現在の手番リングモデルの読み込みに失敗", err);
+      console.warn("プレイヤーリングモデルの読み込みに失敗", err);
     });
-  return turnRingGroup;
+  return record;
 }
 
-function updateTurnRing() {
+function updatePlayerRings() {
   if (!scene) return;
-  const entry = focusPlayerId ? characters.get(focusPlayerId) : null;
-  if (!entry) return;
-  const ring = ensureTurnRing();
-  ring.position.set(entry.group.position.x, 0.02, entry.group.position.z);
+  characters.forEach((entry, playerId) => {
+    const record = ensurePlayerRing(playerId, entry.seatNumber);
+    record.group.position.set(entry.group.position.x, 0.02, entry.group.position.z);
+    const isActive = playerId === focusPlayerId;
+    const targetScale = isActive ? 1.35 : 0.95;
+    const targetEmissive = isActive ? 0.55 : 0.15;
+    record.group.scale.setScalar(record.group.scale.x + (targetScale - record.group.scale.x) * 0.15);
+    record.group.traverse((node) => {
+      if (node.isMesh && node.material) node.material.emissiveIntensity = targetEmissive;
+    });
+  });
 }
 
 function createMascotEntry(nodeId) {
@@ -719,7 +766,7 @@ function createCharacterEntry(player) {
   const visual = player.avatar || {};
   const placeholder = createCharacterPlaceholder(visual.color);
   group.add(placeholder);
-  const entry = { group, placeholder, hop: null, currentNodeId: player.currentNodeId, playerId: player.id };
+  const entry = { group, placeholder, hop: null, currentNodeId: player.currentNodeId, playerId: player.id, seatNumber: player.seatNumber || 1 };
   characters.set(player.id, entry);
   loadSnackCharacterModel(entry, visual.speciesId);
   return entry;
@@ -815,10 +862,39 @@ function focusCamera(playerId) {
   if (playerId) focusPlayerId = playerId;
 }
 
+// マップ全体を収める固定俯瞰の目標位置を計算する。zoomLevelが大きいほど寄る
+// (1=全体表示相当、最大3倍)。panX/panZはズーム時のドラッグパン量(ワールド座標オフセット)。
+function overviewCameraTarget(zoomLevel, panX, panZ) {
+  const b = mapBounds || computeMapBounds();
+  const baseDist = Math.max(b.halfX, b.halfZ) * 1.6 + 6;
+  const dist = baseDist / (zoomLevel || 1);
+  const cx = b.centerX + panX;
+  const cz = b.centerZ + panZ;
+  return {
+    pos: new THREE.Vector3(cx, dist * 0.85, cz + dist * 0.6),
+    lookAt: new THREE.Vector3(cx, 0, cz),
+  };
+}
+
+function updateOverviewCamera() {
+  const { pos, lookAt } = overviewCameraTarget(cameraMode === "zoom" ? zoomState.level : 1, zoomState.panX, zoomState.panZ);
+  cameraCurrentPos.lerp(pos, 0.12);
+  camera.position.copy(cameraCurrentPos);
+  camera.lookAt(lookAt.x, lookAt.y, lookAt.z);
+}
+
 // すごろく本編(board3d.js)と同じ「静止時=ジオラマ風の見下ろし固定角度/移動中=進行方向の
 // 真後ろから追う三人称視点」の2段構成(2026-08-11、ユーザー指示で本編と統一)。
+// 2026-08-12: マップ全体表示・ズーム・マップ紹介フライスルー用にcameraModeで分岐する形に拡張。
+// "intro"は専用のrAFループ(playMapIntro)が毎フレーム直接camera.position/lookAtを操作するため、
+// ここでは何もしない(二重に動かすと競合するため)。
 function updateCamera() {
   if (!camera) return;
+  if (cameraMode === "intro") return;
+  if (cameraMode === "overview" || cameraMode === "zoom") {
+    updateOverviewCamera();
+    return;
+  }
   const entry = focusPlayerId ? characters.get(focusPlayerId) : null;
   if (!entry) return;
   const focusGroup = entry.group;
@@ -841,6 +917,170 @@ function updateCamera() {
   camera.lookAt(focusGroup.position.x, 0.5, focusGroup.position.z);
 }
 
+// ==================== マップ全体表示・ズーム・ドラッグパン ====================
+
+function panZoomBy(dx, dz) {
+  const b = mapBounds || computeMapBounds();
+  const panScale = 0.02 / (zoomState.level || 1);
+  zoomState.panX -= dx * panScale;
+  zoomState.panZ -= dz * panScale;
+  const limX = b.halfX * 0.7;
+  const limZ = b.halfZ * 0.7;
+  zoomState.panX = Math.max(-limX, Math.min(limX, zoomState.panX));
+  zoomState.panZ = Math.max(-limZ, Math.min(limZ, zoomState.panZ));
+}
+
+function setZoomDelta(delta) {
+  zoomState.level = Math.max(1, Math.min(3, zoomState.level + delta));
+}
+
+function onZoomPointerDown(e) {
+  zoomPointerActive = true;
+  zoomLastX = e.clientX;
+  zoomLastY = e.clientY;
+}
+
+function onZoomPointerMove(e) {
+  if (!zoomPointerActive) return;
+  const dx = e.clientX - zoomLastX;
+  const dy = e.clientY - zoomLastY;
+  zoomLastX = e.clientX;
+  zoomLastY = e.clientY;
+  panZoomBy(dx, dy);
+}
+
+function onZoomPointerUp() {
+  zoomPointerActive = false;
+}
+
+function onZoomWheel(e) {
+  e.preventDefault();
+  setZoomDelta(-e.deltaY * 0.001);
+}
+
+function attachZoomPointerHandlers() {
+  if (!renderer) return;
+  const el = renderer.domElement;
+  el.addEventListener("pointerdown", onZoomPointerDown);
+  el.addEventListener("pointermove", onZoomPointerMove);
+  window.addEventListener("pointerup", onZoomPointerUp);
+  el.addEventListener("wheel", onZoomWheel, { passive: false });
+}
+
+function detachZoomPointerHandlers() {
+  zoomPointerActive = false;
+  if (!renderer) return;
+  const el = renderer.domElement;
+  el.removeEventListener("pointerdown", onZoomPointerDown);
+  el.removeEventListener("pointermove", onZoomPointerMove);
+  window.removeEventListener("pointerup", onZoomPointerUp);
+  el.removeEventListener("wheel", onZoomWheel);
+}
+
+function enterOverview() {
+  detachZoomPointerHandlers();
+  cameraMode = "overview";
+}
+
+function enterZoom() {
+  zoomState = { level: 1.9, panX: zoomState.panX || 0, panZ: zoomState.panZ || 0 };
+  cameraMode = "zoom";
+  attachZoomPointerHandlers();
+}
+
+function exitMapView() {
+  detachZoomPointerHandlers();
+  cameraMode = "follow";
+  zoomState = { level: 1.9, panX: 0, panZ: 0 };
+}
+
+// ==================== マップ紹介フライスルー ====================
+// ゲーム開始直後、外周ルートに沿ってマップを1周(分岐・ショップ付近では少し速度を落とす)→
+// 上空へ引いて全景を約1秒静止→スタート地点の通常カメラへ滑らかに戻る。合計約8〜12秒。
+// スキップ時も最終の全景だけは約0.5秒見せてから戻す(仕様書5章の指示通り)。
+function playMapIntro() {
+  let resolveFinished;
+  const finished = new Promise((resolve) => {
+    resolveFinished = resolve;
+  });
+  if (!camera || !scene) {
+    resolveFinished();
+    return { finished, requestSkip: () => {} };
+  }
+  cameraMode = "intro";
+  const b = mapBounds || computeMapBounds();
+  const orbitRadius = Math.max(b.halfX, b.halfZ) * 1.15 + 3;
+  const orbitHeight = Math.max(b.halfX, b.halfZ) * 0.55 + 3;
+  const overviewHeight = Math.max(b.halfX, b.halfZ) * 1.4 + 8;
+  const ellipseSquash = b.halfZ / Math.max(b.halfX, 1);
+  const startAngle = -Math.PI / 2; // snack-data.jsのouter0の角度と揃える
+  const ORBIT_MS = 7000;
+  const OVERVIEW_HOLD_MS = 1200;
+  const RETURN_MS = 1400;
+  const TOTAL_MS = ORBIT_MS + OVERVIEW_HOLD_MS + RETURN_MS;
+  // 分岐点(外周4箇所、周回に対する割合)付近で少し速度を落とす(仕様書5章)。
+  const slowPoints = [0.125, 0.375, 0.625, 0.875];
+  function angularSpeedFactor(progress) {
+    let factor = 1;
+    slowPoints.forEach((p) => {
+      const d = Math.min(Math.abs(progress - p), 1 - Math.abs(progress - p));
+      if (d < 0.06) factor *= 0.4;
+    });
+    return factor;
+  }
+  const startNode = [...nodeMap.values()].find((n) => n.nodeType === "start") || [...nodeMap.values()][0];
+  const startNodePos = (startNode && nodePositions.get(startNode.id)) || new THREE.Vector3(b.centerX, 0, b.centerZ);
+  let startTime = performance.now();
+  let orbitProgress = 0;
+  let lastT = 0;
+  function tick() {
+    if (cameraMode !== "intro" || !camera) {
+      resolveFinished();
+      return;
+    }
+    const now = performance.now();
+    const elapsed = now - startTime;
+    if (elapsed < ORBIT_MS) {
+      const t = elapsed / ORBIT_MS;
+      const dt = Math.max(0, t - lastT);
+      lastT = t;
+      orbitProgress += dt * angularSpeedFactor(orbitProgress);
+      const angle = startAngle - orbitProgress * Math.PI * 2;
+      const cx = b.centerX + Math.cos(angle) * orbitRadius;
+      const cz = b.centerZ + Math.sin(angle) * orbitRadius * ellipseSquash;
+      camera.position.set(cx, orbitHeight, cz);
+      camera.lookAt(b.centerX, 1, b.centerZ);
+    } else if (elapsed < ORBIT_MS + OVERVIEW_HOLD_MS) {
+      const t = Math.min(1, (elapsed - ORBIT_MS) / (OVERVIEW_HOLD_MS * 0.4));
+      const y = orbitHeight + (overviewHeight - orbitHeight) * t;
+      camera.position.set(b.centerX, y, b.centerZ + overviewHeight * 0.5);
+      camera.lookAt(b.centerX, 0, b.centerZ);
+    } else if (elapsed < TOTAL_MS) {
+      const t = (elapsed - ORBIT_MS - OVERVIEW_HOLD_MS) / RETURN_MS;
+      const ease = t * t * (3 - 2 * t);
+      const from = new THREE.Vector3(b.centerX, overviewHeight, b.centerZ + overviewHeight * 0.5);
+      const to = new THREE.Vector3(startNodePos.x - CAMERA_IDLE.trail, CAMERA_IDLE.up, startNodePos.z + CAMERA_IDLE.back);
+      camera.position.lerpVectors(from, to, ease);
+      camera.lookAt(startNodePos.x, 0.5, startNodePos.z);
+    } else {
+      cameraCurrentPos.set(startNodePos.x - CAMERA_IDLE.trail, CAMERA_IDLE.up, startNodePos.z + CAMERA_IDLE.back);
+      cameraMode = "follow";
+      resolveFinished();
+      return;
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+  return {
+    finished,
+    requestSkip: () => {
+      const targetElapsed = ORBIT_MS + OVERVIEW_HOLD_MS - 500;
+      const forcedStart = performance.now() - targetElapsed;
+      if (forcedStart < startTime) startTime = forcedStart;
+    },
+  };
+}
+
 function resize() {
   if (!renderer || !camera) return;
   const canvas = renderer.domElement;
@@ -854,7 +1094,7 @@ function resize() {
 function buildScene(nodes, players, activeSnackNodeId) {
   scene = new THREE.Scene();
   trapMarkerEntries = new Map();
-  turnRingGroup = null;
+  playerRings = new Map();
   diceMesh = null;
   scene.fog = new THREE.Fog(0xbfe3da, 16, 40);
   const bgTexture = textureLoader.load(SKY_BACKDROP_URL);
@@ -1061,7 +1301,7 @@ function animate() {
   if (mascotState && mascotState.entry && mascotState.entry.model) {
     mascotState.entry.model.position.y = mascotState.entry.baseY + Math.sin(now / 500) * 0.08;
   }
-  updateTurnRing();
+  updatePlayerRings();
   updateDiceAnim(now);
   updateCamera();
   renderer.render(scene, camera);
@@ -1077,6 +1317,9 @@ function mount(canvasEl, options) {
   const nodes = opts.nodes || [];
   nodeMap = new Map(nodes.map((n) => [n.id, n]));
   nodePositions = new Map(nodes.map((n) => [n.id, nodeVec3(n)]));
+  mapBounds = computeMapBounds();
+  cameraMode = "follow";
+  zoomState = { level: 1.9, panX: 0, panZ: 0 };
 
   renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -1106,6 +1349,7 @@ function dispose() {
   if (animationFrameId) cancelAnimationFrame(animationFrameId);
   animationFrameId = null;
   window.removeEventListener("resize", resize);
+  detachZoomPointerHandlers();
   if (diceAnim) finishDiceAnim();
   if (renderer) renderer.dispose();
   renderer = null;
@@ -1115,8 +1359,21 @@ function dispose() {
   nodeMarkers = [];
   mascotState = null;
   trapMarkerEntries = new Map();
-  turnRingGroup = null;
+  playerRings = new Map();
   diceMesh = null;
+  cameraMode = "follow";
+  mapBounds = null;
 }
 
-window.LifeRoadSnackBoard3D = { mount, dispose, syncPlayers, focusCamera, playDiceRoll, hopPath };
+window.LifeRoadSnackBoard3D = {
+  mount,
+  dispose,
+  syncPlayers,
+  focusCamera,
+  playDiceRoll,
+  hopPath,
+  playMapIntro,
+  enterOverview,
+  enterZoom,
+  exitMapView,
+};

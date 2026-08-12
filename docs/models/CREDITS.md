@@ -136,8 +136,18 @@
 - **2026-08-10、進行用チャット側で組み込み完了**: ユーザーから「帽子・アクセサリーを廃止し、全身コスチューム(動物種ごとに着せる、独立キャラクターではなく既存の動物種フィット型を採用)に置き換える」との指示を受け、この試作モデルをテストケースとして`board3d.js`にコスチューム+動物種の組み合わせモデル差し替えロジック(`COSTUME_MODEL_MAP`、キー`"{costumeId}_{speciesId}"`)を実装した。
   - scale/yOffset算出: Three.js`GLTFLoader`+`DRACOLoader`(本番と同じ構成)で素の`chinchilla-gray.glb`とこのモデルを実機読み込みし、`Box3.setFromObject(gltf.scene)`で実測。Y軸(垂直方向)の実測サイズは素=1.4678/コスチューム版=1.4151、min.y絶対値は素=0.7343/コスチューム版=0.7088で、既存の`scale=0.47, yOffset=0.445`(素のchinchilla-gray用)に対してこの比率をそのまま適用し`scale=0.4875, yOffset=0.4295`を算出。実機表示(Playwright)でも素のモデルと違和感のない大きさ・接地で表示されることを確認済み。
   - **注記**: このファイル冒頭(2026-08-10)の「Blender等のオフライン計測は軸がずれる場合がある」という注意書きの実例が、まさにこのモデルで確認できた。Blender計測では「Y幅1.90/Z幅1.42」だったのに対し、Three.js実機実測では垂直方向(表示上の高さ)がZ軸相当(≈1.899)ではなくY軸(≈1.415〜1.468)に出ており、素のchinchilla-gray.glbも同じ傾向(Y軸1.468/Z軸1.899)だった。両ファイルで軸の出方が揃っていたため、今回はY軸実測値どうしの比率をそのまま使えば正しく揃うと判断した。
-  - 他29組み合わせ(スーツ・忍者・くまの着ぐるみ×6種、着物の残り5種)は3Dモデル化未着手のため、`COSTUME_MODEL_MAP`に無ければ素の動物モデルにフォールバックする(3D盤面には反映されないが、ショップ・キャラクター編集画面の2Dイラストには反映される)。
+  - **2026-08-11、着物の残り5種+忍者6種を3Dモデル化(下記セクション参照)、他29組み合わせのうちスーツ6種・くまの着ぐるみ6種(計12組み合わせ)は引き続き3Dモデル化未着手**のため、`COSTUME_MODEL_MAP`に無ければ素の動物モデルにフォールバックする(3D盤面には反映されないが、ショップ・キャラクター編集画面の2Dイラストには反映される)。
   - あわせて、`docs/costumes/costume-<id>_<species>.png`(24枚、512×512、透過PNG)をショップ・キャラクター編集画面用のバッジ画像として新規生成した。各コスチュームフォルダの`front.png`(3Dモデル化用の参考イラスト、白背景)から、四隅を背景色として検出し外周と連結した領域のみを透明化する手法(内部の白い衣装部分は透明化しない)で背景除去し、正方形にトリミングしている。
+
+## costume-kimono_chinchilla-white-pied.glb / costume-kimono_dog-frenchie-white.glb / costume-kimono_dog-frenchie-black.glb / costume-kimono_cat-calico.glb / costume-kimono_rabbit-white.glb / costume-ninja_chinchilla-gray.glb / costume-ninja_chinchilla-white-pied.glb / costume-ninja_dog-frenchie-white.glb / costume-ninja_dog-frenchie-black.glb / costume-ninja_cat-calico.glb / costume-ninja_rabbit-white.glb(着物残り5種+忍者6種)
+
+- 2026-08-11、`costume-kimono_chinchilla-gray.glb`の試作確認後、保留していた「着物の残り5種」「忍者6種」を追加でユーザー指示により3Dモデル化(計11組み合わせ)。スーツ・くまの着ぐるみは今回対象外、引き続き保留中
+- 参考イラスト: 着物残り5種は`クロコとcodex受け渡し\素材受け渡し\02_Codex作成素材\アニマルライフ_コスチューム_着物_残り5種_2026-08-09\`、忍者6種は`アニマルライフ_コスチューム_忍者_6種_2026-08-09\`(いずれも既存納品分・正面/側面/背面の3方向)。**うさぎ分(着物・忍者とも)は座りポーズ再作成版に差し替え済みのため、`アニマルライフ_コスチューム_うさぎ座りポーズ再作成_2026-08-10\`の画像を使用**(既存のうさぎ本体モデルと同じポーズに統一するため)
+- 生成: 素の動物モデル・costume-kimono_chinchilla-grayと同じMeshy AI API Multi-Image to 3D(`ai_model: meshy-6`、`enable_pbr: true`、`texture_resolution: 4k`、`should_remesh: true`、`target_polycount: 15000`)。11点を並行リクエスト
+- 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)
+- 最終ファイルサイズ: costume-kimono_chinchilla-white-pied 410KB / costume-kimono_dog-frenchie-white 521KB / costume-kimono_dog-frenchie-black 506KB / costume-kimono_cat-calico 522KB / costume-kimono_rabbit-white 501KB / costume-ninja_chinchilla-gray 424KB / costume-ninja_chinchilla-white-pied 431KB / costume-ninja_dog-frenchie-white 458KB / costume-ninja_dog-frenchie-black 387KB / costume-ninja_cat-calico 477KB / costume-ninja_rabbit-white 484KB
+- Blender簡易レンダーで全11点の形状確認済み、いずれも参考イラストの意匠(着物の和柄・帯、忍者装束のフード・帯)が正しく再現されており問題なし
+- **scale/yOffsetの実測・`docs/board3d.js`の`COSTUME_MODEL_MAP`への組み込みは未実施**、進行用チャット側での対応待ち(costume-kimono_chinchilla-grayと同様、Three.js実機実測での算出が必要)。まだcommit/pushしていない
 
 ## costume-wedding_chinchilla-gray.glb / costume-wedding_chinchilla-white-pied.glb
 
@@ -171,3 +181,83 @@
 - Blender簡易レンダーで形状・質感を確認済み、いずれも既存素材と同等の品質。building-job-centerの壁面に単一画像生成由来の軽い模様ノイズがあるが、実用上問題ないレベル
 - **用途**: おやつ集めモードのステージ1(北エリア=就職センター、中央=円形広場、道沿い=花壇、遠景=丘)。snack-mascotはマップ上に出現・取得・再配置される中心の収集アイテム
 - **このゲームモード自体はまだアイデア段階で実装未着手**、`docs/board3d.js`への組み込みも未実施。素材のみ準備完了の状態。まだcommit/pushしていない
+
+## facility-small-bridge.glb / prop-low-hedge.glb / building-house-small-a.glb / building-house-small-b.glb(おやつ集めモード・ステージ2地形素材)
+
+- 2026-08-11、ステージ2(シーサイド・アドベンチャー)向けに作成。同時に納品された`terrain-water-tile.png`は繰り返し敷き詰めるテクスチャ素材のため、Meshy 3D化の対象外(平面へ直接適用する想定)
+- 参考イラスト: Codexへ依頼(`アニマルライフ_おやつ集めモード_ステージ2地形素材_2026-08-11`)、既存の建物/小道具と同じフェルト調ミニチュアジオラマ様式。既存の`facility-bridge.png`(ステージ2中央の大型橋)とは別物の、島内の小水路用の小橋として依頼
+- 生成: 既存素材と同じ簡易パイプライン(`ai_model: meshy-5`、単一画像、`enable_pbr: false`、`should_remesh: true`、`topology: triangle`)。`target_polycount`はfacility-small-bridge 8,000・prop-low-hedge 6,000・building-house-small-a/b 各10,000
+- 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)
+- 最終仕様: facility-small-bridge 143KB / prop-low-hedge 89KB / building-house-small-a 170KB / building-house-small-b 211KB
+- Blender簡易レンダーで形状・質感を確認済み、いずれも既存素材と同等の品質。目立つアーティファクトなし
+- **用途**: ステージ2の水路・牧場エリア背景装飾(入口ノード必須の主要施設ではなく、装飾レイヤーとして使用)
+- **このゲームモード自体はまだアイデア段階で実装未着手**、`docs/board3d.js`への組み込みも未実施。素材のみ準備完了の状態。まだcommit/pushしていない
+
+## prop-paw-fountain.glb(おやつ集めモード・中央広場の肉球噴水)
+
+- 2026-08-11、中央広場(`facility-plaza-circle.glb`)に置く噴水として作成。景観デザイン案の「追加が必要そうな背景素材」10点のうち最後の1点
+- 参考イラスト: Codexへ依頼(`アニマルライフ_おやつ集めモード_肉球噴水_2026-08-11`)、肉球そのものが噴水(掌パッド+指パッド4つがそれぞれ浅い水盤)になったデザイン。既存の円形広場タイルの中央花壇部分と差し替える想定
+- 生成: 既存素材と同じ簡易パイプライン(`ai_model: meshy-5`、単一画像、`enable_pbr: false`、`should_remesh: true`、`topology: triangle`、`target_polycount: 8000`)
+- 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)。最終仕様: 117KB、8,220ポリゴン
+- Blender簡易レンダーで確認(横長で扁平な形状のため、通常の正面/側面レンダーでは分かりにくく、上方斜めからの追加レンダーで肉球形状を確認)。水しぶきの粒の1つから細い線状の小さなメッシュノイズがあるが、単一画像生成でよくある軽微な副産物で実用上問題ないレベル
+- **用途**: 中央広場タイルの中心に設置。花壇バージョンとの差し替え運用(景観デザイン案より、外周の円形石畳は維持し中央の花壇部分のみ噴水に差し替え)
+- **このゲームモード自体はまだアイデア段階で実装未着手**、`docs/board3d.js`への組み込みも未実施。素材のみ準備完了の状態。まだcommit/pushしていない
+
+## item-dice-plus1.glb 〜 item-trade-ticket.glb(おやつ集めモード・アイテムアイコン12種)
+
+- 2026-08-11、当初「2Dのままで十分」と判断していたおやつ集めモードの残り素材(計47点と誤カウントしていたが、実際は33点。詳細は下記「3D化しなかった素材」参照)について、ユーザーの意向により順番に3Dモデル化する方針に変更。まずアイテムアイコン12種から着手
+- 対象: `item-dice-plus1`(サイコロ+1)・`item-dice-plus2`(サイコロ+2)・`item-dice-plus3`(サイコロ+3)・`item-steal`(横取り袋)・`item-warp`(ワープ玉)・`item-pushback`(押し戻しの実)・`item-trap`(いたずらの実)・`item-scent-herb`(鼻きき草)・`item-aim-powder`(狙い目の粉)・`item-double-seed`(ダブルチャンスの種)・`item-charm-paw`(おまもり)・`item-trade-ticket`(場所交換チケット)
+- 参考イラスト: `クロコとcodex受け渡し\素材受け渡し\02_Codex作成素材\アニマルライフ_おやつ集めモード_アイテム12種_2026-08-11\`(既存納品分)
+- 生成: 既存の街灯/ベンチ/看板/マス目印アイコンと同じ簡易パイプライン(`ai_model: meshy-5`、単一画像、`enable_pbr: false`、`should_remesh: true`、`topology: triangle`、`target_polycount: 6000`)。12点を並行リクエスト
+- 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)
+- 最終ファイルサイズ: item-dice-plus1 108KB / item-dice-plus2 152KB / item-dice-plus3 162KB / item-steal 172KB / item-warp 118KB / item-pushback 129KB / item-trap 129KB / item-scent-herb 122KB / item-aim-powder 100KB / item-double-seed 101KB / item-charm-paw 157KB / item-trade-ticket 167KB
+- Blender簡易レンダーで全12点の形状を確認(いずれも正面レンダーで意匠がはっきり分かる、問題なし)
+- **このゲームモード自体はまだアイデア段階で実装未着手**、`docs/board3d.js`への組み込みも未実施。素材のみ準備完了の状態。まだcommit/pushしていない
+
+## item-shop-kiosk.glb / placed-trap-marker.glb / snack-spawn-marker.glb / snack-spawn-pedestal.glb / warp-destination-tile.glb / winner-trophy.glb(おやつ集めモード・マップ追加素材6種)
+
+- 2026-08-11、上記アイテムアイコンに続けて3Dモデル化。参考イラストは`アニマルライフ_おやつ集めモード_マップ追加素材6種_2026-08-11`(Codexが自主的に追加納品していた既存納品分)
+- 生成: 同じ簡易パイプライン(`ai_model: meshy-5`、単一画像、`enable_pbr: false`、`should_remesh: true`、`topology: triangle`)。`target_polycount`はitem-shop-kiosk 10,000(建物寄りの構造のため他より多め)・placed-trap-marker 5,000・snack-spawn-marker 5,000・snack-spawn-pedestal 6,000・warp-destination-tile 5,000・winner-trophy 6,000
+- 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)
+- 最終ファイルサイズ: item-shop-kiosk 214KB / placed-trap-marker 125KB / snack-spawn-marker 172KB / snack-spawn-pedestal 124KB / warp-destination-tile 132KB / winner-trophy 124KB
+- **扁平な形状のsnack-spawn-marker・warp-destination-tileは、prop-paw-fountainと同様に通常の正面/側面レンダーでは分かりにくいため、`render_top.py`(上方35度からの角度付きレンダー、このセッションで新設)で追加確認**。いずれも意匠(肉球+周回リング/渦巻き模様)がはっきり分かり問題なし
+- **このゲームモード自体はまだアイデア段階で実装未着手**、`docs/board3d.js`への組み込みも未実施。素材のみ準備完了の状態。まだcommit/pushしていない
+
+## current-turn-ring.glb / move-destination-marker.glb / item-pickup-box.glb(おやつ集めモード・操作演出素材のうち3点)
+
+- 2026-08-11、「操作演出素材8種」フォルダのうち、実体のある3D空間内オブジェクトとして意味を持つ3点のみを3Dモデル化。**残り5点(`coin-acquire-effect`・`snack-spawn-effect`・`snack-acquire-trail`・`trap-activate-effect`・`warp-activate-effect`)は、拡大・回転・フェード等で完結する画面演出用の透過エフェクトテクスチャであり、Codexの説明書でも2D UIレイヤー/Sprite・Billboardでの使用が明記されているため、3Dモデル化の対象外と判断し2Dのまま維持**(既存の水面タイル・マップ土台と同じ考え方)
+- 参考イラスト: `アニマルライフ_おやつ集めモード_操作演出素材8種_2026-08-11`(既存納品分)
+- 生成: 同じ簡易パイプライン(`ai_model: meshy-5`、単一画像、`enable_pbr: false`、`should_remesh: true`、`topology: triangle`)。`target_polycount`はcurrent-turn-ring 4,000・move-destination-marker 4,000・item-pickup-box 6,000
+- 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)
+- 最終ファイルサイズ: current-turn-ring 103KB / move-destination-marker 117KB / item-pickup-box 157KB
+- Blender簡易レンダーで3点とも形状確認済み、問題なし
+- **このゲームモード自体はまだアイデア段階で実装未着手**、`docs/board3d.js`への組み込みも未実施。素材のみ準備完了の状態。まだcommit/pushしていない
+
+## paw-coin-single.glb / paw-coin-stack.glb / paw-coin-bag.glb / road-block-barricade.glb / route-choice-signpost.glb / winners-podium.glb(おやつ集めモード・追加実用素材のうち6点)
+
+- 2026-08-11、「追加実用素材7種」フォルダのうち、盤上・リザルト画面に置く実体オブジェクト6点を3Dモデル化。**残り1点(`snack-holder-badge.png`)は、Codexの説明書で「3D上では常にカメラを向くBillboardが適しています」と明記された頭上バッジ用素材のため、3Dモデル化の対象外と判断し2Dのまま維持**
+- 参考イラスト: `アニマルライフ_おやつ集めモード_追加実用素材7種_2026-08-11`(既存納品分)
+- 生成: 同じ簡易パイプライン(`ai_model: meshy-5`、単一画像、`enable_pbr: false`、`should_remesh: true`、`topology: triangle`)。`target_polycount`はpaw-coin-single 3,000・paw-coin-stack 5,000・paw-coin-bag 5,000・road-block-barricade 6,000・route-choice-signpost 6,000・winners-podium 8,000
+- 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)
+- 最終ファイルサイズ: paw-coin-single 120KB / paw-coin-stack 156KB / paw-coin-bag 188KB / road-block-barricade 140KB / route-choice-signpost 142KB / winners-podium 133KB
+- Blender簡易レンダーで6点とも形状確認済み、問題なし
+- **このゲームモード自体はまだアイデア段階で実装未着手**、`docs/board3d.js`への組み込みも未実施。素材のみ準備完了の状態。まだcommit/pushしていない
+
+## おやつ集めモード: 3D化しなかった素材(2D平面のまま使用、2026-08-11確定)
+
+上記27点の3Dモデル化により、「おやつ集めモード」向けに納品された素材のうち、3D空間内で実体を持つオブジェクトはすべて3Dモデル化が完了した。以下は構造上3D化に向かない(または3D化する意味がない)素材として、意図的に2Dのまま据え置く:
+
+- `terrain-water-tile.png`(水面、繰り返し敷き詰めるシームレステクスチャ)
+- `terrain-island-edge.png`(マップ外周の土台、マップ外形に合わせて伸縮させる断面パーツ)
+- `coin-acquire-effect.png` / `snack-spawn-effect.png` / `snack-acquire-trail.png` / `trap-activate-effect.png` / `warp-activate-effect.png`(拡大・回転・フェード等の画面演出で完結する透過エフェクトテクスチャ、操作演出素材8種のうち5点)
+- `snack-holder-badge.png`(常にカメラを向くBillboard用の頭上バッジ)
+
+いずれもPlane/Sprite/Billboardとしてそのまま平面表示する前提の素材であり、3Dメッシュ化しても実用上の意味を持たない。
+
+## docs/images/snack/*.png(おやつ集めモード・ポップアップ式UI刷新の2D素材12点)
+
+- 2026-08-12、おやつ集めモードのUI・演出を「下部固定メニューバー」から「全画面3D+ポップアップ式」へ全面刷新する確定仕様書(Codex連携チャット作成)に伴い受け取った2D UI素材。3D空間内の実体オブジェクトではなくHTML/CSS側で重ねて使う画像のため、他の`.glb`素材とは異なり3Dモデル化の対象外
+- 参考イラスト/納品元: `C:\Users\飯田\Documents\Codex\2026-08-09\codex-01-2026-08-09-md\output\アニマルライフ_ターン行動ポップアップUI_2026-08-12\`(11点: `action-dice`/`action-item`/`action-log`/`action-map`/`action-next`のアイコン5種、`popup-choice-frame`/`popup-choice-button`/`popup-result-frame`のポップアップ枠3種、`map-overview`/`map-zoom`/`map-pan-hint`のマップ確認UI3種)と`...アニマルライフ_プレイヤー情報HUD_2026-08-12\`(1点: `player-status-hud.png`、4隅HUDの背景)
+- 軽量化: Python PIL(`Image.open(...).convert("RGBA").resize(...)`)でモバイル配信用に縮小(アイコン系は320px、フレーム系は800〜900px、いずれも最大辺基準)。納品時点の合計約11.6MBから約1.9MBまで削減(既存の`sky-backdrop.jpg`等と同じ軽量化方針を踏襲)
+- 配置先: `docs/images/snack/`(`docs/images/items/`と同じ`docs/images/<用途別サブフォルダ>/`命名規則)
+- 組み込み: `docs/ui.js`の`SNACK_ACTION_ICONS`(行動アイコン)、`renderSnackPopupChoice`/`renderSnackPopupResult`(border-image 9-sliceでポップアップ枠に使用)、`renderSnackHUD`(4隅HUD背景)、`renderSnackMapViewOverlay`(マップ全体/ズーム切替ボタン・初回パンヒント)から参照。プレイヤー交代テロップ(`PLAYER_INTRO`)・ラウンド切替テロップ(`ROUND_INTRO`)専用の枠素材は未納品のため、`popup-result-frame.png`を暫定枠として再利用している(仕様書内で指示された対応)

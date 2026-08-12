@@ -70,6 +70,18 @@ const SNACK_ITEMS = [
 ];
 const SNACK_ITEM_SLOT_LIMIT = 3;
 
+// P1〜P4固定色(座席番号ベース、行動順が変わっても不変。素材説明書のカラーコードそのまま)
+const SNACK_PLAYER_COLORS = [
+  { seatNumber: 1, label: "P1", main: "#2F80ED", dark: "#1557A0", mark: "🐾" },
+  { seatNumber: 2, label: "P2", main: "#EB5757", dark: "#9B2C2C", mark: "⭐" },
+  { seatNumber: 3, label: "P3", main: "#9B51E0", dark: "#63319A", mark: "🍃" },
+  { seatNumber: 4, label: "P4", main: "#27AE60", dark: "#176B3B", mark: "🌸" },
+];
+
+function snackPlayerColor(seatNumber) {
+  return SNACK_PLAYER_COLORS[(seatNumber - 1 + SNACK_PLAYER_COLORS.length) % SNACK_PLAYER_COLORS.length];
+}
+
 // ==================== ノードグラフ(外周48+内周16=64ノード) ====================
 // Codex連携チャットが試作着手前に用意していたマップ見本(map-stage1-animal-town-ring-park.png)・
 // 引き継ぎ書(ClaudeCode向け_マップ制作引き継ぎ.md)に沿って、外周48+内周16ノード・
