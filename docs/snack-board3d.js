@@ -882,17 +882,23 @@ function hopToNode(entry, fromPos, toPos, toNodeId, durationMs) {
 // snack-engine.jsの移動結果に含まれるpath(通過したノードIdの配列)を1マスずつ順番に
 // ホップさせる(本編board3d.jsのhopStepsと同じ考え方、2026-08-12追加)。
 // pathが空(分岐選択のみ等で移動が発生しなかった手番)なら何もしない。
-async function hopPath(playerId, pathNodeIds) {
+// options.stepDurationMs: 演出速度設定(標準/はやい/最速)に応じた1マスあたりの所要時間。
+// options.onStep(stepsDone, total): 1マス着地するたびに呼ばれる(残り歩数表示の更新用)。
+async function hopPath(playerId, pathNodeIds, options) {
   const entry = characters.get(playerId);
   if (!entry || !pathNodeIds || !pathNodeIds.length) return;
+  const opts = options || {};
+  const stepDurationMs = opts.stepDurationMs || HOP_STEP_DURATION_MS;
   const isFocus = playerId === focusPlayerId;
   if (isFocus) isMoving = true;
   let fromPos = nodePositions.get(entry.currentNodeId) || entry.group.position.clone();
-  for (const nodeId of pathNodeIds) {
+  for (let i = 0; i < pathNodeIds.length; i++) {
+    const nodeId = pathNodeIds[i];
     const toPos = nodePositions.get(nodeId);
     if (!toPos) break;
-    await hopToNode(entry, fromPos, toPos, nodeId, HOP_STEP_DURATION_MS);
+    await hopToNode(entry, fromPos, toPos, nodeId, stepDurationMs);
     fromPos = toPos;
+    if (opts.onStep) opts.onStep(i + 1, pathNodeIds.length);
   }
   if (isFocus) isMoving = false;
 }
@@ -1287,7 +1293,8 @@ function setDiceFaceValue(mesh, value) {
 // snack-engine.jsは移動を同期的に一括処理するため出目(value)は既に確定済みの値を渡す
 // (この演出はあくまで見た目で、ゲームロジックの結果には影響しない)。戻り値のPromiseは
 // 演出(回転+着地+一瞬の静止)が完了したタイミングでresolveする。
-function playDiceRoll(playerId, value) {
+// speedScale: 演出速度設定に応じた倍率(1=標準、大きいほど速く見える)。
+function playDiceRoll(playerId, value, speedScale) {
   return new Promise((resolve) => {
     const entry = characters.get(playerId);
     if (!entry || !scene) {
@@ -1299,7 +1306,7 @@ function playDiceRoll(playerId, value) {
     setDiceFaceValue(mesh, value);
     mesh.visible = true;
     mesh.rotation.set(0, 0, 0);
-    diceAnim = { playerId, mesh, startTime: performance.now(), settled: false, resolve };
+    diceAnim = { playerId, mesh, startTime: performance.now(), settled: false, resolve, speedScale: speedScale || 1 };
   });
 }
 
@@ -1320,7 +1327,7 @@ function updateDiceAnim(now) {
   }
   const mesh = diceAnim.mesh;
   const pos = entry.group.position;
-  const elapsed = now - diceAnim.startTime;
+  const elapsed = (now - diceAnim.startTime) * (diceAnim.speedScale || 1);
   if (elapsed < DICE_SPIN_DURATION_MS) {
     const t = elapsed / DICE_SPIN_DURATION_MS;
     mesh.position.set(pos.x, DICE_HEAD_HEIGHT + Math.sin(t * Math.PI * 3) * 0.18 + 0.15, pos.z);

@@ -457,6 +457,40 @@ body {
   font-size: 0.85rem;
 }
 
+.snack-speed-selector {
+  margin: 4px 0 8px;
+}
+
+.snack-speed-label {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.snack-speed-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.snack-speed-btn {
+  flex: 1;
+  border: 2px solid #e0dccf;
+  background: #fff;
+  border-radius: 10px;
+  padding: 8px 4px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.snack-speed-btn-active {
+  border-color: var(--brand);
+  background: #eaf6f1;
+  color: var(--brand);
+}
+
 /* マスに止まった際の「テロップ」演出。木製フレーム画像(telop-frame.png)を背景にし、
    タイトル・説明文を中央に重ねる。フレーム自体が余白込みの正方形画像のため、
    contentBoxを広めのpaddingで囲んでフレームの縁と文字が重ならないようにする。 */
@@ -993,6 +1027,23 @@ body {
   font-weight: 700;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
   white-space: nowrap;
+}
+
+.snack-remaining-steps {
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 12;
+  background: rgba(46, 125, 107, 0.92);
+  color: #fff;
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 /* ---- ポップアップ共通(popup-choice-frame.png / popup-result-frame.png、9-slice表示) ---- */

@@ -5,16 +5,46 @@ const ONLINE_ROOM_KEY = "liferoad_online_room_v1";
 const SNACK_SAVE_KEY = "liferoad_snack_save_v1";
 const HEARTBEAT_INTERVAL_MS = 15000;
 const HOP_STEP_MS = 420; // マス移動アニメーション、1マスあたりの所要時間
+// snack-board3d.jsのHOP_STEP_DURATION_MSと同じ値(標準速度時の1マスあたりの所要時間)。
+// ESモジュール側のprivate定数を直接参照できないため値を複製している(既存の
+// SPECIES_MODEL_MAP等と同じ、このコードベース既存のパターン)。
+const SNACK_HOP_STEP_MS = 260;
 const CPU_PRE_ROLL_MS = 1100; // CPUがルーレットを回す前の「間」
 const CPU_PRE_CHOICE_MS = 1500; // CPUが選択肢を考える「間」
 const CPU_REVEAL_MS = 2200; // CPUの結果カード(テロップ)を見せておく時間
 const TURN_POPUP_MS = 1500; // 手番切り替えポップアップの表示時間
 const MONEY_TOAST_MS = 2600; // 所持金変動トーストの表示時間
 
+// おやつ集めモードの演出速度設定(標準/はやい/最速)。localStorageにフラグを保存するだけの
+// 簡易実装(既存のaudio.jsの音量設定と同じ保存パターンを踏襲)。snackDelayによる待機時間・
+// 1マスごとの移動時間・サイコロ演出の長さをまとめて倍率で縮める。
+const SNACK_SPEED_KEY = "liferoad_snack_speed_v1";
+const SNACK_SPEED_SCALES = { standard: 1, fast: 1.8, fastest: 3 };
+const SNACK_SPEED_LABELS = { standard: "標準", fast: "はやい", fastest: "最速" };
+let snackSpeedScale = 1; // snackDelay()・サイコロ演出のスケール(1=標準、大きいほど速い)
+
+function loadSnackSpeedSetting() {
+  try {
+    const raw = localStorage.getItem(SNACK_SPEED_KEY);
+    return raw && SNACK_SPEED_SCALES[raw] ? raw : "standard";
+  } catch (e) {
+    return "standard";
+  }
+}
+
+function saveSnackSpeedSetting(speed) {
+  try {
+    localStorage.setItem(SNACK_SPEED_KEY, speed);
+  } catch (e) {
+    // 保存できなくても致命的ではないので無視
+  }
+}
+
 // おやつ集めモードの演出パイプライン(行動順決めサイコロ・ラウンド/ターンテロップ等)で使う
 // Promiseベースの待機ヘルパー。setTimeoutをawaitできる形にするだけの小さなユーティリティ。
+// snackSpeedScaleで割ることで、演出速度設定(はやい/最速)を全ての待機箇所へ一括反映する。
 function snackDelay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms / snackSpeedScale));
 }
 
 // 3D種選択(speciesId)の実装より前に保存されたセーブ・オンライン部屋データにはavatarに
@@ -1360,6 +1390,7 @@ const App = {
       });
     }
     this.snackHumanId = "human";
+    snackSpeedScale = SNACK_SPEED_SCALES[loadSnackSpeedSetting()];
     this.snack = this.createSnackUiState(createSnackState(configs), [{ type: "info", text: "おやつ集めモード開始！" }]);
     this.snack.phase = "MAP_INTRO";
     this.screen = "snack-game";
@@ -1375,6 +1406,7 @@ const App = {
       return;
     }
     this.snackHumanId = saved.humanId;
+    snackSpeedScale = SNACK_SPEED_SCALES[loadSnackSpeedSetting()];
     this.snack = this.createSnackUiState(saved.state, saved.log);
     this.screen = "snack-game";
     this.snack.phase = this.computeResumeSnackPhase();
@@ -1402,7 +1434,18 @@ const App = {
       playerIntro: null,
       roundIntro: null,
       pendingItemId: null,
+      speed: loadSnackSpeedSetting(),
+      remainingSteps: null, // MOVING中のみ数値({playerId, total, done})、それ以外はnull
     };
+  },
+
+  // 演出速度設定(標準/はやい/最速)を変更する。ポーズメニューから呼ばれる。
+  setSnackSpeed(speed) {
+    if (!SNACK_SPEED_SCALES[speed] || !this.snack) return;
+    this.snack.speed = speed;
+    snackSpeedScale = SNACK_SPEED_SCALES[speed];
+    saveSnackSpeedSetting(speed);
+    this.render();
   },
 
   // 演出中(MAP_INTRO/ORDER_ROLL系/ROLLING/MOVING等)にリロードされた場合でも、
@@ -1611,7 +1654,7 @@ const App = {
     const finalRoll = rollSnackDice();
     LifeRoadAudio.playSe("diceRoll");
     this.loadSnackBoard3DModules()
-      .then(() => window.LifeRoadSnackBoard3D.playDiceRoll(playerId, finalRoll))
+      .then(() => window.LifeRoadSnackBoard3D.playDiceRoll(playerId, finalRoll, snackSpeedScale))
       .catch((err) => {
         console.error("おやつ集めモード: サイコロ演出の読み込みに失敗", err);
       })
@@ -1622,10 +1665,22 @@ const App = {
 
   // snack-engine.jsの移動結果に含まれるpath(通過ノードIdの配列)を、3D側で1マスずつ
   // 逐次ホップさせる。3D未マウント時(理論上は起きない想定だが念のため)は何もせず戻る。
+  // 演出速度設定に応じて1マスあたりの所要時間を短縮し、着地のたびに残り歩数表示を更新する
+  // (仕様書14章「1マスずつの移動」の残り歩数表示・速度切替に対応)。
   async playSnackMovementHop(playerId, path) {
     if (!path || !path.length) return;
     if (!this.snackBoard3dMounted || !window.LifeRoadSnackBoard3D) return;
-    await window.LifeRoadSnackBoard3D.hopPath(playerId, path);
+    this.snack.remainingSteps = { playerId, total: path.length, done: 0 };
+    this.render();
+    await window.LifeRoadSnackBoard3D.hopPath(playerId, path, {
+      stepDurationMs: SNACK_HOP_STEP_MS / snackSpeedScale,
+      onStep: (done, total) => {
+        if (!this.snack) return;
+        this.snack.remainingSteps = { playerId, total, done };
+        this.render();
+      },
+    });
+    if (this.snack) this.snack.remainingSteps = null;
   },
 
   async commitSnackRoll(roll) {

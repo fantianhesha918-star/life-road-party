@@ -713,20 +713,44 @@ function renderMoneyToasts(toasts) {
 
 // ヘッダーの中断ボタンから開く「メニューに戻りますか？」確認モーダル。soloは自動保存される旨、
 // onlineは自分だけ退室し他プレイヤーの対戦は続く旨を、それぞれ違う文言で伝える。
-function renderPauseMenuModal(mode) {
+// snackSpeed: mode==="snack"のときだけ使う現在の演出速度設定("standard"/"fast"/"fastest")。
+function renderPauseMenuModal(mode, snackSpeed) {
   const desc = mode === "online"
     ? "ルームから退室します。他のプレイヤーの対戦はそのまま続きます。"
     : mode === "snack"
       ? "進行状況を保存してタイトルに戻ります。続きは「おやつ集めモードの続きから」で再開できます。"
       : "進行状況を保存してタイトルに戻ります。続きは「続きから再開する」で再開できます。";
+  const speedSection = mode === "snack" ? renderSnackSpeedSelector(snackSpeed) : "";
   return `
     <div class="modal-backdrop pause-menu-modal">
       <div class="modal">
         <h3>メニューに戻りますか？</h3>
         <p class="lead">${desc}</p>
+        ${speedSection}
         <button class="btn btn-primary" onclick="App.confirmPauseToTitle()">タイトルに戻る</button>
         <button class="btn" onclick="App.togglePauseMenu()">プレイに戻る</button>
       </div>
+    </div>
+  `;
+}
+
+// おやつ集めモードの演出速度設定(標準/はやい/最速)。ポーズメニュー内の3択ボタン。
+function renderSnackSpeedSelector(current) {
+  const options = [
+    { id: "standard", label: "標準" },
+    { id: "fast", label: "はやい" },
+    { id: "fastest", label: "最速" },
+  ];
+  const buttons = options
+    .map(
+      (o) =>
+        `<button class="snack-speed-btn${o.id === current ? " snack-speed-btn-active" : ""}" onclick="App.setSnackSpeed('${o.id}')">${o.label}</button>`
+    )
+    .join("");
+  return `
+    <div class="snack-speed-selector">
+      <p class="snack-speed-label">演出速度</p>
+      <div class="snack-speed-buttons">${buttons}</div>
     </div>
   `;
 }
@@ -1322,11 +1346,22 @@ function renderSnackGameScreen(snack, humanId, pauseMenuOpen) {
   return `
     <section class="screen screen-game screen-snack-game">
       ${renderSnackHUD(state, humanId)}
+      ${renderSnackRemainingSteps(snack)}
       ${popupHtml}
       ${snack.logOpen ? renderSnackLogModal(snack.log) : ""}
-      ${pauseMenuOpen ? renderPauseMenuModal("snack") : ""}
+      ${pauseMenuOpen ? renderPauseMenuModal("snack", snack.speed) : ""}
     </section>
   `;
+}
+
+// 移動演出中(MOVING、人間・CPUどちらの手番でも)、画面上部へ残り歩数を表示する
+// (仕様書14章「1マスずつの移動」)。this.snack.remainingStepsが立っている間だけ表示する。
+function renderSnackRemainingSteps(snack) {
+  const rs = snack.remainingSteps;
+  if (!rs) return "";
+  const left = Math.max(0, rs.total - rs.done);
+  if (left <= 0) return "";
+  return `<div class="snack-remaining-steps">残り${left}歩</div>`;
 }
 
 function renderSnackResultScreen(state, humanId) {
