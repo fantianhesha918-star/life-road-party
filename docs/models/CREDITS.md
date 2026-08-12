@@ -261,3 +261,10 @@
 - 軽量化: Python PIL(`Image.open(...).convert("RGBA").resize(...)`)でモバイル配信用に縮小(アイコン系は320px、フレーム系は800〜900px、いずれも最大辺基準)。納品時点の合計約11.6MBから約1.9MBまで削減(既存の`sky-backdrop.jpg`等と同じ軽量化方針を踏襲)
 - 配置先: `docs/images/snack/`(`docs/images/items/`と同じ`docs/images/<用途別サブフォルダ>/`命名規則)
 - 組み込み: `docs/ui.js`の`SNACK_ACTION_ICONS`(行動アイコン)、`renderSnackPopupChoice`/`renderSnackPopupResult`(border-image 9-sliceでポップアップ枠に使用)、`renderSnackHUD`(4隅HUD背景)、`renderSnackMapViewOverlay`(マップ全体/ズーム切替ボタン・初回パンヒント)から参照。プレイヤー交代テロップ(`PLAYER_INTRO`)・ラウンド切替テロップ(`ROUND_INTRO`)専用の枠素材は未納品のため、`popup-result-frame.png`を暫定枠として再利用している(仕様書内で指示された対応)
+
+## docs/images/snack-spaces/*.png(おやつ集めモード・通常マス2.5D素材16点)
+
+- 2026-08-13、上記UI統合納品フォルダに同梱されていた「通常マス2.5D実装仕様書」により正式採用。個別3Dモデル化ではなく、全マス共通のクリーム色シリンダー土台(Three.jsのプリミティブで生成、GLB無し)+種類別の透過PNGを貼ったカメラ追従インポスターの組み合わせで16種類を表現する2.5D方式
+- 納品元: `C:\Users\飯田\Documents\Codex\2026-08-09\codex-01-2026-08-09-md\output\アニマルライフ_おやつ集めモード_UI演出統合納品_2026-08-12\06_通常マス2.5D\runtime\`(16枚、512×512、RGBA、同一余白・中央揃えへ正規化済み)。同梱の`space-visual-manifest.json`のSHA-256でコピー後に整合性確認済み(全16件一致)、リサイズ・トリミング等の加工は仕様書の指示により一切行っていない
+- 配置先: `docs/images/snack-spaces/`
+- 組み込み: `docs/snack-board3d.js`の`SPACE_VISUAL_MAP`(`branch→junction`・`item-box→item`・`start→normal`のマッピング含む、現行`snack-data.js`のnodeTypeのうち実際に使う12種のみ対応、残り5種`event`/`paidGate`/`warp`/`family`/`investment`は未使用の予備枠)経由で`buildSpaceGroups()`が読み込み、旧`loadSnackMasuBaseInstances`(masu-base.glbクローン+マテリアル色分けのみ)を置き換えた
