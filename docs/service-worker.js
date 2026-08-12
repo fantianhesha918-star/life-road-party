@@ -1,4 +1,4 @@
-const CACHE_NAME = "liferoad-cache-v4";
+const CACHE_NAME = "liferoad-cache-v5";
 const ASSETS = [
   "./",
   "./index.html",
@@ -13,6 +13,7 @@ const ASSETS = [
   "./manifest.json",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
+  "./icons/icon-180.png",
 ];
 
 self.addEventListener("install", (event) => {
