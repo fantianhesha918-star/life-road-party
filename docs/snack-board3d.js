@@ -939,6 +939,9 @@ function focusCamera(playerId) {
 
 // マップ全体を収める固定俯瞰の目標位置を計算する。zoomLevelが大きいほど寄る
 // (1=全体表示相当、最大3倍)。panX/panZはズーム時のドラッグパン量(ワールド座標オフセット)。
+// 見下ろし俯角は08_全体マップ再現指針の「42〜52度」を目安に、中間の48度付近
+// (atan(0.67/0.6)≈48.2度)へ調整した(2026-08-13、旧値0.85は約54.8度でやや急すぎた)。
+// 64ノードのノード数・構造自体はこの調整では変更しない。
 function overviewCameraTarget(zoomLevel, panX, panZ) {
   const b = mapBounds || computeMapBounds();
   const baseDist = Math.max(b.halfX, b.halfZ) * 1.6 + 6;
@@ -946,7 +949,7 @@ function overviewCameraTarget(zoomLevel, panX, panZ) {
   const cx = b.centerX + panX;
   const cz = b.centerZ + panZ;
   return {
-    pos: new THREE.Vector3(cx, dist * 0.85, cz + dist * 0.6),
+    pos: new THREE.Vector3(cx, dist * 0.67, cz + dist * 0.6),
     lookAt: new THREE.Vector3(cx, 0, cz),
   };
 }
