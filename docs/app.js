@@ -60,13 +60,19 @@ const SNACK_SFX_EVENTS = {
   rankDown: { freq: 392, ms: 140, vibrate: 25 },
   resultReveal: { freq: 700, ms: 220, vibrate: 25 },
   winner: { freq: 1046, ms: 320, vibrate: [80, 40, 120] },
+  // ガブリオンイベント(05_ガブリオンイベント確定仕様書「音と画面効果」)。専用の音源は無いため
+  // 引き続きWeb Audio仮音を使うが、振動パターンだけは仕様書の数値をそのまま採用する。
+  gaburionEntrance: { freq: 220, ms: 260, vibrate: [40, 40] },
+  gaburionSpin: { freq: 500, ms: 90, vibrate: null },
+  gaburionBad: { freq: 260, ms: 260, vibrate: 60 },
+  gaburionRescue: { freq: 900, ms: 260, vibrate: [30, 40] },
 };
 
 function snackSfx(eventId) {
   const ev = SNACK_SFX_EVENTS[eventId];
   if (!ev || !window.LifeRoadAudio) return;
   window.LifeRoadAudio.playTone(ev.freq, ev.ms);
-  window.LifeRoadAudio.vibrate(ev.vibrate);
+  if (ev.vibrate) window.LifeRoadAudio.vibrate(ev.vibrate);
 }
 
 // entries内のtype:"money"/"snack"を見て対応する効果音を鳴らす。1アクションで複数の
@@ -78,6 +84,38 @@ function playSnackEntrySfx(entries) {
     snackSfx("snackGet");
   } else if (moneyEntry) {
     snackSfx(moneyEntry.delta > 0 ? "coinGain" : "coinSpend");
+  }
+}
+
+// 古いセーブ(ガブリオン機能追加より前)にも空のガブリオン関連フィールドを補う
+// (仕様書「古いセーブにはactivated:falseと空配列を補完する」)。
+function migrateSnackSaveState(state) {
+  if (!state.gaburion) {
+    state.gaburion = { eventId: null, actorId: null, phase: null, resultId: null, targetPlayerId: null, resolved: true, cursedDiePlayerIds: [] };
+  }
+  if (!state.finalThree) {
+    state.finalThree = { activated: false, activatedRound: null, seed: null, transformedSpaces: [] };
+  }
+  if (state.pendingGaburion === undefined) state.pendingGaburion = null;
+  return state;
+}
+
+// SNACK_STAGE_NODESはページ内で使い回す共有配列だが、ページ再読み込みでモジュールが
+// 再評価されるとノード側の実行時変更(橋の開閉・ガブリオンの盤面変化)は失われる。
+// セーブ再開時、保存されているstate側の情報からノードの状態を作り直す(罠(activeTrap)は
+// セーブ対象外の既存設計のため対象外のまま)。第8ラウンド以降なのに変化がまだ未適用という
+// タイミングでセーブされていた場合は、演出無しで即座に適用して状態の正しさを優先する。
+function reapplySnackNodeMutations(state) {
+  applySnackGimmickForRound(state);
+  if (state.finalThree.activated) {
+    state.finalThree.transformedSpaces.forEach((change) => {
+      const node = findSnackNode(change.spaceId);
+      if (!node) return;
+      if (change.afterType === "gaburion") node.gaburion = true;
+      else node.nodeType = change.afterType;
+    });
+  } else if (state.round >= state.totalRounds - SNACK_FINAL_SPRINT_ROUND_OFFSET) {
+    applySnackFinalThreeTransform(state);
   }
 }
 
@@ -1441,7 +1479,9 @@ const App = {
     }
     this.snackHumanId = saved.humanId;
     snackSpeedScale = SNACK_SPEED_SCALES[loadSnackSpeedSetting()];
-    this.snack = this.createSnackUiState(saved.state, saved.log);
+    const migratedState = migrateSnackSaveState(saved.state);
+    reapplySnackNodeMutations(migratedState);
+    this.snack = this.createSnackUiState(migratedState, saved.log);
     this.screen = "snack-game";
     this.snack.phase = this.computeResumeSnackPhase();
     this.render();
@@ -1449,6 +1489,8 @@ const App = {
       this.startSnackOrderRoll();
     } else if (this.snack.phase === "CPU_TURN") {
       this.maybeRunSnackCPUTurn();
+    } else if (this.snack.phase === "GABURION_INTRO") {
+      this.beginSnackGaburionSequence(currentSnackPlayer(this.snack.state));
     }
   },
 
@@ -1475,6 +1517,8 @@ const App = {
       resultReveal: null, // 最終結果画面のみ{stage}。finishSnackGame()で作られる
       prevRankById: null, // 直前の順位スナップショット(Map<playerId, rankIndex>)。セーブ非対象の演出用一時状態
       rankChangeFx: null, // 直近の順位変動({changes:[...], id})。一定時間後にnullへ戻る
+      finalThreeReveal: null, // FINAL_THREE_TRANSFORM中のみ{changes, index}
+      lastGaburionEntries: null, // GABURION_RESULT/APPLY中のみ、直近の抽選結果entries
     };
   },
 
@@ -1503,6 +1547,9 @@ const App = {
     const state = this.snack.state;
     if (!state.turnOrderDecided) return "ORDER_ROLL";
     const player = currentSnackPlayer(state);
+    if (state.pendingGaburion || (state.gaburion && !state.gaburion.resolved && state.gaburion.actorId)) {
+      return "GABURION_INTRO";
+    }
     if (state.pendingBranch) return player.isCPU ? "CPU_TURN" : "ROUTE_SELECT";
     if (state.pendingSnackChoice) return player.isCPU ? "CPU_TURN" : "SNACK_PURCHASE_CONFIRM";
     if (state.pendingStopChoice) return player.isCPU ? "CPU_TURN" : "STOP_CHOICE";
@@ -1686,7 +1733,18 @@ const App = {
 
   // ==================== ラウンド・ターン切替テロップ ====================
 
+  // 第8ラウンド開始時のみFINAL_THREE_TRANSFORM(仕様書05章6節)を挟んでから、通常の
+  // ラウンド開始テロップ(showSnackRoundIntro)へ進む。
   beginSnackRound() {
+    const state = this.snack.state;
+    if (state.round === state.totalRounds - SNACK_FINAL_SPRINT_ROUND_OFFSET && !state.finalThree.activated) {
+      this.beginSnackFinalThreeSequence();
+      return;
+    }
+    this.showSnackRoundIntro();
+  },
+
+  showSnackRoundIntro() {
     const state = this.snack.state;
     this.snack.roundIntro = {
       round: state.round,
@@ -1705,6 +1763,55 @@ const App = {
     snackDelay(1800).then(() => {
       if (this._snackFlowToken === token) this.beginSnackPlayerIntro();
     });
+  },
+
+  // FINAL_THREE_WARNING→FINAL_THREE_TRANSFORMの一連の演出(仕様書05章6節「演出」)。
+  // 完了後にshowSnackRoundIntro()へ合流し、通常の第8ラウンド開始テロップ(ラストスパート表示)へ続く。
+  beginSnackFinalThreeSequence() {
+    this.snack.phase = "FINAL_THREE_WARNING";
+    this.render();
+    snackSfx("gaburionBad");
+    const token = (this._snackFlowToken = (this._snackFlowToken || 0) + 1);
+    snackDelay(1600).then(() => {
+      if (this._snackFlowToken !== token) return;
+      const changed = applySnackFinalThreeTransform(this.snack.state);
+      this.snack.finalThreeReveal = { changes: changed, index: 0 };
+      this.snack.phase = "FINAL_THREE_TRANSFORM";
+      this.saveSnackGame();
+      this.render();
+      this.advanceSnackFinalThreeReveal();
+    });
+  },
+
+  advanceSnackFinalThreeReveal() {
+    const token = (this._snackFlowToken = (this._snackFlowToken || 0) + 1);
+    const step = () => {
+      if (!this.snack || !this.snack.finalThreeReveal || this._snackFlowToken !== token) return;
+      const reveal = this.snack.finalThreeReveal;
+      if (reveal.index < reveal.changes.length) {
+        reveal.index += 1;
+        this.render();
+        snackDelay(700).then(step);
+      } else {
+        snackDelay(1000).then(() => {
+          if (this._snackFlowToken !== token) return;
+          this.snack.finalThreeReveal = null;
+          this.showSnackRoundIntro();
+        });
+      }
+    };
+    snackDelay(700).then(step);
+  },
+
+  // 「スキップ」タップ時。仕様書「スキップ時も内部更新は一括完了させ、最終状態だけ表示する」に
+  // 従い、まだ適用前なら即座に適用してからラウンド開始テロップへ進む。
+  snackSkipFinalThree() {
+    this._snackFlowToken = (this._snackFlowToken || 0) + 1;
+    const state = this.snack.state;
+    if (!state.finalThree.activated) applySnackFinalThreeTransform(state);
+    this.snack.finalThreeReveal = null;
+    this.saveSnackGame();
+    this.showSnackRoundIntro();
   },
 
   // 中間順位(仕様書14章MID_RESULT)の表示要否とデータを組み立てる。仕様本文の「第5ラウンド終了時」を
@@ -1787,7 +1894,7 @@ const App = {
   // 出目自体はrollSnackDice()で先に確定させ、3D側の演出(playDiceRoll)はあくまで見た目で
   // ロジックには影響しない(オンライン対戦時の通信遅延不公平を避けるための既存方針)。
   runSnackDiceAnimation(playerId, onFinish) {
-    const finalRoll = rollSnackDice();
+    const finalRoll = rollSnackDice(this.snack.state, playerId);
     LifeRoadAudio.playSe("diceRoll");
     this.loadSnackBoard3DModules()
       .then(() => {
@@ -2133,6 +2240,7 @@ const App = {
       return;
     }
     const player = currentSnackPlayer(state);
+    if (state.pendingGaburion) return this.beginSnackGaburionSequence(player);
     if (state.pendingBranch) return this.enterSnackPendingPhase("ROUTE_SELECT", player);
     if (state.pendingSnackChoice) return this.enterSnackPendingPhase("SNACK_PURCHASE_CONFIRM", player);
     if (state.pendingStopChoice) return this.enterSnackPendingPhase("STOP_CHOICE", player);
@@ -2144,6 +2252,109 @@ const App = {
     }
     this.snack.phase = player.turnRolled ? "NEXT_ACTION" : "TURN_MENU";
     this.render();
+  },
+
+  // ==================== ガブリオンイベント(仕様書05_ガブリオンイベント確定仕様書) ====================
+  // GABURION_INTRO→GABURION_ROULETTE_READY→GABURION_ROULETTE_SPIN→GABURION_RESULT→GABURION_APPLY
+  // の順に進む。人間・CPUどちらの手番でも同じ関数群で進行し(仕様書9章「CPUが対象を選ぶ必要はない」
+  // 通り、CPU固有の判断ロジックは無い)、「まわす」ボタンの起点だけがhuman=タップ/CPU=0.7秒後
+  // 自動、という違いになる。
+
+  beginSnackGaburionSequence(player) {
+    const state = this.snack.state;
+    const { nodeId } = state.pendingGaburion;
+    state.pendingGaburion = null;
+    state.gaburion = {
+      eventId: `gab-${Date.now()}-${player.id}`,
+      actorId: player.id,
+      phase: "GABURION_INTRO",
+      resultId: null,
+      targetPlayerId: null,
+      resolved: false,
+      cursedDiePlayerIds: state.gaburion ? state.gaburion.cursedDiePlayerIds : [],
+    };
+    this.snack.phase = "GABURION_INTRO";
+    this.saveSnackGame();
+    this.render();
+    // カメラはおやつ紹介(SNACK_REVEAL)と同じ「マスを周回して見せる」演出を流用する
+    // (専用のカメラワークを新設するほどの差別化が無いための簡略化)。
+    if (this.snackBoard3dMounted && window.LifeRoadSnackBoard3D) {
+      window.LifeRoadSnackBoard3D.enterSnackReveal(nodeId);
+    }
+    snackSfx("gaburionEntrance");
+    const token = (this._snackFlowToken = (this._snackFlowToken || 0) + 1);
+    snackDelay(1500).then(() => {
+      if (this._snackFlowToken !== token) return;
+      if (window.LifeRoadSnackBoard3D) window.LifeRoadSnackBoard3D.exitSnackReveal();
+      state.gaburion.phase = "GABURION_ROULETTE_READY";
+      this.snack.phase = "GABURION_ROULETTE_READY";
+      this.render();
+      if (player.isCPU) {
+        snackDelay(700).then(() => {
+          if (this._snackFlowToken === token) this.snackSpinGaburionRoulette();
+        });
+      }
+    });
+  },
+
+  // 人間は「まわす」ボタン、CPUは0.7秒後に自動でこれを呼ぶ(仕様書4章)。
+  snackSpinGaburionRoulette() {
+    if (this.snack.phase !== "GABURION_ROULETTE_READY") return;
+    const state = this.snack.state;
+    const player = state.players.find((p) => p.id === state.gaburion.actorId);
+    // 結果を先に確定させ、その後で見た目のルーレット回転を見せる(仕様書「結果はRNGで先に
+    // 決め、盤面回転は結果区画に停止角度を合わせる」、既存の行動順決めサイコロと同じ設計)。
+    const resultId = pickGaburionOutcomeId(state, player);
+    state.gaburion.resultId = resultId;
+    state.gaburion.phase = "GABURION_ROULETTE_SPIN";
+    this.snack.phase = "GABURION_ROULETTE_SPIN";
+    this.saveSnackGame();
+    this.render();
+    snackSfx("gaburionSpin");
+    const spinMs = 2600; // 仕様書の2.2〜3.0秒レンジの中間値
+    const token = (this._snackFlowToken = (this._snackFlowToken || 0) + 1);
+    snackDelay(spinMs).then(() => {
+      if (this._snackFlowToken !== token) return;
+      this.enterSnackGaburionResult();
+    });
+  },
+
+  enterSnackGaburionResult() {
+    const state = this.snack.state;
+    const player = state.players.find((p) => p.id === state.gaburion.actorId);
+    const entries = [];
+    const effectInfo = applyGaburionOutcome(state, player, state.gaburion.resultId, entries);
+    state.gaburion.targetPlayerId = effectInfo.targetPlayerId;
+    state.gaburion.resolved = true;
+    state.gaburion.phase = "GABURION_RESULT";
+    this.pushSnackLog(entries);
+    this.snack.lastGaburionEntries = entries;
+    this.snack.phase = "GABURION_RESULT";
+    this.saveSnackGame();
+    const isRescue = state.gaburion.resultId === "BONUS_COINS";
+    snackSfx(isRescue ? "gaburionRescue" : "gaburionBad");
+    this.render();
+    // CPU中も最低1.2秒表示する(仕様書9章)。人間側もテンポを揃えるため同じ最低時間にした。
+    const minMs = 1200;
+    const token = (this._snackFlowToken = (this._snackFlowToken || 0) + 1);
+    snackDelay(minMs).then(() => {
+      if (this._snackFlowToken !== token) return;
+      state.gaburion.phase = "GABURION_APPLY";
+      this.snack.phase = "GABURION_APPLY";
+      this.render();
+      if (player.isCPU) {
+        snackDelay(900).then(() => {
+          if (this._snackFlowToken === token) this.snackFinishGaburion();
+        });
+      }
+    });
+  },
+
+  // 「つぎへ」ボタン(人間)/自動進行(CPU)。通常のターン進行処理へ合流する。
+  snackFinishGaburion() {
+    if (this.snack.phase !== "GABURION_APPLY") return;
+    this.saveSnackGame();
+    this.afterSnackAction();
   },
 
   enterSnackPendingPhase(phase, player) {

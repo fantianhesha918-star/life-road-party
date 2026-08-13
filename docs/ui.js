@@ -902,6 +902,25 @@ const SNACK_ACTION_ICONS = {
   next: "images/snack/action-next.png",
 };
 
+// ガブリオンイベント(05_ガブリオンイベント確定仕様書)の素材パス。
+const SNACK_GABURION_IMAGES = {
+  entrance: "images/snack/gaburion/gaburion-entrance.png",
+  failure: "images/snack/gaburion/gaburion-failure.png",
+  wheel: "images/snack/gaburion/gaburion-wheel.png",
+  finalThreeWarning: "images/snack/gaburion/final-three-warning.png",
+  spaceTransformEffect: "images/snack/gaburion/space-transform-effect.png",
+};
+const SNACK_GABURION_RESULT_ICONS = {
+  COIN_LOSS: "images/snack/gaburion/roulette-coin-loss.png",
+  ALL_PAY: "images/snack/gaburion/roulette-all-pay.png",
+  ITEM_LOSS: "images/snack/gaburion/roulette-item-loss.png",
+  MOVE_BACK: "images/snack/gaburion/roulette-move-back.png",
+  SWAP_POSITION: "images/snack/gaburion/roulette-swap-position.png",
+  SNACK_RELOCATE: "images/snack/gaburion/roulette-snack-relocate.png",
+  CURSED_DIE: "images/snack/gaburion/roulette-cursed-die.png",
+  BONUS_COINS: "images/snack/gaburion/roulette-bonus-coins.png",
+};
+
 function snackColorVars(seatNumber) {
   const c = snackPlayerColor(seatNumber);
   return `--p-color:${c.main};--p-color-dark:${c.dark}`;
@@ -1365,6 +1384,133 @@ function renderSnackCPUTurnOverlay(snack, state) {
   `;
 }
 
+// ==================== ガブリオンイベント ====================
+
+function snackGaburionOutcomeLabel(resultId) {
+  const found = SNACK_GABURION_OUTCOMES.find((o) => o.id === resultId);
+  return found ? found.label : "";
+}
+
+// ルーレット盤面(gaburion-wheel.png)の各区画の中心角度。SNACK_GABURION_OUTCOMES配列の
+// 並び順を、12時位置から時計回りに等間隔で割り当てたものとして扱う(素材側の実際の区画順が
+// これと異なっていても、結果はGABURION_ROULETTE_SPINより前にRNGで確定済みなので見た目の
+// ズレのみに留まりゲームロジックには影響しない)。
+function snackGaburionSegmentAngle(resultId) {
+  const order = SNACK_GABURION_OUTCOMES.map((o) => o.id);
+  const idx = order.indexOf(resultId);
+  return idx >= 0 ? idx * (360 / order.length) : 0;
+}
+
+function renderSnackGaburionWheel(resultId, spinning) {
+  const segAngle = snackGaburionSegmentAngle(resultId);
+  const finalDeg = 5 * 360 - segAngle; // 5周させてから結果区画で止める
+  const styleAttr = spinning
+    ? `style="--gaburion-final-deg: ${finalDeg}deg;"`
+    : `style="transform: rotate(${-segAngle}deg);"`;
+  return `
+    <div class="gaburion-wheel-wrap">
+      <div class="gaburion-wheel-needle"></div>
+      <img class="gaburion-wheel-img${spinning ? " gaburion-wheel-spinning" : ""}" src="${SNACK_GABURION_IMAGES.wheel}" ${styleAttr} alt=""/>
+    </div>
+  `;
+}
+
+function renderSnackGaburionIntro(state) {
+  const player = state.players.find((p) => p.id === state.gaburion.actorId);
+  return `
+    <div class="gaburion-overlay">
+      <div class="gaburion-smoke-puff"></div>
+      <img class="gaburion-entrance-img" src="${SNACK_GABURION_IMAGES.entrance}" alt="ガブリオン"/>
+      <p class="gaburion-title">ガブリオンが あらわれた！</p>
+      <p class="gaburion-sub">${escapeHtml(player.name)}が呼び出してしまった…</p>
+    </div>
+  `;
+}
+
+function renderSnackGaburionRouletteReady(state) {
+  const player = state.players.find((p) => p.id === state.gaburion.actorId);
+  const actionHtml = player.isCPU
+    ? `<p class="gaburion-cpu-wait">${escapeHtml(player.name)}が回そうとしています…</p>`
+    : `<button class="btn btn-primary gaburion-spin-btn" onclick="App.snackSpinGaburionRoulette()">まわす</button>`;
+  return `
+    <div class="gaburion-overlay">
+      ${renderSnackGaburionWheel(null, false)}
+      <p class="gaburion-title">ルーレットで運試し！</p>
+      ${actionHtml}
+    </div>
+  `;
+}
+
+function renderSnackGaburionRouletteSpin(state) {
+  return `
+    <div class="gaburion-overlay">
+      ${renderSnackGaburionWheel(state.gaburion.resultId, true)}
+      <p class="gaburion-title">ルーレット回転中…</p>
+    </div>
+  `;
+}
+
+function renderSnackGaburionResultPanel(snack, state, showNextButton) {
+  const resultId = state.gaburion.resultId;
+  const player = state.players.find((p) => p.id === state.gaburion.actorId);
+  const target = state.gaburion.targetPlayerId ? state.players.find((p) => p.id === state.gaburion.targetPlayerId) : null;
+  const icon = SNACK_GABURION_RESULT_ICONS[resultId] || SNACK_GABURION_IMAGES.failure;
+  const lines = (snack.lastGaburionEntries || []).map((e) => `<li>${escapeHtml(e.text)}</li>`).join("");
+  const nextBtn = showNextButton
+    ? player.isCPU
+      ? ""
+      : `<button class="btn btn-primary" onclick="App.snackFinishGaburion()">つぎへ</button>`
+    : "";
+  // 悪い結果の初回表示(GABURION_RESULT)にだけ画面揺れを付ける(仕様書「被害結果」演出、
+  // つぎへ待ちのGABURION_APPLYまで揺らし続けると煩わしいため最初の一回に限定)。
+  const isBad = resultId !== "BONUS_COINS";
+  const shakeClass = isBad && !showNextButton ? " gaburion-shake" : "";
+  return `
+    <div class="gaburion-overlay${shakeClass}">
+      <img class="gaburion-result-icon" src="${icon}" alt=""/>
+      <p class="gaburion-title">${escapeHtml(snackGaburionOutcomeLabel(resultId))}</p>
+      <p class="gaburion-sub">${escapeHtml(player.name)}${target && target.id !== player.id ? ` ↔ ${escapeHtml(target.name)}` : ""}</p>
+      ${lines ? `<ul class="gaburion-result-log">${lines}</ul>` : ""}
+      ${nextBtn}
+    </div>
+  `;
+}
+
+function renderSnackFinalThreeWarning() {
+  return `
+    <div class="gaburion-overlay">
+      <img class="gaburion-entrance-img" src="${SNACK_GABURION_IMAGES.finalThreeWarning}" alt=""/>
+      <p class="gaburion-title">残り3ラウンド！</p>
+      <p class="gaburion-sub">ガブリオンの大あばれ！</p>
+    </div>
+  `;
+}
+
+function renderSnackFinalThreeTransform(state, snack) {
+  const reveal = snack.finalThreeReveal;
+  const changes = reveal ? reveal.changes : [];
+  const shown = changes.slice(0, reveal ? reveal.index : changes.length);
+  const rows = shown
+    .map((c) => {
+      const label = c.afterType === "gaburion" ? "ガブリオンマスに変化！" : "危険なマスに変化！";
+      return `
+        <li class="gaburion-transform-row">
+          <img class="gaburion-transform-effect" src="${SNACK_GABURION_IMAGES.spaceTransformEffect}" alt=""/>
+          <span>${escapeHtml(label)}</span>
+        </li>
+      `;
+    })
+    .join("");
+  const skipBtn = shown.length < changes.length ? `<button class="btn" onclick="App.snackSkipFinalThree()">スキップ</button>` : "";
+  return `
+    <div class="gaburion-overlay">
+      <p class="gaburion-title">盤面が変化しています…</p>
+      <ul class="gaburion-transform-list">${rows}</ul>
+      ${skipBtn}
+    </div>
+  `;
+}
+
 // ==================== 画面全体の組み立て ====================
 
 function renderSnackGameScreen(snack, humanId, pauseMenuOpen) {
@@ -1376,6 +1522,27 @@ function renderSnackGameScreen(snack, humanId, pauseMenuOpen) {
       break;
     case "SNACK_REVEAL":
       popupHtml = renderSnackRevealTelop(snack);
+      break;
+    case "GABURION_INTRO":
+      popupHtml = renderSnackGaburionIntro(state);
+      break;
+    case "GABURION_ROULETTE_READY":
+      popupHtml = renderSnackGaburionRouletteReady(state);
+      break;
+    case "GABURION_ROULETTE_SPIN":
+      popupHtml = renderSnackGaburionRouletteSpin(state);
+      break;
+    case "GABURION_RESULT":
+      popupHtml = renderSnackGaburionResultPanel(snack, state, false);
+      break;
+    case "GABURION_APPLY":
+      popupHtml = renderSnackGaburionResultPanel(snack, state, true);
+      break;
+    case "FINAL_THREE_WARNING":
+      popupHtml = renderSnackFinalThreeWarning();
+      break;
+    case "FINAL_THREE_TRANSFORM":
+      popupHtml = renderSnackFinalThreeTransform(state, snack);
       break;
     case "ORDER_ROLL":
     case "ORDER_TIE_ROLL":

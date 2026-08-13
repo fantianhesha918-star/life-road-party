@@ -1888,3 +1888,181 @@ body {
   height: 100%;
   display: block;
 }
+
+/* ==================== ガブリオンイベント(05_ガブリオンイベント確定仕様書) ==================== */
+
+.gaburion-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 18;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 20px;
+  background: rgba(20, 8, 30, 0.6);
+  text-align: center;
+}
+
+.gaburion-smoke-puff {
+  position: absolute;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(170, 90, 220, 0.9) 0%, rgba(170, 90, 220, 0.4) 45%, rgba(170, 90, 220, 0) 70%);
+  mix-blend-mode: screen;
+  animation: gaburion-smoke-fade 0.9s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes gaburion-smoke-fade {
+  0% { opacity: 0; transform: scale(0.6); }
+  30% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.3); }
+}
+
+.gaburion-entrance-img {
+  width: min(52vw, 220px);
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
+}
+
+.gaburion-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+.gaburion-sub {
+  margin: 0;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.gaburion-cpu-wait {
+  margin: 0;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.gaburion-spin-btn {
+  min-width: 160px;
+}
+
+.gaburion-wheel-wrap {
+  position: relative;
+  width: min(60vw, 240px);
+  height: min(60vw, 240px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gaburion-wheel-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.gaburion-wheel-spinning {
+  animation: gaburion-wheel-spin 2.6s cubic-bezier(0.15, 0.85, 0.25, 1) forwards;
+}
+
+@keyframes gaburion-wheel-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(var(--gaburion-final-deg)); }
+}
+
+.gaburion-wheel-needle {
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-top: 16px solid #fff;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.4));
+  z-index: 1;
+}
+
+.gaburion-result-icon {
+  width: min(40vw, 140px);
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.35));
+}
+
+.gaburion-result-log {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.92);
+  max-width: 320px;
+}
+
+.gaburion-transform-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gaburion-transform-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.gaburion-transform-effect {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  animation: gaburion-transform-pop 0.5s ease-out;
+}
+
+@keyframes gaburion-transform-pop {
+  0% { transform: scale(0.4); opacity: 0; }
+  60% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* 悪い結果の画面揺れ。仕様書「最大6px、0.25秒以内」。 */
+.gaburion-shake {
+  animation: gaburion-screen-shake 0.25s ease-in-out;
+}
+
+@keyframes gaburion-screen-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  75% { transform: translateX(6px); }
+}
+
+/* 仕様書「prefers-reduced-motionでは回転や画面揺れを省き、0.2秒のフェードへ置き換える」 */
+@media (prefers-reduced-motion: reduce) {
+  .gaburion-wheel-spinning {
+    animation: gaburion-wheel-fade 0.2s ease-out forwards;
+  }
+  .gaburion-smoke-puff {
+    animation: none;
+    opacity: 0;
+  }
+  .gaburion-transform-effect {
+    animation: none;
+  }
+  .gaburion-shake {
+    animation: none;
+  }
+}
+
+@keyframes gaburion-wheel-fade {
+  from { opacity: 0.4; }
+  to { opacity: 1; }
+}

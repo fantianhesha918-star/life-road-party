@@ -11,8 +11,17 @@ function currentSnackPlayer(state) {
   return state.players[state.currentTurnIndex];
 }
 
-function rollSnackDice() {
-  return 1 + Math.floor(Math.random() * 6);
+// ガブリオンの「しょんぼりサイコロ」効果(CURSED_DIE)がかかっている場合、出目を1〜3に
+// 制限し、使用後は解除する(仕様書「1回振ると解除」)。state/playerIdを渡さない呼び出し
+// (Node vm回帰テスト等の素の乱数確認用)にも対応できるよう両方省略可能にしてある。
+function rollSnackDice(state, playerId) {
+  const cursedList = state && state.gaburion ? state.gaburion.cursedDiePlayerIds : null;
+  const isCursed = !!(cursedList && playerId && cursedList.includes(playerId));
+  const max = isCursed ? 3 : 6;
+  if (isCursed) {
+    state.gaburion.cursedDiePlayerIds = cursedList.filter((id) => id !== playerId);
+  }
+  return 1 + Math.floor(Math.random() * max);
 }
 
 function pickWeightedSnackOutcome(outcomes) {
@@ -34,6 +43,10 @@ function pickNewSnackLocation(excludeNodeId) {
 function createSnackState(playerConfigs) {
   SNACK_STAGE_NODES.forEach((n) => {
     n.activeTrap = null;
+    // ガブリオン仕様6章FINAL_THREE_TRANSFORMがnodeType/gaburionを書き換えるため、
+    // 新規ゲーム開始のたびに読み込み時点の姿へ戻す。
+    n.nodeType = SNACK_ORIGINAL_NODE_TYPES.get(n.id);
+    n.gaburion = SNACK_GABURION_INITIAL_NODE_IDS.includes(n.id);
   });
   // ステージギミック(橋)も新規ゲーム開始のたびに開いた状態へ戻す(activeTrapと同じ理由:
   // SNACK_STAGE_NODESはモジュールロード時に1回だけ作られる共有配列なので、前回のプレイで
@@ -49,6 +62,11 @@ function createSnackState(playerConfigs) {
     pendingBranch: null, // { playerId, nodeId }
     pendingSnackChoice: null, // { playerId, nodeId }
     pendingStopChoice: null, // { playerId, title, prompt, options }
+    pendingGaburion: null, // { playerId, nodeId }
+    // ガブリオンイベント(05_ガブリオンイベント仕様書8章の保存項目に準拠)。cursedDiePlayerIdsは
+    // 個別イベントをまたいで持続する(次に該当プレイヤーがサイコロを振るまで残る)。
+    gaburion: { eventId: null, actorId: null, phase: null, resultId: null, targetPlayerId: null, resolved: true, cursedDiePlayerIds: [] },
+    finalThree: { activated: false, activatedRound: null, seed: null, transformedSpaces: [] },
     // 行動順決めサイコロ・マップ紹介は新規開始時に1回だけ行う演出。再開時にやり直さないよう
     // stateへ保存する(セーブは{state,log,humanId}を丸ごと保存する既存パターンにそのまま乗る)。
     turnOrderDecided: false,
@@ -125,7 +143,7 @@ function isSnackFinalSprint(state) {
 }
 
 function applySnackFinalSprintBonus(state, baseAmount) {
-  return isSnackFinalSprint(state) ? Math.round(baseAmount * SNACK_FINAL_SPRINT_COIN_MULT) : baseAmount;
+  return isSnackFinalSprint(state) ? Math.ceil(baseAmount * SNACK_FINAL_SPRINT_COIN_MULT) : baseAmount;
 }
 
 // 通過時に発動する効果(就職・給料日)。ショップは見た目のみで通過効果は持たない(v1簡易仕様)。
@@ -190,11 +208,177 @@ function applyNodeStopType(state, node, player, entries) {
 
 // 歩数を使い切ったノードで発生する停止イベントを解決する(おやつ確認はstepOntoNode側で
 // 通過時に既に処理済みのため、ここではそのノード本来のタイプの効果のみを扱う)。
+// ガブリオンマス(仕様書05章)は「止まった時だけ・通常マス効果の代わりに」発生させるため、
+// 他の停止効果より先に判定し、該当すればそちらで処理を打ち切る。
 function resolveStopEvent(state, player, node, entries) {
+  if (node.gaburion) {
+    state.pendingGaburion = { playerId: player.id, nodeId: node.id };
+    return;
+  }
   const choiceEvent = applyNodeStopType(state, node, player, entries);
   if (choiceEvent) {
     state.pendingStopChoice = { playerId: player.id, title: choiceEvent.title, prompt: choiceEvent.prompt, options: choiceEvent.options };
   }
+}
+
+// ==================== ガブリオンイベント ====================
+
+// ノードの「一つ前」を逆引きする(nextNodeIdsは一方通行の有向グラフなので、後退にはこの
+// 逆探索が必要)。ステージギミック(橋)がnextNodeIdsを実行時に書き換えるため、結果は
+// キャッシュせず毎回その場で求める(64ノード程度の走査なので負荷は無視できる)。
+function getSnackPredecessorNodeId(nodeId) {
+  const found = SNACK_STAGE_NODES.find((n) => n.nextNodeIds.includes(nodeId));
+  return found ? found.id : nodeId;
+}
+
+// ガブリオン結果「ちょっと戻って！」。経路を指定歩数だけ逆戻りする。stepOntoNode等の通常の
+// 移動パイプラインを経由しないため、到着先の各種イベント(おやつ確認・停止効果・ガブリオン
+// 再発生)は一切発生しない(仕様書「到着先イベントは発生させない」を自然に満たす)。
+function movePlayerBackForGaburion(player, steps) {
+  let nodeId = player.currentNodeId;
+  for (let i = 0; i < steps; i++) {
+    nodeId = getSnackPredecessorNodeId(nodeId);
+  }
+  player.currentNodeId = nodeId;
+}
+
+// 救済ルール・おやつ再配置候補切れを考慮した上で、抽選対象の候補リストを組み立てる
+// (仕様書05章「救済ルール」)。
+function buildGaburionOutcomePool(state, player) {
+  const ranking = getSnackRanking(state);
+  const isLastPlace = ranking.length > 0 && ranking[ranking.length - 1].id === player.id;
+  const needsRescue = player.matchCoins === 0 && player.snacks === 0 && isLastPlace;
+  let pool = SNACK_GABURION_OUTCOMES.map((o) => ({ id: o.id, weight: o.weight }));
+  if (needsRescue) {
+    const removed = pool.filter((o) => o.id === "COIN_LOSS" || o.id === "ALL_PAY");
+    const bonusWeight = removed.reduce((sum, o) => sum + o.weight, 0);
+    pool = pool.filter((o) => o.id !== "COIN_LOSS" && o.id !== "ALL_PAY");
+    const bonusEntry = pool.find((o) => o.id === "BONUS_COINS");
+    bonusEntry.weight += bonusWeight;
+  }
+  return pool;
+}
+
+function pickGaburionOutcomeId(state, player) {
+  const pool = buildGaburionOutcomePool(state, player);
+  let resultId = pickWeightedSnackOutcome(pool).id;
+  if (resultId === "SNACK_RELOCATE") {
+    const hasCandidate = snackCandidateNodeIds().some((id) => id !== state.activeSnackNodeId);
+    if (!hasCandidate) resultId = "BONUS_COINS"; // 仕様書「候補がない場合はBONUS_COINSへ置換」
+  }
+  return resultId;
+}
+
+// 抽選結果を実際に適用する。戻り値のtargetPlayerIdはセーブ項目gaburion.targetPlayerId用
+// (ALL_PAY/SNACK_RELOCATEのように特定の1人に絞れない結果はnullを返す)。
+function applyGaburionOutcome(state, player, resultId, entries) {
+  switch (resultId) {
+    case "COIN_LOSS": {
+      const amount = Math.min(5, player.matchCoins);
+      player.matchCoins -= amount;
+      entries.push({ type: "money", text: `ガブリオンにコインを${amount}奪われた！`, delta: -amount });
+      return { targetPlayerId: player.id };
+    }
+    case "ALL_PAY": {
+      state.players.forEach((p) => {
+        const amount = Math.min(3, p.matchCoins);
+        if (amount <= 0) return;
+        p.matchCoins -= amount;
+        entries.push({ type: "money", text: `${p.name}が${amount}コイン徴収された`, delta: -amount });
+      });
+      return { targetPlayerId: null };
+    }
+    case "ITEM_LOSS": {
+      if (player.items.length) {
+        const idx = Math.floor(Math.random() * player.items.length);
+        const itemId = player.items[idx];
+        const item = SNACK_ITEMS.find((it) => it.id === itemId);
+        player.items.splice(idx, 1);
+        entries.push({ type: "info", text: `「${item ? item.name : "アイテム"}」を奪われた！` });
+      } else {
+        const amount = Math.min(3, player.matchCoins);
+        player.matchCoins -= amount;
+        entries.push({ type: "money", text: `アイテムが無いのでコインを${amount}奪われた`, delta: -amount });
+      }
+      return { targetPlayerId: player.id };
+    }
+    case "MOVE_BACK": {
+      movePlayerBackForGaburion(player, 3);
+      entries.push({ type: "info", text: "3マス後ろへ戻された！" });
+      return { targetPlayerId: player.id };
+    }
+    case "SWAP_POSITION": {
+      const others = state.players.filter((p) => p.id !== player.id);
+      const other = others[Math.floor(Math.random() * others.length)];
+      const tmpNodeId = player.currentNodeId;
+      player.currentNodeId = other.currentNodeId;
+      other.currentNodeId = tmpNodeId;
+      entries.push({ type: "info", text: `${other.name}と場所を交換した！` });
+      return { targetPlayerId: other.id };
+    }
+    case "SNACK_RELOCATE": {
+      state.activeSnackNodeId = pickNewSnackLocation(state.activeSnackNodeId);
+      entries.push({ type: "info", text: "おやつがお引っ越しした！" });
+      return { targetPlayerId: null };
+    }
+    case "CURSED_DIE": {
+      const isFinalRound = state.round === state.totalRounds;
+      if (isFinalRound) {
+        // 仕様書「最終ラウンドで出た場合は次回へ持ち越さず3コイン獲得へ置換」
+        player.matchCoins += 3;
+        entries.push({ type: "money", text: "最終ラウンドなのでコイン+3に変換された", delta: 3 });
+      } else {
+        if (!state.gaburion.cursedDiePlayerIds.includes(player.id)) {
+          state.gaburion.cursedDiePlayerIds.push(player.id);
+        }
+        entries.push({ type: "info", text: "次のサイコロの出目が1〜3に制限される…" });
+      }
+      return { targetPlayerId: player.id };
+    }
+    case "BONUS_COINS":
+    default: {
+      player.matchCoins += 5;
+      entries.push({ type: "money", text: "ガブリオン大失敗！コインを5もらった", delta: 5 });
+      return { targetPlayerId: player.id };
+    }
+  }
+}
+
+// ==================== FINAL_THREE_TRANSFORM(第8ラウンド開始時の盤面変化) ====================
+
+// 32マス前提の仕様書の分類比率表は64ノードのこの盤面には当てはまらないため、仕様書6章が
+// 用意している逃げ道(「新たにガブリオン2マス、マイナス2マスを増やす」)をそのまま採用し、
+// 変化対象は最大4マスに絞る(ユーザー確認済み、仕様の絶対数をそのまま使う方針)。
+function pickSnackFinalThreeCandidates(nodeTypes, excludeIds, count) {
+  const pool = SNACK_STAGE_NODES.filter((n) => nodeTypes.includes(n.nodeType) && !n.gaburion && !excludeIds.has(n.id));
+  const shuffled = pool.slice().sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, count);
+}
+
+function applySnackFinalThreeTransform(state) {
+  if (state.finalThree.activated) return [];
+  const excludeIds = new Set([SNACK_START_NODE_ID, SNACK_GIMMICK_NODE_ID, state.activeSnackNodeId]);
+  state.players.forEach((p) => excludeIds.add(p.currentNodeId));
+  SNACK_STAGE_NODES.forEach((n) => {
+    if (n.nodeType === "branch" || n.nodeType === "shop") excludeIds.add(n.id);
+  });
+  const toGaburion = pickSnackFinalThreeCandidates(["coin", "income", "payday"], excludeIds, 2);
+  toGaburion.forEach((n) => excludeIds.add(n.id));
+  const toMinus = pickSnackFinalThreeCandidates(["choice", "item-box", "rest"], excludeIds, 2);
+  const changed = [];
+  toGaburion.forEach((n) => {
+    changed.push({ spaceId: n.id, beforeType: n.nodeType, afterType: "gaburion" });
+    n.gaburion = true;
+  });
+  toMinus.forEach((n) => {
+    changed.push({ spaceId: n.id, beforeType: n.nodeType, afterType: "expense" });
+    n.nodeType = "expense";
+  });
+  state.finalThree.activated = true;
+  state.finalThree.activatedRound = state.round;
+  state.finalThree.seed = Math.floor(Math.random() * 1e9);
+  state.finalThree.transformedSpaces = changed;
+  return changed;
 }
 
 // path: 呼び出し元が用意した配列に、通過したノードIdを順番に積んでいく(3D側が1マスずつの
@@ -273,7 +457,15 @@ function accumulateSnackStats(player, entries) {
 }
 
 function wrapUpSnackAction(state, player, entries, path) {
-  const pending = state.pendingBranch ? "branch" : state.pendingSnackChoice ? "snack" : state.pendingStopChoice ? "choice" : null;
+  const pending = state.pendingBranch
+    ? "branch"
+    : state.pendingSnackChoice
+      ? "snack"
+      : state.pendingStopChoice
+        ? "choice"
+        : state.pendingGaburion
+          ? "gaburion"
+          : null;
   const movementDone = !pending && player.remainingSteps === 0;
   if (movementDone) applySnackEncounterIfAny(state, player, entries);
   accumulateSnackStats(player, entries);

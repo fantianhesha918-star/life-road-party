@@ -268,3 +268,11 @@
 - 納品元: `C:\Users\飯田\Documents\Codex\2026-08-09\codex-01-2026-08-09-md\output\アニマルライフ_おやつ集めモード_UI演出統合納品_2026-08-12\06_通常マス2.5D\runtime\`(16枚、512×512、RGBA、同一余白・中央揃えへ正規化済み)。同梱の`space-visual-manifest.json`のSHA-256でコピー後に整合性確認済み(全16件一致)、リサイズ・トリミング等の加工は仕様書の指示により一切行っていない
 - 配置先: `docs/images/snack-spaces/`
 - 組み込み: `docs/snack-board3d.js`の`SPACE_VISUAL_MAP`(`branch→junction`・`item-box→item`・`start→normal`のマッピング含む、現行`snack-data.js`のnodeTypeのうち実際に使う12種のみ対応、残り5種`event`/`paidGate`/`warp`/`family`/`investment`は未使用の予備枠)経由で`buildSpaceGroups()`が読み込み、旧`loadSnackMasuBaseInstances`(masu-base.glbクローン+マテリアル色分けのみ)を置き換えた
+
+## docs/images/snack/gaburion/*.png(おやつ集めモード・ガブリオンイベント素材20点)
+
+- 2026-08-13、上記UI統合納品フォルダに同梱されていた「05_ガブリオンイベント確定仕様書」により正式採用。ガブリオンマスに止まると発生するルーレット形式のミニイベント(仕様書の8種類の結果・救済ルール・第8ラウンド開始時の盤面変化FINAL_THREE_TRANSFORMを含む)の2D UI素材。3D空間内の実体オブジェクトではなく画面全体を覆うオーバーレイ(`.gaburion-overlay`)として使うため3Dモデル化の対象外
+- 納品元: `C:\Users\飯田\Documents\Codex\2026-08-09\codex-01-2026-08-09-md\output\アニマルライフ_おやつ集めモード_UI演出統合納品_2026-08-12\05_ガブリオンイベント\individual\`(20枚、いずれもRGBA透過、300〜700px程度)。同フォルダには一覧用シート・再編集用クロマキー素材も同梱されていたが、仕様書の指示通り`individual`のみを使用
+- 軽量化: 納品時点で既に300〜700px程度とUI用途として十分小さいサイズだったため、追加のリサイズは行っていない(合計約5.4MB)
+- 配置先: `docs/images/snack/gaburion/`
+- 組み込み: `docs/ui.js`の`SNACK_GABURION_IMAGES`/`SNACK_GABURION_RESULT_ICONS`経由で、`GABURION_INTRO`/`GABURION_ROULETTE_READY`/`GABURION_ROULETTE_SPIN`/`GABURION_RESULT`/`GABURION_APPLY`/`FINAL_THREE_WARNING`/`FINAL_THREE_TRANSFORM`の各フェーズ専用render関数から参照。一覧用シート・クロマキー素材(`gaburion-character-sheet.png`等)は取り込んでいない

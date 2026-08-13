@@ -8,10 +8,12 @@ const SNACK_SNACK_PRICE = 20;
 const SNACK_BRANCH_TOLL = 5; // 内周(近道)へ入る際の通行料
 
 // ラストスパート(仕様書14章FINAL_SPRINT)。「残り3ラウンド」からを対象とするので
-// totalRounds(10)からのオフセットは2(=第8ラウンド開始から)。倍率は仕様書に具体数値が
-// 無かったため「少し増やす」の解釈として控えめな1.3倍を採用。
+// totalRounds(10)からのオフセットは2(=第8ラウンド開始から)。倍率は当初14章の「少し増やす」を
+// 1.3倍と仮決めしていたが、後発のガブリオン仕様書6章が同じ第8〜10ラウンドの窓に対して
+// 「仕事・コイン獲得額を1.5倍、端数は切り上げ」という明確な数値を与えたため、二重加算を避け
+// この1.5倍に統一した(2つの別演出が同じ倍率を共有する形)。
 const SNACK_FINAL_SPRINT_ROUND_OFFSET = 2;
-const SNACK_FINAL_SPRINT_COIN_MULT = 1.3;
+const SNACK_FINAL_SPRINT_COIN_MULT = 1.5;
 
 // 職業ランク(A〜E)。人生ゲームモードのJOB_OFFERSとは通貨単位が違う別経済のため専用に用意。
 const SNACK_JOB_RANKS = [
@@ -175,6 +177,7 @@ function buildSnackStageNodes() {
       tollCost: branchPos !== -1 ? SNACK_BRANCH_TOLL : 0,
       snackSpawnCandidate: SNACK_CANDIDATE_OUTER_INDEXES.includes(i),
       trap: false,
+      gaburion: false,
     });
   }
 
@@ -203,6 +206,7 @@ function buildSnackStageNodes() {
       tollCost,
       snackSpawnCandidate: SNACK_CANDIDATE_INNER_INDEXES.includes(i),
       trap: i === 6 || i === 14, // 内周の2箇所を罠を仕掛けやすい危険な近道の位置づけに(元は1箇所を比例拡大)
+      gaburion: false,
     });
   }
 
@@ -216,6 +220,12 @@ function findSnackNode(nodeId) {
   return SNACK_STAGE_NODES.find((n) => n.id === nodeId) || null;
 }
 
+// FINAL_THREE_TRANSFORM(ガブリオン仕様6章)が実行時にnodeType/gaburionを書き換えるため、
+// 新規ゲーム開始のたびに「本来の姿」へ戻せるよう、モジュール読み込み時点(=誰もまだ何も
+// 書き換えていない状態)のnodeTypeをスナップショットしておく(activeTrap/nextNodeIdsと
+// 同じ「実行時ミューテート可能な共有ノード」パターンのためのリセット用データ)。
+const SNACK_ORIGINAL_NODE_TYPES = new Map(SNACK_STAGE_NODES.map((n) => [n.id, n.nodeType]));
+
 // ステージ固有ギミック(仕様書14章、水路の橋)。4箇所ある分岐(SNACK_BRANCH_OUTER_INDEXES)の
 // うち1箇所(outer6=北エリアの近道)を対象に、第6ラウンド開始からは近道側を閉鎖する
 // 「特定ラウンドで一度だけ閉じる橋」として実装(仕様の「開閉」を毎ラウンド反復させると
@@ -228,6 +238,30 @@ const SNACK_GIMMICK_CLOSE_ROUND = 6;
 const SNACK_GIMMICK_ORIGINAL_NEXT_IDS = Object.freeze(
   (findSnackNode(SNACK_GIMMICK_NODE_ID) ? findSnackNode(SNACK_GIMMICK_NODE_ID).nextNodeIds : []).slice()
 );
+
+// ガブリオンイベント(05_ガブリオンイベント確定仕様書)。仕様は「32マス中2箇所」を前提に
+// 数を決めているため、ユーザー確認の上でこの絶対数(初期2箇所・第8ラウンドの変化上限4箇所)を
+// そのまま採用し、64ノードへの比例拡大はしない。既存nodeTypeを上書きしない追加フラグとして
+// node.gaburionを持たせる(activeTrap/snackSpawnCandidateと同じ「上書きしない別フラグ」方式)。
+// 選定基準: スタート・分岐・ショップ・ギミック制御マス・おやつ出現候補マスと重複しない
+// normal種別のノードを、外周上でなるべく離れた2箇所から選んだ。
+const SNACK_GABURION_INITIAL_NODE_IDS = ["outer11", "outer34"];
+
+SNACK_GABURION_INITIAL_NODE_IDS.forEach((id) => {
+  const n = findSnackNode(id);
+  if (n) n.gaburion = true;
+});
+
+const SNACK_GABURION_OUTCOMES = [
+  { id: "COIN_LOSS", label: "コインちょうだい！", weight: 20 },
+  { id: "ALL_PAY", label: "みんなでお支払い！", weight: 12 },
+  { id: "ITEM_LOSS", label: "アイテムいただき！", weight: 10 },
+  { id: "MOVE_BACK", label: "ちょっと戻って！", weight: 12 },
+  { id: "SWAP_POSITION", label: "場所をチェンジ！", weight: 12 },
+  { id: "SNACK_RELOCATE", label: "おやつをお引っ越し！", weight: 10 },
+  { id: "CURSED_DIE", label: "しょんぼりサイコロ", weight: 10 },
+  { id: "BONUS_COINS", label: "ガブリオン大失敗！", weight: 14 },
+];
 
 function snackCandidateNodeIds() {
   return SNACK_STAGE_NODES.filter((n) => n.snackSpawnCandidate).map((n) => n.id);
