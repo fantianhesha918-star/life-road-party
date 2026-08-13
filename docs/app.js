@@ -47,6 +47,39 @@ function snackDelay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms / snackSpeedScale));
 }
 
+// おやつ集めモード専用の効果音・振動(仕様書14章・別紙「効果音・振動仕様」)。
+// 音源ファイルが未納のため、audio.jsに追加したplayTone()でWeb Audio APIの短い仮音を鳴らす。
+// 仕様書のイベントID表(全19件)のうち、既存のフックだけで取りこぼし無く検出できる代表的な
+// 7件に絞った(通過マスの効果音等、専用の検出ポイントが無いものは今回のフェーズでは対象外)。
+const SNACK_SFX_EVENTS = {
+  diceStop: { freq: 660, ms: 120, vibrate: 35 },
+  coinGain: { freq: 880, ms: 90, vibrate: 20 },
+  coinSpend: { freq: 330, ms: 110, vibrate: 20 },
+  snackGet: { freq: 1046, ms: 220, vibrate: 80 },
+  rankUp: { freq: 784, ms: 140, vibrate: 20 },
+  rankDown: { freq: 392, ms: 140, vibrate: 25 },
+  winner: { freq: 1046, ms: 320, vibrate: [80, 40, 120] },
+};
+
+function snackSfx(eventId) {
+  const ev = SNACK_SFX_EVENTS[eventId];
+  if (!ev || !window.LifeRoadAudio) return;
+  window.LifeRoadAudio.playTone(ev.freq, ev.ms);
+  window.LifeRoadAudio.vibrate(ev.vibrate);
+}
+
+// entries内のtype:"money"/"snack"を見て対応する効果音を鳴らす。1アクションで複数の
+// entryが出ることもあるが、演出としてはまとめて1回で十分なため最初の1件だけを採用する。
+function playSnackEntrySfx(entries) {
+  if (!entries || !entries.length) return;
+  const moneyEntry = entries.find((e) => e.type === "money" && typeof e.delta === "number" && e.delta !== 0);
+  if (entries.some((e) => e.type === "snack")) {
+    snackSfx("snackGet");
+  } else if (moneyEntry) {
+    snackSfx(moneyEntry.delta > 0 ? "coinGain" : "coinSpend");
+  }
+}
+
 // 3D種選択(speciesId)の実装より前に保存されたセーブ・オンライン部屋データにはavatarに
 // speciesIdが無い場合がある。無いままだと board3d.js が3Dモデルを一切読み込まず、
 // createCharacterPlaceholder()の色付きカプセル(プレイヤー色そのまま)で止まってしまうため、
@@ -1437,6 +1470,7 @@ const App = {
       speed: loadSnackSpeedSetting(),
       remainingSteps: null, // MOVING中のみ数値({playerId, total, done})、それ以外はnull
       reveal: null, // SNACK_REVEAL中のみ{nodeId, ringLabel, zoneLabel, price}
+      cpuReason: null, // 直近のCPU判断理由(仕様書14章)。CPU_TURNオーバーレイの吹き出しに使う
       prevRankById: null, // 直前の順位スナップショット(Map<playerId, rankIndex>)。セーブ非対象の演出用一時状態
       rankChangeFx: null, // 直近の順位変動({changes:[...], id})。一定時間後にnullへ戻る
     };
@@ -1448,6 +1482,15 @@ const App = {
     this.snack.speed = speed;
     snackSpeedScale = SNACK_SPEED_SCALES[speed];
     saveSnackSpeedSetting(speed);
+    this.render();
+  },
+
+  // 振動オン/オフ設定を変更する。ポーズメニューから呼ばれる(audio.jsの既存設定オブジェクトに
+  // vibrationOnとして相乗り保存する)。
+  setSnackVibration(on) {
+    const settings = LifeRoadAudio.loadAudioSettings();
+    settings.vibrationOn = !!on;
+    LifeRoadAudio.saveAudioSettings(settings);
     this.render();
   },
 
@@ -1697,6 +1740,7 @@ const App = {
 
   beginSnackPlayerIntro() {
     const player = currentSnackPlayer(this.snack.state);
+    this.snack.cpuReason = null; // 手番プレイヤーが変わったら前の吹き出しを残さない
     this.snack.playerIntro = { playerId: player.id };
     this.snack.phase = "PLAYER_INTRO";
     this.render();
@@ -1753,6 +1797,7 @@ const App = {
       })
       .then(() => {
         if (window.LifeRoadSnackBoard3D) window.LifeRoadSnackBoard3D.exitDiceFocus();
+        snackSfx("diceStop");
         onFinish(finalRoll);
       });
   },
@@ -1833,6 +1878,7 @@ const App = {
     this.snack.lastActionActor = { name: player.name, seatNumber: player.seatNumber, isCPU: player.isCPU };
     this.snack.lastActionEntries = entries || [];
     this.snack.phase = "ACTION_RESULT";
+    playSnackEntrySfx(entries);
     this.render();
   },
 
@@ -1840,6 +1886,7 @@ const App = {
   setSnackActionResult(player, entries) {
     this.snack.lastActionActor = { name: player.name, seatNumber: player.seatNumber, isCPU: player.isCPU };
     this.snack.lastActionEntries = entries || [];
+    playSnackEntrySfx(entries);
   },
 
   snackDismissActionResult() {
@@ -1974,8 +2021,9 @@ const App = {
     if (state.pendingBranch) {
       setTimeout(async () => {
         if (!this.snack || !this.snack.state.pendingBranch) return;
-        const choice = window.LifeRoadSnackCPU.cpuChooseSnackBranch(this.snack.state, player);
-        const result = resolveSnackBranch(this.snack.state, choice);
+        const decision = window.LifeRoadSnackCPU.cpuChooseSnackBranch(this.snack.state, player);
+        this.snack.cpuReason = decision.reason;
+        const result = resolveSnackBranch(this.snack.state, decision.choice);
         this.pushSnackLog(result.entries);
         this.setSnackActionResult(player, result.entries);
         this.saveSnackGame();
@@ -2016,8 +2064,11 @@ const App = {
       setTimeout(() => {
         if (!this.snack || this.snack.state.status !== "playing") return;
         if (currentSnackPlayer(this.snack.state).id !== player.id) return;
-        const itemId = window.LifeRoadSnackCPU.cpuDecideItemToUse(this.snack.state, player);
-        if (itemId) useSnackItem(this.snack.state, player.id, itemId);
+        const itemDecision = window.LifeRoadSnackCPU.cpuDecideItemToUse(this.snack.state, player);
+        if (itemDecision.choice) {
+          useSnackItem(this.snack.state, player.id, itemDecision.choice);
+          this.snack.cpuReason = itemDecision.reason;
+        }
         this.runSnackDiceAnimation(player.id, async (roll) => {
           const result = rollSnackAndMove(this.snack.state, roll);
           this.pushSnackLog(result.entries);
@@ -2057,6 +2108,7 @@ const App = {
       });
     });
     if (!changes.length) return;
+    snackSfx(changes.some((c) => c.direction === "crown" || c.direction === "up") ? "rankUp" : "rankDown");
     const fxId = Date.now();
     this.snack.rankChangeFx = { changes, id: fxId };
     setTimeout(() => {
@@ -2109,6 +2161,7 @@ const App = {
   finishSnackGame() {
     this.screen = "snack-result";
     this.clearSnackSave();
+    snackSfx("winner");
     this.render();
   },
 };

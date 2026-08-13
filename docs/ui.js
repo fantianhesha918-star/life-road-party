@@ -721,12 +721,14 @@ function renderPauseMenuModal(mode, snackSpeed) {
       ? "進行状況を保存してタイトルに戻ります。続きは「おやつ集めモードの続きから」で再開できます。"
       : "進行状況を保存してタイトルに戻ります。続きは「続きから再開する」で再開できます。";
   const speedSection = mode === "snack" ? renderSnackSpeedSelector(snackSpeed) : "";
+  const vibrationSection = mode === "snack" ? renderSnackVibrationToggle(LifeRoadAudio.loadAudioSettings().vibrationOn) : "";
   return `
     <div class="modal-backdrop pause-menu-modal">
       <div class="modal">
         <h3>メニューに戻りますか？</h3>
         <p class="lead">${desc}</p>
         ${speedSection}
+        ${vibrationSection}
         <button class="btn btn-primary" onclick="App.confirmPauseToTitle()">タイトルに戻る</button>
         <button class="btn" onclick="App.togglePauseMenu()">プレイに戻る</button>
       </div>
@@ -751,6 +753,20 @@ function renderSnackSpeedSelector(current) {
     <div class="snack-speed-selector">
       <p class="snack-speed-label">演出速度</p>
       <div class="snack-speed-buttons">${buttons}</div>
+    </div>
+  `;
+}
+
+// 振動オン/オフ切り替え(仕様書「振動オフ設定必須」)。Vibration API非対応端末でも
+// 設定自体は保存できる(実際の振動が鳴らないだけで、切り替え操作はエラーにならない)。
+function renderSnackVibrationToggle(vibrationOn) {
+  return `
+    <div class="snack-speed-selector">
+      <p class="snack-speed-label">振動</p>
+      <div class="snack-speed-buttons">
+        <button class="snack-speed-btn${vibrationOn ? " snack-speed-btn-active" : ""}" onclick="App.setSnackVibration(true)">ON</button>
+        <button class="snack-speed-btn${vibrationOn ? "" : " snack-speed-btn-active"}" onclick="App.setSnackVibration(false)">OFF</button>
+      </div>
     </div>
   `;
 }
@@ -1337,9 +1353,13 @@ function renderSnackCPUTurnOverlay(snack, state) {
   const color = snackPlayerColor(player.seatNumber);
   const showLog = snack.lastActionActor && snack.lastActionActor.seatNumber === player.seatNumber;
   const lines = showLog ? (snack.lastActionEntries || []).map((e) => `<li>${escapeHtml(e.text)}</li>`).join("") : "";
+  // CPU判断理由の吹き出し(仕様書14章)。分岐・アイテム使用など、実際にCPUが評価に
+  // 使った材料(距離・所持金・残りラウンド)をそのまま短い一言にして表示する。
+  const reasonHtml = snack.cpuReason ? `<p class="snack-cpu-reason-bubble">💭 ${escapeHtml(snack.cpuReason)}</p>` : "";
   return `
     <div class="snack-cpu-turn-overlay" style="${snackColorVars(player.seatNumber)}">
       <p class="snack-cpu-turn-label">${color.label} ${escapeHtml(player.name)}が考え中…</p>
+      ${reasonHtml}
       ${lines ? `<ul class="snack-cpu-turn-log">${lines}</ul>` : ""}
     </div>
   `;

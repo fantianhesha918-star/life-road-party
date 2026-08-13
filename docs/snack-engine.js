@@ -70,6 +70,12 @@ function createSnackState(playerConfigs) {
       job: null,
       items: [],
       totalStepsWalked: 0,
+      // 統計データ(仕様書14章、3f「特別賞」で使用予定)。既存のtotalStepsWalkedと同じ
+      // 「アクション処理の中でその場でインクリメントする」方針を踏襲する。
+      coinsEarned: 0,
+      coinsSpent: 0,
+      itemsUsed: 0,
+      shortcutsUsed: 0,
       guardCharges: 0,
       pendingExtraDice: 0,
       // 「まだロールしていない(サイコロ待ち)」と「移動・確認まで完了した(つぎへ待ち)」を
@@ -255,10 +261,22 @@ function applySnackEncounterIfAny(state, player, entries) {
   }
 }
 
+// 統計データ(仕様書14章)。entries内の{type:"money", delta}を集計するだけなので、
+// アクションの区切りごとに呼ばれるwrapUpSnackAction一箇所に置いても取りこぼしが無い
+// (どのアクション関数も、コインが変化する箇所では必ずtype:"money"のentryを積む設計のため)。
+function accumulateSnackStats(player, entries) {
+  entries.forEach((e) => {
+    if (e.type !== "money" || typeof e.delta !== "number") return;
+    if (e.delta > 0) player.coinsEarned += e.delta;
+    else if (e.delta < 0) player.coinsSpent += -e.delta;
+  });
+}
+
 function wrapUpSnackAction(state, player, entries, path) {
   const pending = state.pendingBranch ? "branch" : state.pendingSnackChoice ? "snack" : state.pendingStopChoice ? "choice" : null;
   const movementDone = !pending && player.remainingSteps === 0;
   if (movementDone) applySnackEncounterIfAny(state, player, entries);
+  accumulateSnackStats(player, entries);
   return { entries, pending, movementDone, path: path || [] };
 }
 
@@ -297,6 +315,7 @@ function resolveSnackBranch(state, chosenNextNodeId) {
   } else {
     if (isToll) {
       player.matchCoins -= branchNode.tollCost;
+      player.shortcutsUsed += 1;
       entries.push({ type: "money", text: `近道の通行料 -${branchNode.tollCost}`, delta: -branchNode.tollCost });
     }
     stepOntoNode(state, player, chosenNextNodeId, entries, path);
@@ -423,5 +442,6 @@ function useSnackItem(state, playerId, itemId) {
       break;
   }
   player.items.splice(idx, 1);
+  player.itemsUsed += 1;
   return { ok: true, entries };
 }

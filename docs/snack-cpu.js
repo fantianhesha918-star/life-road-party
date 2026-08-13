@@ -29,10 +29,13 @@ function snackGraphDistance(fromId, toId) {
 
 // 分岐(外周を進み続けるか、通行料を払って内周のショートカットに入るか)の判断。
 // 内周を使った場合に「おやつまでの歩数」がどれだけ縮むかと、通行料に見合うコインがあるかを見る。
+// 戻り値を{choice, reason}にしているのは、仕様書14章「CPU判断理由の吹き出し」用に、
+// 実際に使った評価材料(距離・所持金・残りラウンド)をそのまま一言テキスト化するため
+// (後付けの説明文ではなく、上のif分岐が採用した理由をそのまま返す)。
 function cpuChooseSnackBranch(state, player) {
   const branch = findSnackNode(state.pendingBranch.nodeId);
   const options = branch.nextNodeIds;
-  if (options.length === 1) return options[0];
+  if (options.length === 1) return { choice: options[0], reason: null };
   const [stayOuter, takeShortcut] = options;
   const distStay = snackGraphDistance(stayOuter, state.activeSnackNodeId);
   const distShortcut = snackGraphDistance(takeShortcut, state.activeSnackNodeId);
@@ -40,8 +43,13 @@ function cpuChooseSnackBranch(state, player) {
   // 残りラウンドが少ないほど、多少無理をしてでも近道を優先する
   const roundsLeft = state.totalRounds - state.round + 1;
   const urgency = roundsLeft <= 3 ? 2 : 0;
-  if (canAffordToll && distShortcut + urgency < distStay) return takeShortcut;
-  return stayOuter;
+  if (canAffordToll && distShortcut + urgency < distStay) {
+    return { choice: takeShortcut, reason: `${branch.tollCost}コイン払っておやつまで近道` };
+  }
+  return {
+    choice: stayOuter,
+    reason: canAffordToll ? "外周のままでもおやつまで十分近いから外周へ" : "近道の通行料が足りないので外周へ",
+  };
 }
 
 // おやつ購入は、コインが足りている限りCPUは原則購入する(本格版のような終盤の見送り判断は
@@ -55,24 +63,30 @@ function cpuDecideSnackPurchase() {
 // - おまもり: 妨害を受けていない限り温存する(guardChargesが0の時だけ使う判断はItem所持側で行う)
 // - 鼻きき草・いたずらの実: 手元に余裕があれば早めに使い切る(在庫を腐らせない)
 function cpuDecideItemToUse(state, player) {
-  if (!player.items.length) return null;
+  if (!player.items.length) return { choice: null, reason: null };
   const distToSnack = snackGraphDistance(player.currentNodeId, state.activeSnackNodeId);
   const diceItem = player.items.find((id) => {
     const item = SNACK_ITEMS.find((it) => it.id === id);
     return item && item.effect === "extraDice";
   });
-  if (diceItem && distToSnack >= 3) return diceItem;
+  if (diceItem && distToSnack >= 3) {
+    return { choice: diceItem, reason: "おやつまで遠いので追加サイコロを使う" };
+  }
   const trapItem = player.items.find((id) => {
     const item = SNACK_ITEMS.find((it) => it.id === id);
     return item && item.effect === "trap";
   });
-  if (trapItem) return trapItem;
+  if (trapItem) {
+    return { choice: trapItem, reason: "先にいたずらの実を仕掛けておく" };
+  }
   const hintItem = player.items.find((id) => {
     const item = SNACK_ITEMS.find((it) => it.id === id);
     return item && item.effect === "hint";
   });
-  if (hintItem && distToSnack >= 4) return hintItem;
-  return null;
+  if (hintItem && distToSnack >= 4) {
+    return { choice: hintItem, reason: "おやつの方角を確かめるため鼻きき草を使う" };
+  }
+  return { choice: null, reason: null };
 }
 
 window.LifeRoadSnackCPU = {

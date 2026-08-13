@@ -1683,6 +1683,14 @@ body {
   color: var(--muted);
 }
 
+.snack-cpu-reason-bubble {
+  margin: 4px 0 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--muted);
+  font-style: italic;
+}
+
 /* 通常時のターンハブ(menu)は、毎ターン表示されるためマップを隠さない
    細い横並びバーとして画面最下部に常設する(サブ画面はturn-hub-modalの大きいカードのまま)。 */
 .hub-bar {
