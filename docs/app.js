@@ -58,6 +58,7 @@ const SNACK_SFX_EVENTS = {
   snackGet: { freq: 1046, ms: 220, vibrate: 80 },
   rankUp: { freq: 784, ms: 140, vibrate: 20 },
   rankDown: { freq: 392, ms: 140, vibrate: 25 },
+  resultReveal: { freq: 700, ms: 220, vibrate: 25 },
   winner: { freq: 1046, ms: 320, vibrate: [80, 40, 120] },
 };
 
@@ -1232,7 +1233,7 @@ const App = {
     } else if (this.screen === "snack-game" && this.snack) {
       view.innerHTML = renderSnackGameScreen(this.snack, this.snackHumanId, this.pauseMenuOpen);
     } else if (this.screen === "snack-result" && this.snack) {
-      view.innerHTML = renderSnackResultScreen(this.snack.state, this.snackHumanId);
+      view.innerHTML = renderSnackResultScreen(this.snack.state, this.snackHumanId, this.snack.resultReveal);
     }
     this.sync3DBoard();
     this.syncHeader();
@@ -1471,6 +1472,7 @@ const App = {
       remainingSteps: null, // MOVING中のみ数値({playerId, total, done})、それ以外はnull
       reveal: null, // SNACK_REVEAL中のみ{nodeId, ringLabel, zoneLabel, price}
       cpuReason: null, // 直近のCPU判断理由(仕様書14章)。CPU_TURNオーバーレイの吹き出しに使う
+      resultReveal: null, // 最終結果画面のみ{stage}。finishSnackGame()で作られる
       prevRankById: null, // 直前の順位スナップショット(Map<playerId, rankIndex>)。セーブ非対象の演出用一時状態
       rankChangeFx: null, // 直近の順位変動({changes:[...], id})。一定時間後にnullへ戻る
     };
@@ -2161,7 +2163,32 @@ const App = {
   finishSnackGame() {
     this.screen = "snack-result";
     this.clearSnackSave();
-    snackSfx("winner");
+    this.snack.resultReveal = { stage: 0 };
+    this.render();
+    this.advanceSnackResultReveal();
+  },
+
+  // 段階的な最終結果発表(仕様書14章FINAL_RESULT_REVEAL)。4位→1位の順に1段階ずつ、
+  // 既存のROUND_INTRO等と同じ「setTimeout+トークン確認」パターンで自動的に公開していく。
+  advanceSnackResultReveal() {
+    const total = getSnackRanking(this.snack.state).length;
+    const token = (this._snackFlowToken = (this._snackFlowToken || 0) + 1);
+    const step = () => {
+      if (!this.snack || !this.snack.resultReveal || this._snackFlowToken !== token) return;
+      this.snack.resultReveal.stage += 1;
+      const isFinal = this.snack.resultReveal.stage >= total;
+      snackSfx(isFinal ? "winner" : "resultReveal");
+      this.render();
+      if (!isFinal) snackDelay(650).then(step);
+    };
+    snackDelay(500).then(step);
+  },
+
+  // 「結果をすぐ見る」タップ時、残りの段階を即座に全公開する。
+  snackSkipResultReveal() {
+    if (!this.snack || !this.snack.resultReveal) return;
+    this._snackFlowToken = (this._snackFlowToken || 0) + 1;
+    this.snack.resultReveal.stage = getSnackRanking(this.snack.state).length;
     this.render();
   },
 };

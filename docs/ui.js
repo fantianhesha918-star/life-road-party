@@ -1453,27 +1453,96 @@ function renderSnackRemainingSteps(snack) {
   return `<div class="snack-remaining-steps">残り${left}歩</div>`;
 }
 
-function renderSnackResultScreen(state, humanId) {
+// 特別賞(仕様書14章SPECIAL_AWARDS)。Phase 3eで記録した統計データから各賞のトップ1名を選ぶだけの
+// 単純な最大値判定(勝敗=実際の順位には一切影響しない、getSnackRankingとは完全に独立)。
+// 該当者がいない(値が0)場合はその賞自体を出さない。同値の場合は先頭(座席順)を採用する簡易仕様。
+function buildSnackSpecialAwards(state) {
+  const pickTop = (label, emoji, getValue) => {
+    let best = null;
+    let bestValue = 0;
+    state.players.forEach((p) => {
+      const v = getValue(p) || 0;
+      if (v > bestValue) {
+        best = p;
+        bestValue = v;
+      }
+    });
+    return best ? { label, emoji, name: best.name, value: bestValue } : null;
+  };
+  return [
+    pickTop("いちばん歩いたで賞", "🐾", (p) => p.totalStepsWalked),
+    pickTop("コインを稼いだで賞", "🪙", (p) => p.coinsEarned),
+    pickTop("アイテム名人", "🎒", (p) => p.itemsUsed),
+    pickTop("近道名人", "🌉", (p) => p.shortcutsUsed),
+    pickTop("おしごと名人", "💼", (p) => (p.job ? p.job.salary : 0)),
+  ].filter(Boolean);
+}
+
+// 段階的な最終結果発表(仕様書14章FINAL_RESULT_REVEAL)。4位→1位の順に1段階ずつ公開し、
+// 未公開の順位は「?」のシルエット行として表示する。resultReveal.stageは
+// App.finishSnackGame()/advanceSnackResultReveal()がsetTimeoutで1ずつ進める
+// (this.snack自体はゲーム終了後もクリアされないため、既存のroundIntro等と同じ「snackへ
+// 生やすローカルUI状態」パターンをそのまま踏襲できる)。
+function renderSnackResultScreen(state, humanId, resultReveal) {
   const ranking = getSnackRanking(state);
+  const total = ranking.length;
+  const stage = resultReveal ? resultReveal.stage : total;
+  const fullyRevealed = stage >= total;
   const rows = ranking
     .map((p, i) => {
+      const rank = i + 1;
+      const revealedAtStage = total - rank + 1; // 1位はstage===totalで初めて解禁
+      if (stage < revealedAtStage) {
+        return `
+          <li class="result-row snack-result-row-hidden">
+            <span class="result-rank">${rank}位</span>
+            <span class="snack-result-hidden-label">？？？</span>
+          </li>
+        `;
+      }
       const visual = p.avatar || { color: "#e4572e", speciesEmoji: null, costumeImage: null };
+      const isWinner = rank === 1;
       return `
-        <li class="result-row">
-          <span class="result-rank">${i + 1}位</span>
-          ${renderAvatarBadge(visual, 26)}
+        <li class="result-row${isWinner ? " snack-result-row-winner" : ""}">
+          <span class="result-rank">${isWinner ? "🏆" : `${rank}位`}</span>
+          ${renderAvatarBadge(visual, isWinner ? 34 : 26)}
           <span class="p-name">${escapeHtml(p.name)}${p.isCPU ? "(CPU)" : ""}</span>
-          <span class="p-money">🍪${p.snacks} 🪙${p.matchCoins}</span>
+          <span class="p-money">🍪${p.snacks} 🪙${p.matchCoins} ・ ${p.totalStepsWalked}歩</span>
         </li>
       `;
     })
     .join("");
+  const awardsHtml = fullyRevealed
+    ? `
+      <div class="snack-special-awards">
+        <p class="snack-special-awards-heading">特別賞</p>
+        <ul class="snack-special-awards-list">
+          ${buildSnackSpecialAwards(state)
+            .map(
+              (a) => `
+                <li class="snack-special-award-row">
+                  <span>${a.emoji} ${escapeHtml(a.label)}</span>
+                  <span class="snack-special-award-name">${escapeHtml(a.name)}</span>
+                </li>
+              `
+            )
+            .join("")}
+        </ul>
+      </div>
+    `
+    : "";
+  const actionsHtml = fullyRevealed
+    ? `
+      <button class="btn btn-primary" onclick="App.goSnackSetup()">もう一度遊ぶ</button>
+      <button class="btn" onclick="App.goTitle()">タイトルへ</button>
+    `
+    : `<button class="btn" onclick="App.snackSkipResultReveal()">結果をすぐ見る</button>`;
   return `
     <section class="screen screen-result">
       <h2>おやつ集め結果発表</h2>
       <ul class="result-list">${rows}</ul>
-      <button class="btn btn-primary" onclick="App.goSnackSetup()">もう一度遊ぶ</button>
-      <button class="btn" onclick="App.goTitle()">タイトルへ</button>
+      ${awardsHtml}
+      ${actionsHtml}
     </section>
   `;
 }
