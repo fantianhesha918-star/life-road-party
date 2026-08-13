@@ -115,6 +115,16 @@ function snackOuterZoneForIndex(i) {
   return zone ? zone.name : "station";
 }
 
+// SNACK_OUTER_ZONESの表示名(日本語)。おやつ紹介ポップアップ(14章SNACK_REVEAL)でのみ使う
+// 表示専用ラベルで、上のコメント通りゲームロジックへは影響しない。
+const SNACK_ZONE_LABELS = {
+  station: "駅前エリア",
+  office: "オフィス街",
+  school: "学校エリア",
+  church: "教会エリア",
+  park: "公園エリア",
+};
+
 // 外周のマス種別(index→種別の上書き。指定の無いindexは"normal")。
 // 現行(24ノード)の構成比を48ノードへ比例拡大しつつ、見本のゾーン配置
 // (北=ショップA、南=ショップB、就職センターは北)に寄せて配置した。

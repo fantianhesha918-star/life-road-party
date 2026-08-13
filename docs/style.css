@@ -965,6 +965,42 @@ body {
   color: var(--p-color-dark, var(--brand-dark));
 }
 
+/* 順位変動(仕様書14章RANK_CHANGE)。translate(-50%,-50%)の中心固定を維持したまま
+   scale/translateY/rotateだけキーフレームで動かす(基準transformを上書きしないため)。 */
+.snack-hud-rank-crown {
+  animation: snack-rank-crown-pop 0.7s ease-out;
+  color: #c9860a;
+  font-size: 0.72rem;
+}
+
+.snack-hud-rank-up {
+  animation: snack-rank-bounce 0.6s ease-out;
+  color: var(--brand-dark);
+}
+
+.snack-hud-rank-down {
+  animation: snack-rank-wobble 0.6s ease-out;
+  color: #b23b3b;
+}
+
+@keyframes snack-rank-crown-pop {
+  0% { transform: translate(-50%, -50%) scale(1); }
+  40% { transform: translate(-50%, -50%) scale(1.7); }
+  100% { transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes snack-rank-bounce {
+  0%, 100% { transform: translate(-50%, -50%) translateY(0); }
+  30% { transform: translate(-50%, -50%) translateY(-7px); }
+  60% { transform: translate(-50%, -50%) translateY(1px); }
+}
+
+@keyframes snack-rank-wobble {
+  0%, 100% { transform: translate(-50%, -50%) rotate(0deg); }
+  25% { transform: translate(-50%, -50%) rotate(-10deg); }
+  75% { transform: translate(-50%, -50%) rotate(10deg); }
+}
+
 .snack-hud-name {
   position: absolute;
   left: 33%;
@@ -1044,6 +1080,29 @@ body {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
   white-space: nowrap;
   pointer-events: none;
+}
+
+.snack-rank-toast {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 96px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 13;
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--brand-dark);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  animation: snack-rank-toast-in 0.25s ease-out;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+@keyframes snack-rank-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
 /* ---- ポップアップ共通(popup-choice-frame.png / popup-result-frame.png、9-slice表示) ---- */
@@ -1375,6 +1434,70 @@ body {
   margin: 0;
   font-size: 0.85rem;
   color: var(--muted);
+}
+
+.snack-reveal-price {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: var(--brand-dark);
+}
+
+.snack-mid-result {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(0, 0, 0, 0.15);
+  width: 100%;
+}
+
+.snack-mid-result-heading {
+  margin: 0 0 6px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: var(--muted);
+  text-align: center;
+}
+
+.snack-mid-result-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.snack-mid-result-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.snack-mid-result-rank {
+  min-width: 28px;
+}
+
+.snack-mid-result-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snack-mid-result-diff {
+  color: var(--muted);
+  font-weight: 600;
+  min-width: 56px;
+  text-align: right;
+}
+
+.snack-mid-result-spot {
+  margin: 8px 0 0;
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-align: center;
 }
 
 /* ---- 行動順決めサイコロ ---- */

@@ -339,7 +339,8 @@ const diceFaceTextureCache = {};
 // ---- マップ紹介フライスルー・全体表示・ズームで使うカメラモード ----
 // "follow"(通常の駒追従、既定) | "intro"(開始時のマップ紹介、専用rAFループが直接カメラを操作) |
 // "overview"(マップ全体固定俯瞰) | "zoom"(overview基準の拡大+ドラッグパン) |
-// "diceFocus"(サイコロを振る手番プレイヤーへ寄る演出) | "branchOverview"(分岐マスの俯瞰)
+// "diceFocus"(サイコロを振る手番プレイヤーへ寄る演出) | "branchOverview"(分岐マスの俯瞰) |
+// "snackReveal"(おやつ地点を周回して見せる演出)
 let cameraMode = "follow";
 let mapBounds = null; // { centerX, centerZ, halfX, halfZ }
 let zoomState = { level: 1.9, panX: 0, panZ: 0 };
@@ -348,6 +349,8 @@ let zoomLastX = 0;
 let zoomLastY = 0;
 let diceFocusPlayerId = null;
 let branchOverviewNodeId = null;
+let snackRevealNodeId = null;
+let snackRevealStartTime = 0;
 
 function computeMapBounds() {
   if (!nodePositions.size) return { centerX: 0, centerZ: 0, halfX: 10, halfZ: 10 };
@@ -975,6 +978,10 @@ function updateCamera() {
     updateBranchOverviewCamera();
     return;
   }
+  if (cameraMode === "snackReveal") {
+    updateSnackRevealCamera();
+    return;
+  }
   const entry = focusPlayerId ? characters.get(focusPlayerId) : null;
   if (!entry) return;
   const focusGroup = entry.group;
@@ -1045,6 +1052,35 @@ function enterBranchOverview(nodeId) {
 function exitBranchOverview() {
   if (cameraMode === "branchOverview") cameraMode = "follow";
   branchOverviewNodeId = null;
+}
+
+// おやつ地点をゆっくり周回しながら見せる紹介演出用カメラ(仕様書14章SNACK_REVEALの
+// 「おやつを回転させる」を、素材側にモデルを回すギミックが無いためカメラ側の周回で代替する簡略版)。
+function updateSnackRevealCamera() {
+  const pos = snackRevealNodeId ? nodePositions.get(snackRevealNodeId) : null;
+  if (!pos) {
+    updateOverviewCamera();
+    return;
+  }
+  const elapsed = (performance.now() - snackRevealStartTime) / 1000;
+  const angle = elapsed * 0.5;
+  const radius = 2.6;
+  const desired = new THREE.Vector3(pos.x + Math.cos(angle) * radius, 1.9, pos.z + Math.sin(angle) * radius);
+  cameraCurrentPos.lerp(desired, CAMERA_LERP * 1.4);
+  camera.position.copy(cameraCurrentPos);
+  camera.lookAt(pos.x, 0.5, pos.z);
+}
+
+function enterSnackReveal(nodeId) {
+  if (!nodeId || !camera) return;
+  snackRevealNodeId = nodeId;
+  snackRevealStartTime = performance.now();
+  cameraMode = "snackReveal";
+}
+
+function exitSnackReveal() {
+  if (cameraMode === "snackReveal") cameraMode = "follow";
+  snackRevealNodeId = null;
 }
 
 // ==================== マップ全体表示・ズーム・ドラッグパン ====================
@@ -1486,6 +1522,7 @@ function dispose() {
   mapBounds = null;
   diceFocusPlayerId = null;
   branchOverviewNodeId = null;
+  snackRevealNodeId = null;
 }
 
 window.LifeRoadSnackBoard3D = {
@@ -1503,4 +1540,6 @@ window.LifeRoadSnackBoard3D = {
   exitDiceFocus,
   enterBranchOverview,
   exitBranchOverview,
+  enterSnackReveal,
+  exitSnackReveal,
 };

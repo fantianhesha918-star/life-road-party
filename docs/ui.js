@@ -956,11 +956,12 @@ function snackNextButton(label, onclick) {
 
 // ==================== 4隅HUD(player-status-hud.png、P1〜P4固定色) ====================
 
-function renderSnackHUD(state, humanId) {
+function renderSnackHUD(state, humanId, rankChangeFx) {
   const roundsLeft = Math.max(0, state.totalRounds - state.round + 1);
   const me = state.players.find((p) => p.id === humanId);
   const ranking = getSnackRanking(state);
   const currentId = currentSnackPlayer(state).id;
+  const changeById = new Map((rankChangeFx ? rankChangeFx.changes : []).map((c) => [c.playerId, c]));
   const cards = state.players
     .slice()
     .sort((a, b) => a.seatNumber - b.seatNumber)
@@ -971,11 +972,13 @@ function renderSnackHUD(state, humanId) {
       const color = snackPlayerColor(p.seatNumber);
       const rank = ranking.findIndex((r) => r.id === p.id) + 1;
       const corner = SNACK_CORNER_POSITIONS[p.seatNumber - 1] || "topleft";
+      const change = changeById.get(p.id);
+      const rankFxClass = change ? ` snack-hud-rank-${change.direction}` : "";
       return `
         <div class="snack-hud-corner snack-hud-corner-${corner}">
           <div class="snack-hud-card${isActive ? " snack-hud-active" : ""}" style="${snackColorVars(p.seatNumber)}">
             <div class="snack-hud-face">${renderAvatarBadge(visual, 40)}</div>
-            <div class="snack-hud-rank">${rank}</div>
+            <div class="snack-hud-rank${rankFxClass}">${change && change.direction === "crown" ? "👑" : ""}${rank}</div>
             <div class="snack-hud-name">${escapeHtml(p.name)}${p.isCPU ? "(CPU)" : ""}</div>
             <div class="snack-hud-snacks">🍪${p.snacks}</div>
             <div class="snack-hud-coins">🪙${p.matchCoins}</div>
@@ -989,6 +992,21 @@ function renderSnackHUD(state, humanId) {
     <div class="snack-round-badge">⏳ 残り${roundsLeft}ラウンド ・ 🎒${me.items.length}/${SNACK_ITEM_SLOT_LIMIT}</div>
     <div class="snack-hud-layer">${cards}</div>
   `;
+}
+
+// 順位変動(仕様書14章RANK_CHANGE)の一言テキスト。四隅HUDの数字は上のrenderSnackHUDが
+// 直接アニメーションさせるので、ここでは変化理由を短く伝えるトースト1件だけを画面下部に出す
+// (複数人が同時に変動しても、人間プレイヤー優先→無ければ先頭の変化のみを表示して情報量を絞る)。
+function renderSnackRankToast(rankChangeFx, state, humanId) {
+  if (!rankChangeFx || !rankChangeFx.changes.length) return "";
+  const change = rankChangeFx.changes.find((c) => c.playerId === humanId) || rankChangeFx.changes[0];
+  const player = state.players.find((p) => p.id === change.playerId);
+  if (!player) return "";
+  const text =
+    change.direction === "crown"
+      ? `${escapeHtml(player.name)} 1位に浮上！`
+      : `${escapeHtml(player.name)} ${change.fromRank + 1}位から${change.toRank + 1}位へ`;
+  return `<div class="snack-rank-toast">${text}</div>`;
 }
 
 // ==================== マップ紹介フライスルー ====================
@@ -1060,6 +1078,23 @@ function renderSnackOrderResultPopup(snack, state) {
   `;
 }
 
+// ==================== おやつ紹介(SNACK_REVEAL) ====================
+
+function renderSnackRevealTelop(snack) {
+  const reveal = snack.reveal;
+  if (!reveal) return "";
+  const zoneText = reveal.zoneLabel ? `${reveal.zoneLabel}・${reveal.ringLabel}` : reveal.ringLabel;
+  return `
+    <div class="snack-telop-backdrop snack-telop-backdrop-dark" onclick="App.snackSkipReveal()">
+      <div class="snack-telop-card snack-reveal">
+        <h2 class="snack-telop-title">🍪 おやつを発見！</h2>
+        <p class="snack-telop-sub">${escapeHtml(zoneText)}</p>
+        <p class="snack-reveal-price">🪙${reveal.price}コインで購入できます</p>
+      </div>
+    </div>
+  `;
+}
+
 // ==================== ラウンド・ターン切替テロップ ====================
 
 function renderSnackRoundIntroTelop(snack) {
@@ -1069,7 +1104,33 @@ function renderSnackRoundIntroTelop(snack) {
       <div class="snack-telop-card snack-round-intro">
         <h2 class="snack-telop-title">${ri.isFinal ? "最終ラウンド！" : `第${ri.round}ラウンド！`}</h2>
         <p class="snack-telop-sub">残り${Math.max(0, snack.state.totalRounds - snack.state.round + 1)}ラウンド</p>
+        ${ri.midResult ? renderSnackMidResultBlock(ri.midResult) : ""}
       </div>
+    </div>
+  `;
+}
+
+// 中間順位(仕様書14章MID_RESULT)。第5ラウンド終了時(=第6ラウンド開始時)・残り3ラウンド開始時・
+// 最終ラウンド開始時のみ、ラウンド開始テロップに重ねて簡易順位表を表示する。
+function renderSnackMidResultBlock(midResult) {
+  const rows = midResult.ranking
+    .map(
+      (r) => `
+        <li class="snack-mid-result-row">
+          <span class="snack-mid-result-rank">${r.rank}位</span>
+          <span class="snack-mid-result-name">${escapeHtml(r.name)}</span>
+          <span class="snack-mid-result-snacks">🍪${r.snacks}</span>
+          <span class="snack-mid-result-coins">🪙${r.coins}</span>
+          <span class="snack-mid-result-diff">${r.rank === 1 ? "" : `1位差${r.diffFromTop}`}</span>
+        </li>
+      `
+    )
+    .join("");
+  return `
+    <div class="snack-mid-result">
+      <p class="snack-mid-result-heading">中間順位</p>
+      <ul class="snack-mid-result-list">${rows}</ul>
+      ${midResult.snackZoneLabel ? `<p class="snack-mid-result-spot">おやつは${escapeHtml(midResult.snackZoneLabel)}にあるよ</p>` : ""}
     </div>
   `;
 }
@@ -1289,6 +1350,9 @@ function renderSnackGameScreen(snack, humanId, pauseMenuOpen) {
     case "MAP_INTRO":
       popupHtml = renderSnackMapIntroOverlay();
       break;
+    case "SNACK_REVEAL":
+      popupHtml = renderSnackRevealTelop(snack);
+      break;
     case "ORDER_ROLL":
     case "ORDER_TIE_ROLL":
       popupHtml = renderSnackOrderRollPopup(snack, state, humanId);
@@ -1345,7 +1409,8 @@ function renderSnackGameScreen(snack, humanId, pauseMenuOpen) {
   }
   return `
     <section class="screen screen-game screen-snack-game">
-      ${renderSnackHUD(state, humanId)}
+      ${renderSnackHUD(state, humanId, snack.rankChangeFx)}
+      ${renderSnackRankToast(snack.rankChangeFx, state, humanId)}
       ${renderSnackRemainingSteps(snack)}
       ${popupHtml}
       ${snack.logOpen ? renderSnackLogModal(snack.log) : ""}

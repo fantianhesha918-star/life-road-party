@@ -1436,6 +1436,9 @@ const App = {
       pendingItemId: null,
       speed: loadSnackSpeedSetting(),
       remainingSteps: null, // MOVING中のみ数値({playerId, total, done})、それ以外はnull
+      reveal: null, // SNACK_REVEAL中のみ{nodeId, ringLabel, zoneLabel, price}
+      prevRankById: null, // 直前の順位スナップショット(Map<playerId, rankIndex>)。セーブ非対象の演出用一時状態
+      rankChangeFx: null, // 直近の順位変動({changes:[...], id})。一定時間後にnullへ戻る
     };
   },
 
@@ -1510,11 +1513,54 @@ const App = {
     }
     this.snack.state.mapIntroDone = true;
     this.saveSnackGame();
-    this.startSnackOrderRoll();
+    // await せずfire-and-forgetで呼ぶ(下のplaySnackReveal自身がstartSnackOrderRoll()まで
+    // 責任を持つ。ここでawaitしてから続けて呼ぶと、途中でsnackSkipReveal()がタップされた
+    // 場合にstartSnackOrderRoll()が二重に走ってしまう=beginSnackRound等と同じ
+    // 「setTimeout+トークン確認」パターンを踏襲するための設計)。
+    this.playSnackReveal();
   },
 
   snackSkipMapIntro() {
     if (this._snackIntroSkip) this._snackIntroSkip();
+  },
+
+  // 初回出現時のおやつ紹介演出(仕様書14章SNACK_REVEAL)。ゲーム開始時に1回だけ、
+  // マップ紹介フライスルーの直後・行動順決めサイコロの前に挟む。取得後の再配置紹介は
+  // CPU手番も含め呼び出し箇所が増えて演出が頻発しすぎるため、今回のフェーズでは対象外
+  // (毎ターンのテンポを優先し、初回オリエンテーションのみに絞った)。
+  // 呼び出し完了後のstartSnackOrderRoll()まで自分で面倒を見る(snackSkipReveal()から
+  // 直接呼ばれた場合との二重呼び出しを避けるため、下のトークン確認を必ず通す)。
+  async playSnackReveal() {
+    const node = findSnackNode(this.snack.state.activeSnackNodeId);
+    if (!node) {
+      this.startSnackOrderRoll();
+      return;
+    }
+    this.snack.reveal = {
+      nodeId: node.id,
+      ringLabel: node.zone === "outer" ? "外周" : "内周",
+      zoneLabel: node.buildingZone ? SNACK_ZONE_LABELS[node.buildingZone] || "" : "",
+      price: SNACK_SNACK_PRICE,
+    };
+    this.snack.phase = "SNACK_REVEAL";
+    this.render();
+    if (this.snackBoard3dMounted && window.LifeRoadSnackBoard3D) {
+      window.LifeRoadSnackBoard3D.enterSnackReveal(node.id);
+    }
+    const token = (this._snackFlowToken = (this._snackFlowToken || 0) + 1);
+    await snackDelay(3000);
+    if (this._snackFlowToken !== token) return;
+    if (window.LifeRoadSnackBoard3D) window.LifeRoadSnackBoard3D.exitSnackReveal();
+    this.snack.reveal = null;
+    this.startSnackOrderRoll();
+  },
+
+  snackSkipReveal() {
+    if (this.snack.phase !== "SNACK_REVEAL") return;
+    this._snackFlowToken = (this._snackFlowToken || 0) + 1;
+    if (window.LifeRoadSnackBoard3D) window.LifeRoadSnackBoard3D.exitSnackReveal();
+    this.snack.reveal = null;
+    this.startSnackOrderRoll();
   },
 
   // ==================== 行動順決めサイコロ ====================
@@ -1596,13 +1642,50 @@ const App = {
   // ==================== ラウンド・ターン切替テロップ ====================
 
   beginSnackRound() {
-    this.snack.roundIntro = { round: this.snack.state.round, isFinal: this.snack.state.round === this.snack.state.totalRounds };
+    this.snack.roundIntro = {
+      round: this.snack.state.round,
+      isFinal: this.snack.state.round === this.snack.state.totalRounds,
+      midResult: this.buildSnackMidResult(),
+    };
     this.snack.phase = "ROUND_INTRO";
     this.render();
     const token = (this._snackFlowToken = (this._snackFlowToken || 0) + 1);
     snackDelay(1800).then(() => {
       if (this._snackFlowToken === token) this.beginSnackPlayerIntro();
     });
+  },
+
+  // 中間順位(仕様書14章MID_RESULT)の表示要否とデータを組み立てる。仕様本文の「第5ラウンド終了時」を
+  // 「第6ラウンド開始時」、「残り3ラウンド開始時」を「totalRounds-2ラウンド開始時」と解釈した
+  // (両者とも仕様書内の言い回しがラウンド開始/終了で厳密に統一されていないため、既存のROUND_INTRO
+  // テロップに乗せられる「ラウンド開始のタイミング」に寄せて実装した)。totalRoundsが5未満の場合は
+  // 対象ラウンドが重複・存在しなくなるため自然に非表示になる。
+  buildSnackMidResult() {
+    const state = this.snack.state;
+    const round = state.round;
+    const totalRounds = state.totalRounds;
+    const isTarget = round === 6 || round === totalRounds - 2 || round === totalRounds;
+    if (!isTarget) return null;
+    const ranking = getSnackRanking(state);
+    const topCoins = ranking.length ? ranking[0].matchCoins : 0;
+    const snackNode = findSnackNode(state.activeSnackNodeId);
+    const snackZoneLabel = snackNode
+      ? snackNode.buildingZone
+        ? SNACK_ZONE_LABELS[snackNode.buildingZone] || ""
+        : snackNode.zone === "outer"
+          ? "外周"
+          : "内周"
+      : "";
+    return {
+      ranking: ranking.map((p, i) => ({
+        name: p.name,
+        rank: i + 1,
+        snacks: p.snacks,
+        coins: p.matchCoins,
+        diffFromTop: topCoins - p.matchCoins,
+      })),
+      snackZoneLabel,
+    };
   },
 
   beginSnackPlayerIntro() {
@@ -1944,12 +2027,46 @@ const App = {
     setTimeout(() => this.endSnackTurnAndContinue(), 500);
   },
 
+  // 順位変動(仕様書14章RANK_CHANGE)の検出。afterSnackAction()の単一合流点から呼ぶことで、
+  // 人間・CPUどちらの手番が何を解決した後でも同じ条件で検出できる(コイン/おやつが変わり得るのは
+  // ここに来る直前=ロール・分岐・購入・選択イベントの解決後のみのため、これで網羅できる)。
+  // prevRankByIdはセーブ非対象の演出専用状態なので、ゲーム開始直後(初回呼び出し)は比較対象が無く
+  // 何もしない。
+  checkSnackRankChange() {
+    const ranking = getSnackRanking(this.snack.state);
+    const rankById = new Map(ranking.map((p, i) => [p.id, i]));
+    const prev = this.snack.prevRankById;
+    this.snack.prevRankById = rankById;
+    if (!prev) return;
+    const changes = [];
+    rankById.forEach((rank, id) => {
+      const prevRank = prev.get(id);
+      if (prevRank === undefined || prevRank === rank) return;
+      changes.push({
+        playerId: id,
+        direction: rank === 0 ? "crown" : rank < prevRank ? "up" : "down",
+        fromRank: prevRank,
+        toRank: rank,
+      });
+    });
+    if (!changes.length) return;
+    const fxId = Date.now();
+    this.snack.rankChangeFx = { changes, id: fxId };
+    setTimeout(() => {
+      if (this.snack && this.snack.rankChangeFx && this.snack.rankChangeFx.id === fxId) {
+        this.snack.rankChangeFx = null;
+        this.render();
+      }
+    }, 1600 / snackSpeedScale);
+  },
+
   // ロール・分岐・おやつ確認・選択イベントのいずれかを解決した直後に必ず呼ぶ(人間はACTION_RESULTの
   // 「次へ」タップから、CPUはmaybeRunSnackCPUTurnから直接)。ゲーム終了判定、まだ解決していない
   // pending(分岐/おやつ確認/選択イベント)への遷移、CPU自動進行、人間の次phase(まだロールして
   // いなければTURN_MENU、ロール済みならNEXT_ACTION)を一箇所で決める単一の合流点。
   afterSnackAction() {
     const state = this.snack.state;
+    this.checkSnackRankChange();
     if (state.status === "finished") {
       this.finishSnackGame();
       return;
