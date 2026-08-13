@@ -35,6 +35,11 @@ function createSnackState(playerConfigs) {
   SNACK_STAGE_NODES.forEach((n) => {
     n.activeTrap = null;
   });
+  // ステージギミック(橋)も新規ゲーム開始のたびに開いた状態へ戻す(activeTrapと同じ理由:
+  // SNACK_STAGE_NODESはモジュールロード時に1回だけ作られる共有配列なので、前回のプレイで
+  // 閉じたままにしておくと次のゲームの序盤ラウンドにまで閉鎖が残ってしまう)。
+  const gimmickNode = findSnackNode(SNACK_GIMMICK_NODE_ID);
+  if (gimmickNode) gimmickNode.nextNodeIds = SNACK_GIMMICK_ORIGINAL_NEXT_IDS.slice();
   return {
     round: 1,
     totalRounds: SNACK_TOTAL_ROUNDS,
@@ -108,6 +113,15 @@ function applyTrapIfAny(state, player, node, entries) {
   node.activeTrap = null;
 }
 
+// ラストスパート(仕様書14章FINAL_SPRINT)判定。残り3ラウンド(totalRounds-2ラウンド目)からを対象とする。
+function isSnackFinalSprint(state) {
+  return state.round >= state.totalRounds - SNACK_FINAL_SPRINT_ROUND_OFFSET;
+}
+
+function applySnackFinalSprintBonus(state, baseAmount) {
+  return isSnackFinalSprint(state) ? Math.round(baseAmount * SNACK_FINAL_SPRINT_COIN_MULT) : baseAmount;
+}
+
 // 通過時に発動する効果(就職・給料日)。ショップは見た目のみで通過効果は持たない(v1簡易仕様)。
 function processPassEvent(state, player, node, entries) {
   if (node.nodeType === "job") {
@@ -116,19 +130,22 @@ function processPassEvent(state, player, node, entries) {
       entries.push({ type: "info", text: `『${player.job.name}』になった(給料${player.job.salary})` });
     }
   } else if (node.nodeType === "payday") {
-    const income = player.job ? player.job.salary : SNACK_UNEMPLOYED_INCOME;
+    const base = player.job ? player.job.salary : SNACK_UNEMPLOYED_INCOME;
+    const income = applySnackFinalSprintBonus(state, base);
     player.matchCoins += income;
-    entries.push({ type: "money", text: `給料日 +${income}`, delta: income });
+    entries.push({ type: "money", text: `給料日 +${income}${income > base ? "(ラストスパート増額)" : ""}`, delta: income });
   }
 }
 
 // 歩数を使い切ったノードでの、そのノード本来のタイプに応じた効果(おやつ確認より後に処理)
-function applyNodeStopType(node, player, entries) {
+function applyNodeStopType(state, node, player, entries) {
   switch (node.nodeType) {
-    case "coin":
-      player.matchCoins += 3;
-      entries.push({ type: "money", text: "コインマス +3", delta: 3 });
+    case "coin": {
+      const amount = applySnackFinalSprintBonus(state, 3);
+      player.matchCoins += amount;
+      entries.push({ type: "money", text: `コインマス +${amount}${amount > 3 ? "(ラストスパート増額)" : ""}`, delta: amount });
       return;
+    }
     case "income": {
       const ev = SNACK_INCOME_EVENTS[Math.floor(Math.random() * SNACK_INCOME_EVENTS.length)];
       player.matchCoins += ev.delta;
@@ -168,7 +185,7 @@ function applyNodeStopType(node, player, entries) {
 // 歩数を使い切ったノードで発生する停止イベントを解決する(おやつ確認はstepOntoNode側で
 // 通過時に既に処理済みのため、ここではそのノード本来のタイプの効果のみを扱う)。
 function resolveStopEvent(state, player, node, entries) {
-  const choiceEvent = applyNodeStopType(node, player, entries);
+  const choiceEvent = applyNodeStopType(state, node, player, entries);
   if (choiceEvent) {
     state.pendingStopChoice = { playerId: player.id, title: choiceEvent.title, prompt: choiceEvent.prompt, options: choiceEvent.options };
   }
@@ -209,9 +226,40 @@ function continueSnackMovement(state, player, entries, path) {
   }
 }
 
+// 同じマスの交流(仕様書14章PLAYER_ENCOUNTER)。あいさつ/落とし物/交換の3パターンに絞った簡易版
+// (ミニ勝負・いたずら・奪い合いは対戦性のあるUIが別途必要になるため今回のフェーズでは対象外。
+// 「友好的な結果を含める」という仕様の要件は満たしつつ、駆け引き性のある演出は将来検討とする)。
+// 移動が完全に完了した時だけ判定することで「止まった時」のみ発生させ、既に同じマスに
+// 居合わせていただけの相手との毎ターン再発生を避ける。
+const SNACK_ENCOUNTER_OUTCOMES = [
+  { weight: 5, kind: "greet" },
+  { weight: 2, kind: "gift" },
+  { weight: 2, kind: "trade" },
+];
+
+function applySnackEncounterIfAny(state, player, entries) {
+  const other = state.players.find((p) => p.id !== player.id && p.currentNodeId === player.currentNodeId);
+  if (!other) return;
+  const outcome = pickWeightedSnackOutcome(SNACK_ENCOUNTER_OUTCOMES);
+  if (outcome.kind === "gift" && other.matchCoins > 0) {
+    const amount = Math.min(2, other.matchCoins);
+    other.matchCoins -= amount;
+    player.matchCoins += amount;
+    entries.push({ type: "money", text: `${other.name}から落とし物のコインをもらった(+${amount})`, delta: amount });
+  } else if (outcome.kind === "trade") {
+    player.matchCoins += 1;
+    other.matchCoins += 1;
+    entries.push({ type: "money", text: `${other.name}とおやつを交換して仲良くなった`, delta: 1 });
+  } else {
+    entries.push({ type: "info", text: `${other.name}と出会って挨拶した` });
+  }
+}
+
 function wrapUpSnackAction(state, player, entries, path) {
   const pending = state.pendingBranch ? "branch" : state.pendingSnackChoice ? "snack" : state.pendingStopChoice ? "choice" : null;
-  return { entries, pending, movementDone: !pending && player.remainingSteps === 0, path: path || [] };
+  const movementDone = !pending && player.remainingSteps === 0;
+  if (movementDone) applySnackEncounterIfAny(state, player, entries);
+  return { entries, pending, movementDone, path: path || [] };
 }
 
 function rollSnackAndMove(state, roll) {
@@ -301,6 +349,17 @@ function resolveSnackStopChoice(state, optionIndex) {
   return wrapUpSnackAction(state, player, entries);
 }
 
+// ステージギミック(橋)の開閉をラウンド番号だけから決定する。誰も移動中でないラウンド境界
+// (endSnackTurnで手番が1周した瞬間)でだけ呼ぶため、仕様書の「通行中には閉じない」を自然に満たす。
+function applySnackGimmickForRound(state) {
+  const node = findSnackNode(SNACK_GIMMICK_NODE_ID);
+  if (!node) return;
+  const shouldBeOpen = state.round < SNACK_GIMMICK_CLOSE_ROUND;
+  const isOpen = node.nextNodeIds.length > 1;
+  if (shouldBeOpen === isOpen) return;
+  node.nextNodeIds = shouldBeOpen ? SNACK_GIMMICK_ORIGINAL_NEXT_IDS.slice() : [SNACK_GIMMICK_ORIGINAL_NEXT_IDS[0]];
+}
+
 // 手番の移動・各種確認がすべて終わった後、明示的に呼ばれてはじめて次のプレイヤーへ進む
 // (ショップ立ち寄り・アイテム使用はターンハブから任意に行えるため、自動では進めない)。
 function endSnackTurn(state) {
@@ -310,6 +369,7 @@ function endSnackTurn(state) {
   state.currentTurnIndex = next;
   if (next === 0) {
     state.round += 1;
+    applySnackGimmickForRound(state);
     if (state.round > state.totalRounds) {
       state.status = "finished";
     }

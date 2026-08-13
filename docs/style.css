@@ -1065,6 +1065,11 @@ body {
   white-space: nowrap;
 }
 
+.snack-round-badge-sprint {
+  background: rgba(224, 122, 43, 0.94);
+  color: #fff;
+}
+
 .snack-remaining-steps {
   position: fixed;
   bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
@@ -1498,6 +1503,21 @@ body {
   font-size: 0.7rem;
   color: var(--muted);
   text-align: center;
+}
+
+.snack-round-intro-sprint {
+  border: 3px solid #e07a2b;
+}
+
+.snack-round-intro-sprint .snack-telop-title {
+  color: #c25f18;
+}
+
+.snack-gimmick-warning {
+  margin: 2px 0 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #8a5a1e;
 }
 
 /* ---- 行動順決めサイコロ ---- */

@@ -988,8 +988,10 @@ function renderSnackHUD(state, humanId, rankChangeFx) {
       `;
     })
     .join("");
+  // ラストスパート(仕様書14章FINAL_SPRINT)中は残りラウンド表示を終盤色で強調する。
+  const sprintClass = isSnackFinalSprint(state) ? " snack-round-badge-sprint" : "";
   return `
-    <div class="snack-round-badge">⏳ 残り${roundsLeft}ラウンド ・ 🎒${me.items.length}/${SNACK_ITEM_SLOT_LIMIT}</div>
+    <div class="snack-round-badge${sprintClass}">⏳ 残り${roundsLeft}ラウンド ・ 🎒${me.items.length}/${SNACK_ITEM_SLOT_LIMIT}</div>
     <div class="snack-hud-layer">${cards}</div>
   `;
 }
@@ -1099,11 +1101,13 @@ function renderSnackRevealTelop(snack) {
 
 function renderSnackRoundIntroTelop(snack) {
   const ri = snack.roundIntro;
+  const title = ri.isFinal ? "最終ラウンド！" : ri.isFinalSprintStart ? "ラストスパート！" : `第${ri.round}ラウンド！`;
   return `
     <div class="snack-telop-backdrop snack-telop-backdrop-dark" onclick="App.snackSkipTelop()">
-      <div class="snack-telop-card snack-round-intro">
-        <h2 class="snack-telop-title">${ri.isFinal ? "最終ラウンド！" : `第${ri.round}ラウンド！`}</h2>
+      <div class="snack-telop-card snack-round-intro${ri.isFinalSprintStart || ri.isFinal ? " snack-round-intro-sprint" : ""}">
+        <h2 class="snack-telop-title">${title}</h2>
         <p class="snack-telop-sub">残り${Math.max(0, snack.state.totalRounds - snack.state.round + 1)}ラウンド</p>
+        ${ri.gimmickWarning ? `<p class="snack-gimmick-warning">🌉 ${escapeHtml(ri.gimmickWarning)}</p>` : ""}
         ${ri.midResult ? renderSnackMidResultBlock(ri.midResult) : ""}
       </div>
     </div>

@@ -1642,9 +1642,16 @@ const App = {
   // ==================== ラウンド・ターン切替テロップ ====================
 
   beginSnackRound() {
+    const state = this.snack.state;
     this.snack.roundIntro = {
-      round: this.snack.state.round,
-      isFinal: this.snack.state.round === this.snack.state.totalRounds,
+      round: state.round,
+      isFinal: state.round === state.totalRounds,
+      // ラストスパート(仕様書14章FINAL_SPRINT)開始ラウンド=中間順位(MID_RESULT)を
+      // 「残り3ラウンド開始時」に表示するラウンドと同じタイミングなので、その回だけ
+      // タイトルを差し替える形で統合する(同内容のポップアップが2回続けて出るのを避けるため)。
+      isFinalSprintStart: state.round === state.totalRounds - SNACK_FINAL_SPRINT_ROUND_OFFSET,
+      // ステージギミック(橋)予告(仕様書「変化前に対象ルートを予告する」)。閉鎖の1ラウンド前に告知。
+      gimmickWarning: state.round === SNACK_GIMMICK_CLOSE_ROUND - 1 ? "まもなく北の近道(橋)が閉じます" : null,
       midResult: this.buildSnackMidResult(),
     };
     this.snack.phase = "ROUND_INTRO";

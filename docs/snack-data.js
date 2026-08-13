@@ -7,6 +7,12 @@ const SNACK_START_COINS = 10;
 const SNACK_SNACK_PRICE = 20;
 const SNACK_BRANCH_TOLL = 5; // 内周(近道)へ入る際の通行料
 
+// ラストスパート(仕様書14章FINAL_SPRINT)。「残り3ラウンド」からを対象とするので
+// totalRounds(10)からのオフセットは2(=第8ラウンド開始から)。倍率は仕様書に具体数値が
+// 無かったため「少し増やす」の解釈として控えめな1.3倍を採用。
+const SNACK_FINAL_SPRINT_ROUND_OFFSET = 2;
+const SNACK_FINAL_SPRINT_COIN_MULT = 1.3;
+
 // 職業ランク(A〜E)。人生ゲームモードのJOB_OFFERSとは通貨単位が違う別経済のため専用に用意。
 const SNACK_JOB_RANKS = [
   { name: "パンやさん", rank: "A", salary: 12 },
@@ -209,6 +215,19 @@ const SNACK_START_NODE_ID = "outer0";
 function findSnackNode(nodeId) {
   return SNACK_STAGE_NODES.find((n) => n.id === nodeId) || null;
 }
+
+// ステージ固有ギミック(仕様書14章、水路の橋)。4箇所ある分岐(SNACK_BRANCH_OUTER_INDEXES)の
+// うち1箇所(outer6=北エリアの近道)を対象に、第6ラウンド開始からは近道側を閉鎖する
+// 「特定ラウンドで一度だけ閉じる橋」として実装(仕様の「開閉」を毎ラウンド反復させると
+// 経路探索・CPU判断・保存項目が複雑になるため、今回は一方向の閉鎖のみに絞った簡略版)。
+// nextNodeIdsを直接ミューテートすることで、経路探索(BFS)・分岐判定・CPU判断・ルート選択UIの
+// いずれも追加コード無しで閉鎖状態に追従する(既存のactiveTrapと同じ「実行時ミューテート可能な
+// シングルトンノード」パターンを踏襲)。
+const SNACK_GIMMICK_NODE_ID = "outer6";
+const SNACK_GIMMICK_CLOSE_ROUND = 6;
+const SNACK_GIMMICK_ORIGINAL_NEXT_IDS = Object.freeze(
+  (findSnackNode(SNACK_GIMMICK_NODE_ID) ? findSnackNode(SNACK_GIMMICK_NODE_ID).nextNodeIds : []).slice()
+);
 
 function snackCandidateNodeIds() {
   return SNACK_STAGE_NODES.filter((n) => n.snackSpawnCandidate).map((n) => n.id);
