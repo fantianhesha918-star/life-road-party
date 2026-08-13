@@ -338,13 +338,16 @@ const diceFaceTextureCache = {};
 
 // ---- マップ紹介フライスルー・全体表示・ズームで使うカメラモード ----
 // "follow"(通常の駒追従、既定) | "intro"(開始時のマップ紹介、専用rAFループが直接カメラを操作) |
-// "overview"(マップ全体固定俯瞰) | "zoom"(overview基準の拡大+ドラッグパン)
+// "overview"(マップ全体固定俯瞰) | "zoom"(overview基準の拡大+ドラッグパン) |
+// "diceFocus"(サイコロを振る手番プレイヤーへ寄る演出) | "branchOverview"(分岐マスの俯瞰)
 let cameraMode = "follow";
 let mapBounds = null; // { centerX, centerZ, halfX, halfZ }
 let zoomState = { level: 1.9, panX: 0, panZ: 0 };
 let zoomPointerActive = false;
 let zoomLastX = 0;
 let zoomLastY = 0;
+let diceFocusPlayerId = null;
+let branchOverviewNodeId = null;
 
 function computeMapBounds() {
   if (!nodePositions.size) return { centerX: 0, centerZ: 0, halfX: 10, halfZ: 10 };
@@ -964,6 +967,14 @@ function updateCamera() {
     updateOverviewCamera();
     return;
   }
+  if (cameraMode === "diceFocus") {
+    updateDiceFocusCamera();
+    return;
+  }
+  if (cameraMode === "branchOverview") {
+    updateBranchOverviewCamera();
+    return;
+  }
   const entry = focusPlayerId ? characters.get(focusPlayerId) : null;
   if (!entry) return;
   const focusGroup = entry.group;
@@ -984,6 +995,56 @@ function updateCamera() {
   cameraCurrentPos.lerp(desired, CAMERA_LERP);
   camera.position.copy(cameraCurrentPos);
   camera.lookAt(focusGroup.position.x, 0.5, focusGroup.position.z);
+}
+
+// サイコロを振る手番プレイヤーへ少し寄って見下ろす演出用カメラ。対象が見つからない場合は
+// 全体俯瞰にフォールバックする(演出中に手番プレイヤー情報が欠けても画面が固まらないように)。
+function updateDiceFocusCamera() {
+  const entry = diceFocusPlayerId ? characters.get(diceFocusPlayerId) : null;
+  if (!entry) {
+    updateOverviewCamera();
+    return;
+  }
+  const p = entry.group.position;
+  const desired = new THREE.Vector3(p.x - 1.15, 2.15, p.z + 1.65);
+  cameraCurrentPos.lerp(desired, CAMERA_LERP * 1.6);
+  camera.position.copy(cameraCurrentPos);
+  camera.lookAt(p.x, 0.9, p.z);
+}
+
+// 分岐マスで両方のルートが見えるよう、やや高い位置から見下ろす演出用カメラ。
+function updateBranchOverviewCamera() {
+  const pos = branchOverviewNodeId ? nodePositions.get(branchOverviewNodeId) : null;
+  if (!pos) {
+    updateOverviewCamera();
+    return;
+  }
+  const desired = new THREE.Vector3(pos.x - 2.2, 5.4, pos.z + 3.6);
+  cameraCurrentPos.lerp(desired, CAMERA_LERP);
+  camera.position.copy(cameraCurrentPos);
+  camera.lookAt(pos.x, 0.4, pos.z);
+}
+
+function enterDiceFocus(playerId) {
+  if (!playerId || !camera) return;
+  diceFocusPlayerId = playerId;
+  cameraMode = "diceFocus";
+}
+
+function exitDiceFocus() {
+  if (cameraMode === "diceFocus") cameraMode = "follow";
+  diceFocusPlayerId = null;
+}
+
+function enterBranchOverview(nodeId) {
+  if (!nodeId || !camera) return;
+  branchOverviewNodeId = nodeId;
+  cameraMode = "branchOverview";
+}
+
+function exitBranchOverview() {
+  if (cameraMode === "branchOverview") cameraMode = "follow";
+  branchOverviewNodeId = null;
 }
 
 // ==================== マップ全体表示・ズーム・ドラッグパン ====================
@@ -1423,6 +1484,8 @@ function dispose() {
   diceMesh = null;
   cameraMode = "follow";
   mapBounds = null;
+  diceFocusPlayerId = null;
+  branchOverviewNodeId = null;
 }
 
 window.LifeRoadSnackBoard3D = {
@@ -1436,4 +1499,8 @@ window.LifeRoadSnackBoard3D = {
   enterOverview,
   enterZoom,
   exitMapView,
+  enterDiceFocus,
+  exitDiceFocus,
+  enterBranchOverview,
+  exitBranchOverview,
 };

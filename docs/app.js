@@ -1654,11 +1654,15 @@ const App = {
     const finalRoll = rollSnackDice();
     LifeRoadAudio.playSe("diceRoll");
     this.loadSnackBoard3DModules()
-      .then(() => window.LifeRoadSnackBoard3D.playDiceRoll(playerId, finalRoll, snackSpeedScale))
+      .then(() => {
+        window.LifeRoadSnackBoard3D.enterDiceFocus(playerId);
+        return window.LifeRoadSnackBoard3D.playDiceRoll(playerId, finalRoll, snackSpeedScale);
+      })
       .catch((err) => {
         console.error("おやつ集めモード: サイコロ演出の読み込みに失敗", err);
       })
       .then(() => {
+        if (window.LifeRoadSnackBoard3D) window.LifeRoadSnackBoard3D.exitDiceFocus();
         onFinish(finalRoll);
       });
   },
@@ -1670,6 +1674,7 @@ const App = {
   async playSnackMovementHop(playerId, path) {
     if (!path || !path.length) return;
     if (!this.snackBoard3dMounted || !window.LifeRoadSnackBoard3D) return;
+    window.LifeRoadSnackBoard3D.exitBranchOverview();
     this.snack.remainingSteps = { playerId, total: path.length, done: 0 };
     this.render();
     await window.LifeRoadSnackBoard3D.hopPath(playerId, path, {
@@ -1964,6 +1969,9 @@ const App = {
   },
 
   enterSnackPendingPhase(phase, player) {
+    if (phase === "ROUTE_SELECT" && this.snackBoard3dMounted && window.LifeRoadSnackBoard3D && this.snack.state.pendingBranch) {
+      window.LifeRoadSnackBoard3D.enterBranchOverview(this.snack.state.pendingBranch.nodeId);
+    }
     if (player.isCPU) {
       this.snack.phase = "CPU_TURN";
       this.render();
