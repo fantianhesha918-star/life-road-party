@@ -314,7 +314,7 @@ function buildSpaceGroups(nodes) {
   nodes.forEach((n) => {
     const pos = nodePositions.get(n.id);
     const group = new THREE.Group();
-    group.position.set(pos.x, 0, pos.z);
+    group.position.set(pos.x, pos.y, pos.z);
     scene.add(group);
     loadDecorationModel(group, SNACK_SPACE_MODEL_ASSETS[snackSpaceModelKeyForNode(n)]);
     if (n.gaburion) {
@@ -395,6 +395,26 @@ let mapBounds = null; // { centerX, centerZ, halfX, halfZ }
 // 大きい(建物・木・岩が浮島の縁付近まで並ぶため)。全体表示カメラの距離計算はノード座標では
 // なくこちらを基準にする(2026-08-13、Codexレビュー「全体表示でも中央部分しか見えない」対応)。
 let islandRadius = { x: 14, z: 10 };
+// 浮島の中心(=マス群のバウンディングボックス中心、buildScene冒頭で設定)。terrainHeightAtが
+// islandRadiusとあわせて参照する。
+let islandCenter = { x: 0, z: 0 };
+
+// ==================== 地形の高低差(2026-08-15、利用者仕様書「地面を完全な平面にせず、
+// 中央を少し高く、外周をわずかに低く」対応) ====================
+// あくまで見た目のY座標のみに使う値で、ゲームロジック(ノードのx,z座標・停止判定・当たり判定)には
+// 一切使わない・影響させない。中心(t=0)ほど高く、外周(t=1)ほど低く、なめらかに変化する。
+const TERRAIN_CENTER_LIFT = 0.14;
+const TERRAIN_EDGE_DROP = 0.1;
+function terrainHeightForT(t) {
+  const tt = THREE.MathUtils.clamp(t, 0, 1);
+  const s = tt * tt * (3 - 2 * tt); // smoothstep
+  return THREE.MathUtils.lerp(TERRAIN_CENTER_LIFT, -TERRAIN_EDGE_DROP, s);
+}
+function terrainHeightAt(worldX, worldZ) {
+  const nx = (worldX - islandCenter.x) / (islandRadius.x || 1);
+  const nz = (worldZ - islandCenter.z) / (islandRadius.z || 1);
+  return terrainHeightForT(Math.sqrt(nx * nx + nz * nz));
+}
 const SNACK_FOG_FOLLOW = { near: 16, far: 40 };
 // 全体表示・ズーム中は追従時より奥行きが必要なため霞を大幅に弱める(利用者仕様書11章)。
 const SNACK_FOG_OVERVIEW = { near: 40, far: 140 };
@@ -419,7 +439,7 @@ function computeMapBounds() {
 }
 
 function nodeVec3(node) {
-  return new THREE.Vector3(node.position.x, 0, node.position.z);
+  return new THREE.Vector3(node.position.x, terrainHeightAt(node.position.x, node.position.z), node.position.z);
 }
 
 function loadGroundTexture(width, depth) {
@@ -509,7 +529,9 @@ function buildRibbon(points, closed) {
     const normal = new THREE.Vector3(-tangent.z, 0, tangent.x);
     const left = p.clone().addScaledVector(normal, ROAD_HALF_WIDTH);
     const right = p.clone().addScaledVector(normal, -ROAD_HALF_WIDTH);
-    positions.push(left.x, -0.45, left.z, right.x, -0.45, right.z);
+    // 2026-08-15、地形の高低差(terrainHeightAt)に追従するよう、固定の-0.45ではなく
+    // 経路点pの実際のY(nodeVec3で地形高さ込み)を基準にする。
+    positions.push(left.x, p.y - 0.45, left.z, right.x, p.y - 0.45, right.z);
     if (i > 0) uAccum += p.distanceTo(points[i - 1]) / (ROAD_HALF_WIDTH * 2);
     uvs.push(uAccum, 0, uAccum, 1);
   }
@@ -531,28 +553,58 @@ function buildRibbon(points, closed) {
   return mesh;
 }
 
-// 地面を矩形ではなく楕円形にし(見本の「フェルト製の島」らしい輪郭に近づける)、
-// テクスチャが正しくタイル表示されるよう、ShapeGeometryの既定UV(0〜1に正規化)ではなく
-// ワールド座標ベースのUVを手動で割り当てる(loadGroundTextureのrepeat.set(width/3,depth/3)と
-// 揃えるため、同じ/3の係数を使う)。
+// 地面を矩形ではなく楕円形にし(見本の「フェルト製の島」らしい輪郭に近づける)。
+// 以前はShapeGeometry(境界の点だけを三角形分割)で完全に平坦だったが、2026-08-15、
+// 「中央を少し高く、外周をわずかに低く」に対応するため、中心点+同心楕円リング(段階的に
+// 半径を広げる)を自前で組み立てるジオメトリに変更した。各リングの高さはterrainHeightForTで
+// 決め、リング間はbuildRibbon/createIslandEdgeSkirtと同じ「a,c,b,b,c,d」の帯三角形分割を使う。
+// テクスチャが正しくタイル表示されるよう、UVはワールド座標ベース(loadGroundTextureの
+// repeat.set(width/3,depth/3)と揃えるため、同じ/3の係数)を手動で割り当てる。
 function createIslandGroundGeometry(radiusX, radiusZ) {
-  const shape = new THREE.Shape();
   const segments = 64;
-  for (let i = 0; i <= segments; i++) {
-    const angle = (i / segments) * Math.PI * 2;
-    const x = Math.cos(angle) * radiusX;
-    const y = Math.sin(angle) * radiusZ;
-    if (i === 0) shape.moveTo(x, y);
-    else shape.lineTo(x, y);
+  const rings = 6;
+  const positions = [0, 0, terrainHeightForT(0)];
+  const uvs = [0, 0];
+
+  for (let r = 1; r <= rings; r++) {
+    const t = r / rings;
+    const rx = radiusX * t;
+    const rz = radiusZ * t;
+    const h = terrainHeightForT(t);
+    for (let i = 0; i < segments; i++) {
+      const angle = (i / segments) * Math.PI * 2;
+      const x = Math.cos(angle) * rx;
+      const y = Math.sin(angle) * rz;
+      positions.push(x, y, h);
+      uvs.push(x / 3, y / 3);
+    }
   }
-  const geometry = new THREE.ShapeGeometry(shape, segments);
-  const pos = geometry.attributes.position;
-  const uv = new Float32Array(pos.count * 2);
-  for (let i = 0; i < pos.count; i++) {
-    uv[i * 2] = pos.getX(i) / 3;
-    uv[i * 2 + 1] = pos.getY(i) / 3;
+
+  const indices = [];
+  // 中心点(index0)と最初のリングを結ぶ扇
+  for (let i = 0; i < segments; i++) {
+    const b = 1 + i;
+    const d = 1 + ((i + 1) % segments);
+    indices.push(b, 0, d);
   }
-  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  // リング間を結ぶ帯(buildRibbonと同じ内周/外周の対応関係)
+  for (let r = 1; r < rings; r++) {
+    const innerStart = 1 + (r - 1) * segments;
+    const outerStart = 1 + r * segments;
+    for (let i = 0; i < segments; i++) {
+      const a = innerStart + i;
+      const b = outerStart + i;
+      const c = innerStart + ((i + 1) % segments);
+      const d = outerStart + ((i + 1) % segments);
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
   return geometry;
 }
 
@@ -581,6 +633,8 @@ function createIslandSkirtTexture() {
 function createIslandEdgeSkirt(centerX, centerZ, radiusX, radiusZ, depth) {
   const segments = 64;
   const outerScale = 1.06;
+  // 地面リングの外周(t=1)の高さに合わせる(2026-08-15、外周を低くした地形と縁がずれないように)。
+  const edgeY = -0.5 + terrainHeightForT(1);
   const positions = [];
   const uvs = [];
   const indices = [];
@@ -590,7 +644,7 @@ function createIslandEdgeSkirt(centerX, centerZ, radiusX, radiusZ, depth) {
     const topZ = centerZ + Math.sin(angle) * radiusZ;
     const botX = centerX + Math.cos(angle) * radiusX * outerScale;
     const botZ = centerZ + Math.sin(angle) * radiusZ * outerScale;
-    positions.push(topX, -0.5, topZ, botX, -0.5 - depth, botZ);
+    positions.push(topX, edgeY, topZ, botX, edgeY - depth, botZ);
     uvs.push(0, 0, 0, 1);
   }
   for (let i = 0; i < segments; i++) {
@@ -636,7 +690,7 @@ function loadDecorationModel(owner, config) {
 function placeOutwardDecoration(pos, centerX, centerZ, offset, config) {
   const dir = new THREE.Vector3(pos.x - centerX, 0, pos.z - centerZ).normalize();
   const group = new THREE.Group();
-  group.position.set(pos.x + dir.x * offset, 0, pos.z + dir.z * offset);
+  group.position.set(pos.x + dir.x * offset, pos.y, pos.z + dir.z * offset);
   group.rotation.y = Math.atan2(-dir.x, -dir.z);
   scene.add(group);
   loadDecorationModel(group, config);
@@ -655,12 +709,13 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
   // 2026-08-13(第3弾)、利用者仕様書に沿って2.2倍(SNACK_STAGE_MODELS側でscale調整済み)に
   // 拡大し、マップ全体の視線の中心として主役化。周囲に花壇・ベンチ・街灯をリング状に配置し、
   // 内周ルートから庭園がよく見えるよう高い建物は寄せない(周辺装飾は花壇・ベンチ・街灯のみ)。
+  const centerGroundY = terrainHeightAt(centerX, centerZ);
   const plazaGroup = new THREE.Group();
-  plazaGroup.position.set(centerX, 0, centerZ);
+  plazaGroup.position.set(centerX, centerGroundY, centerZ);
   scene.add(plazaGroup);
   loadDecorationModel(plazaGroup, SNACK_STAGE_MODELS.plazaCircle);
   const fountainGroup = new THREE.Group();
-  fountainGroup.position.set(centerX, 0, centerZ);
+  fountainGroup.position.set(centerX, centerGroundY, centerZ);
   scene.add(fountainGroup);
   loadDecorationModel(fountainGroup, SNACK_STAGE_MODELS.pawFountain);
 
@@ -671,7 +726,7 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
     const px = centerX + Math.cos(angle) * plazaRingRadius;
     const pz = centerZ + Math.sin(angle) * plazaRingRadius;
     const group = new THREE.Group();
-    group.position.set(px, 0, pz);
+    group.position.set(px, terrainHeightAt(px, pz), pz);
     group.rotation.y = angle;
     scene.add(group);
     // 花壇・ベンチ・街灯を交互に配置(低木の専用素材は無いため、既存の花壇素材で代替)
@@ -704,7 +759,7 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
     const rock = new THREE.Mesh(rockGeo, rockMat);
     const s = 0.35 + (i % 3) * 0.18;
     rock.scale.set(s, s * 0.7, s);
-    rock.position.set(rx, -0.42, rz);
+    rock.position.set(rx, -0.42 + terrainHeightAt(rx, rz), rz);
     rock.rotation.set(i * 0.7, i * 1.3, i * 0.4);
     rock.receiveShadow = true;
     rock.castShadow = true;
@@ -717,7 +772,7 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
     const hx = centerX + Math.cos(angle) * (halfX * 1.55 + 2);
     const hz = centerZ + Math.sin(angle) * (halfZ * 1.55 + 2);
     const group = new THREE.Group();
-    group.position.set(hx, 0, hz);
+    group.position.set(hx, terrainHeightAt(hx, hz), hz);
     group.rotation.y = angle;
     scene.add(group);
     loadDecorationModel(group, SNACK_STAGE_MODELS.distantHill);
@@ -819,7 +874,7 @@ function syncTrapMarkers() {
     const pos = nodePositions.get(id);
     if (!pos) return;
     const group = new THREE.Group();
-    group.position.set(pos.x, 0, pos.z);
+    group.position.set(pos.x, pos.y, pos.z);
     scene.add(group);
     loadDecorationModel(group, SNACK_STAGE_MODELS.trapMarker);
     trapMarkerEntries.set(id, group);
@@ -866,7 +921,9 @@ function updatePlayerRings() {
   if (!scene) return;
   characters.forEach((entry, playerId) => {
     const record = ensurePlayerRing(playerId, entry.seatNumber);
-    record.group.position.set(entry.group.position.x, 0.02, entry.group.position.z);
+    // entry.group.position.yはホップ中の弧の高さを含むため使わず、x/zから地形高さを再計算する。
+    const ringY = terrainHeightAt(entry.group.position.x, entry.group.position.z) + 0.02;
+    record.group.position.set(entry.group.position.x, ringY, entry.group.position.z);
     const isActive = playerId === focusPlayerId;
     const targetScale = isActive ? 1.35 : 0.95;
     const targetEmissive = isActive ? 0.55 : 0.15;
@@ -882,7 +939,7 @@ function createMascotEntry(nodeId) {
   const pos = nodePositions.get(nodeId);
   if (!pos) return;
   const group = new THREE.Group();
-  group.position.set(pos.x, 0, pos.z);
+  group.position.set(pos.x, pos.y, pos.z);
   scene.add(group);
   const entry = { group, model: null, baseY: SNACK_STAGE_MODELS.mascot.yOffset };
   mascotEntries.set(nodeId, entry);
@@ -954,7 +1011,7 @@ function loadSnackCharacterModel(entry, speciesId) {
 function createCharacterEntry(player) {
   const group = new THREE.Group();
   const pos = nodePositions.get(player.currentNodeId) || new THREE.Vector3();
-  group.position.set(pos.x, 0, pos.z);
+  group.position.set(pos.x, pos.y, pos.z);
   scene.add(group);
   const visual = player.avatar || {};
   const placeholder = createCharacterPlaceholder(visual.color);
@@ -985,12 +1042,15 @@ function updateHopForEntry(entry, now) {
   entry.group.position.x = hop.from.x + (hop.to.x - hop.from.x) * t;
   entry.group.position.z = hop.from.z + (hop.to.z - hop.from.z) * t;
   const arc = Math.sin(t * Math.PI);
-  entry.group.position.y = arc * HOP_HEIGHT;
+  // 2026-08-15、地形の高低差に追従するよう、移動元/移動先ノードの実際のY(terrainHeightAt込み)を
+  // 補間した上でホップの弧を足す(以前は常にy=0基準で、地形が平坦だった頃の名残)。
+  const groundY = hop.from.y + (hop.to.y - hop.from.y) * t;
+  entry.group.position.y = groundY + arc * HOP_HEIGHT;
   const stretch = 1 + arc * 0.08;
   entry.group.scale.set(1 / Math.sqrt(stretch), stretch, 1 / Math.sqrt(stretch));
   if (t >= 1) {
     entry.currentNodeId = hop.toNodeId;
-    entry.group.position.y = 0;
+    entry.group.position.y = hop.to.y;
     entry.group.scale.set(1, 1, 1);
     const onDone = hop.onDone;
     entry.hop = null;
@@ -1450,6 +1510,12 @@ function buildScene(nodes, players, activeSnackNodeIds) {
   const groundRadiusZ = halfZ * 1.35 + 4;
   // 全体表示カメラの距離計算(overviewCameraTarget)が参照する実際の浮島半径を記録する。
   islandRadius = { x: groundRadiusX, z: groundRadiusZ };
+  // terrainHeightAtが参照する浮島の中心。nodeVec3(この後の道リボン生成で使う)より先に
+  // 設定しておく必要がある。mount()側でも一度nodePositionsを構築しているが、その時点では
+  // islandCenter/islandRadiusがまだ既定値(前回マップ or 初期値)のままなので、ここで正しい
+  // 中心・半径が確定した後にもう一度作り直す(マス・キャラクター・装飾の高さがずれないように)。
+  islandCenter = { x: centerX, z: centerZ };
+  nodePositions = new Map(nodes.map((n) => [n.id, nodeVec3(n)]));
   const ground = new THREE.Mesh(
     createIslandGroundGeometry(groundRadiusX, groundRadiusZ),
     new THREE.MeshStandardMaterial({ map: loadGroundTexture(groundRadiusX * 2, groundRadiusZ * 2) })
@@ -1598,7 +1664,7 @@ function updateDiceAnim(now) {
   const elapsed = (now - diceAnim.startTime) * (diceAnim.speedScale || 1);
   if (elapsed < DICE_SPIN_DURATION_MS) {
     const t = elapsed / DICE_SPIN_DURATION_MS;
-    mesh.position.set(pos.x, DICE_HEAD_HEIGHT + Math.sin(t * Math.PI * 3) * 0.18 + 0.15, pos.z);
+    mesh.position.set(pos.x, pos.y + DICE_HEAD_HEIGHT + Math.sin(t * Math.PI * 3) * 0.18 + 0.15, pos.z);
     mesh.rotation.x += 0.35;
     mesh.rotation.y += 0.28;
     mesh.rotation.z += 0.18;
@@ -1608,14 +1674,14 @@ function updateDiceAnim(now) {
     mesh.rotation.x *= 0.8;
     mesh.rotation.y *= 0.8;
     mesh.rotation.z *= 0.8;
-    mesh.position.set(pos.x, DICE_HEAD_HEIGHT + bounce * 0.22, pos.z);
+    mesh.position.set(pos.x, pos.y + DICE_HEAD_HEIGHT + bounce * 0.22, pos.z);
   } else if (!diceAnim.settled) {
     diceAnim.settled = true;
     mesh.rotation.set(0, 0, 0);
-    mesh.position.set(pos.x, DICE_HEAD_HEIGHT, pos.z);
+    mesh.position.set(pos.x, pos.y + DICE_HEAD_HEIGHT, pos.z);
     setTimeout(finishDiceAnim, DICE_HOLD_DURATION_MS);
   } else {
-    mesh.position.set(pos.x, DICE_HEAD_HEIGHT, pos.z);
+    mesh.position.set(pos.x, pos.y + DICE_HEAD_HEIGHT, pos.z);
   }
 }
 
