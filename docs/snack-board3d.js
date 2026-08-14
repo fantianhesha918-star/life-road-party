@@ -223,212 +223,63 @@ const SNACK_ZONE_PROP_MIN_GAP = 2.4;
 
 const textureLoader = new THREE.TextureLoader();
 
-// ==================== 通常マスの土台(共通シリンダー、全ファミリー共通) ====================
-// 全マス共通のクリーム色シリンダー土台(InstancedMesh、1ジオメトリ・1マテリアルを共有)。
-// 2026-08-13、この上に載せる表示は2.5D画像インポスターから9種類の立体シンボルへ置き換えた
-// (下記「通常マスの完全3D化」ブロック参照)。土台自体の形状は変更していない。
-const SPACE_METRICS = {
-  diameter: 1.0,
-  baseHeight: 0.16,
-};
-// 旧プレースホルダー円柱(高さ0.14、中心y=-0.38)の上面(-0.31)を踏襲し、キャラクター(y=0基準)
-// との相対位置が変わらないようにする土台上面の基準高さ。実機確認の上で微調整すること。
-const SPACE_GROUND_Y = -0.31;
-
-// ==================== 通常マスの完全3D化(9種類のシンボル、2026-08-13第3弾) ====================
-// 2D画像板のカメラ追従インポスターを廃止し、Three.jsのプリミティブ形状合成による立体シンボルに
-// 置き換える(board3d.jsのcreateBuildingPlaceholder/createTreePlaceholderと同じ「Group+
-// プリミティブ、共通マテリアル方針」を踏襲)。ロジック側のnodeType(12種)はそのまま維持し、
-// 表示だけ9つの視覚ファミリーへ集約する対応表(利用者仕様書5章の9種類に対応)。
-const SNACK_SPACE_FAMILY_MAP = {
-  start: "start",
-  coin: "plus",
-  income: "plus",
-  expense: "minus",
-  normal: "event",
-  choice: "event",
+// ==================== 通常マスの完全3D化 v2(2026-08-14、Meshy画像→3D変換版) ====================
+// 2026-08-13(第3弾)にプリミティブ形状合成(コイン・矢印・箱等をThree.jsの基本図形で組み立てる方式)へ
+// 一度置き換えたが、実機で見比べたところ他の建物・小道具(いずれもMeshyで作った本物の3Dモデル)と
+// 比べて質感が単調に見えるという指摘を受け、2026-08-14にdocs/images/snack-spaces/の元画像(フェルト
+// パック調、実ゲームでは未使用のまま残っていた2.5D素材)をMeshyで画像→3D変換した本物のモデルに
+// 差し替えた。「共通の土台+その上に載る種類別アイコン」という2層構成をやめ、土台とアイコンが
+// 一体になった1個の完成モデル(=フェルトパックそのもの)をノードごとに配置する方式にしている。
+// nodeTypeごとに使うモデルのキー。マス目のロジック(nodeType、12種)はそのまま維持し、
+// 表示だけ実際に用意した11種のモデルへ集約する(branch→junction・item-box→item・start→normalは
+// 旧2.5D仕様書のSPACE_VISUAL_MAPと同じ対応。startは専用の絵柄が無く、実際のスタート演出は
+// 別途配置されるgate-start.glbが担うため、マス自体は無地のnormalパックでよい)。
+const SNACK_SPACE_MODEL_KEY_MAP = {
+  start: "normal",
+  coin: "coin",
+  income: "income",
+  expense: "expense",
+  normal: "normal",
+  choice: "choice",
   "item-box": "item",
-  job: "special",
-  payday: "special",
-  shop: "special",
-  rest: "special",
-  branch: "branch",
+  job: "job",
+  payday: "payday",
+  shop: "shop",
+  rest: "rest",
+  branch: "junction",
 };
-// "special"ファミリー内の種類差はシンボル上面の色で区別する(共有ジオメトリ+色分けの既存方針)
-const SNACK_SPECIAL_ACCENT_COLORS = { job: 0x5b8def, payday: 0x63c17a, shop: 0xe98cc9, rest: 0x5fb8b0 };
 
-function snackFamilyForNode(node) {
-  if (node.gaburion) return "gaburion";
-  return SNACK_SPACE_FAMILY_MAP[node.nodeType] || "event";
+// scale/yOffsetはThree.js Box3実機実測(空中ではなくシーン読み込み後の実測値)から算出。
+// 全モデルとも横幅(X)は正規化されて2.0に揃っていたため直径1.0相当のscale=0.5を基本にしつつ、
+// item/job/payday/shopは単一画像からの立体復元で縦(Y)方向が誇張され、そのままだとキャラクターより
+// 高くなってしまったため、表示高さの上限(0.62)を超えないよう個別にscaleを絞った(2026-08-14実測)。
+// yOffsetは各モデルの中心Yで、旧・共通シリンダー土台の底面だった-0.47(SPACE_GROUND_Y=-0.31から
+// baseHeight0.16ぶん下)に底面が揃うよう、-0.47+(高さ/2×scale)で算出。
+const SNACK_SPACE_MODEL_ASSETS = {
+  normal: { url: new URL("./models/space-normal.glb", import.meta.url).href, scale: 0.5, yOffset: -0.3 },
+  coin: { url: new URL("./models/space-coin.glb", import.meta.url).href, scale: 0.5, yOffset: -0.332 },
+  income: { url: new URL("./models/space-income.glb", import.meta.url).href, scale: 0.5, yOffset: -0.269 },
+  expense: { url: new URL("./models/space-expense.glb", import.meta.url).href, scale: 0.5, yOffset: -0.198 },
+  choice: { url: new URL("./models/space-choice.glb", import.meta.url).href, scale: 0.5, yOffset: -0.297 },
+  item: { url: new URL("./models/space-item.glb", import.meta.url).href, scale: 0.3105, yOffset: -0.16 },
+  job: { url: new URL("./models/space-job.glb", import.meta.url).href, scale: 0.4131, yOffset: -0.16 },
+  payday: { url: new URL("./models/space-payday.glb", import.meta.url).href, scale: 0.3301, yOffset: -0.16 },
+  shop: { url: new URL("./models/space-shop.glb", import.meta.url).href, scale: 0.3815, yOffset: -0.16 },
+  rest: { url: new URL("./models/space-rest.glb", import.meta.url).href, scale: 0.5, yOffset: -0.265 },
+  junction: { url: new URL("./models/space-junction.glb", import.meta.url).href, scale: 0.5, yOffset: -0.255 },
+};
+
+function snackSpaceModelKeyForNode(node) {
+  return SNACK_SPACE_MODEL_KEY_MAP[node.nodeType] || "normal";
 }
 
 function matteMaterial(color, opts) {
   return new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 0.82, metalness: 0 }, opts || {}));
 }
 
-// 星形(トロフィー用)。THREE.Shape+ExtrudeGeometryで5稜の星を作り、平置き(上面が見える向き)に
-// 回転させる(玩具の勲章のような、平たいシルエットで見分けられる形を狙う)。
-function createStarGeometry(outerR, innerR, depth) {
-  const shape = new THREE.Shape();
-  const points = 5;
-  const step = Math.PI / points;
-  for (let i = 0; i < points * 2; i++) {
-    const r = i % 2 === 0 ? outerR : innerR;
-    const angle = i * step - Math.PI / 2;
-    const x = Math.cos(angle) * r;
-    const y = Math.sin(angle) * r;
-    if (i === 0) shape.moveTo(x, y);
-    else shape.lineTo(x, y);
-  }
-  shape.closePath();
-  const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 6 });
-  geo.rotateX(-Math.PI / 2);
-  geo.translate(0, -depth / 2, 0);
-  return geo;
-}
-
-// 肉球(スタート以外の各種装飾で使い回す既存の意匠、prop-paw-fountain等と統一)。
-function addPawMark(group, y, scale, color) {
-  const mat = matteMaterial(color);
-  const pad = new THREE.Mesh(new THREE.SphereGeometry(0.09 * scale, 10, 8), mat);
-  pad.position.set(0, y, 0.03 * scale);
-  group.add(pad);
-  const toeOffsets = [
-    [-0.09, 0.1],
-    [-0.03, 0.14],
-    [0.03, 0.14],
-    [0.09, 0.1],
-  ];
-  toeOffsets.forEach(([dx, dz]) => {
-    const toe = new THREE.Mesh(new THREE.SphereGeometry(0.045 * scale, 8, 6), mat);
-    toe.position.set(dx * scale, y, dz * scale);
-    group.add(toe);
-  });
-}
-
-// 1. スタート(旗)。ゲート本体は既存gate-start.glbが別途配置されるため、ここは旗だけの簡素な意匠。
-function createStartSymbol() {
-  const group = new THREE.Group();
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.42, 8), matteMaterial(0xcbb27a));
-  pole.position.y = 0.21;
-  group.add(pole);
-  const flagShape = new THREE.Shape();
-  flagShape.moveTo(0, 0);
-  flagShape.lineTo(0.18, -0.05);
-  flagShape.lineTo(0, -0.1);
-  flagShape.closePath();
-  const flagGeo = new THREE.ExtrudeGeometry(flagShape, { depth: 0.01, bevelEnabled: false });
-  const flag = new THREE.Mesh(flagGeo, matteMaterial(0xe0574f, { side: THREE.DoubleSide }));
-  flag.position.set(0.018, 0.36, 0);
-  flag.userData.isFlag = true;
-  group.add(flag);
-  group.userData.flag = flag;
-  return group;
-}
-
-// 2. プラス(金貨+上向き矢印)
-function createPlusSymbol() {
-  const group = new THREE.Group();
-  const coinMat = matteMaterial(0xf5c451, { roughness: 0.55 });
-  [
-    [0, 0.05, 0],
-    [0.09, 0.11, 0.05],
-    [-0.07, 0.17, -0.04],
-  ].forEach(([x, y, z]) => {
-    const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.035, 14), coinMat);
-    coin.position.set(x, y, z);
-    coin.rotation.x = Math.PI / 2;
-    group.add(coin);
-  });
-  const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.24, 4), matteMaterial(0xffe27a));
-  arrow.position.set(0, 0.38, 0);
-  arrow.rotation.y = Math.PI / 4;
-  group.add(arrow);
-  return group;
-}
-
-// 3. マイナス(傾いた金貨+下向き矢印)
-function createMinusSymbol() {
-  const group = new THREE.Group();
-  const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.035, 14), matteMaterial(0xcbb27a, { roughness: 0.6 }));
-  coin.position.set(0, 0.09, 0);
-  coin.rotation.set(Math.PI / 2.3, 0, 0.3);
-  group.add(coin);
-  const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.22, 4), matteMaterial(0xe0574f));
-  arrow.position.set(0.02, 0.3, 0);
-  arrow.rotation.set(Math.PI, Math.PI / 4, 0);
-  group.add(arrow);
-  return group;
-}
-
-// 4. イベント(肉球付きブロック)。文字「？」は専用フォント読み込みが要るため、既存の肉球意匠で
-// 「何が起きるか分からない」ミステリー感を表現する簡略化(このセッションでの設計判断)。
-function createEventSymbol() {
-  const group = new THREE.Group();
-  const block = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.28, 0.32), matteMaterial(0xf3a953));
-  block.position.y = 0.16;
-  group.add(block);
-  addPawMark(group, 0.32, 1.1, 0xfff3e0);
-  return group;
-}
-
-// 5. アイテム(リボン付きプレゼント箱)
-function createItemSymbol() {
-  const group = new THREE.Group();
-  const box = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.26, 0.3), matteMaterial(0xdba6f0));
-  box.position.y = 0.15;
-  group.add(box);
-  const ribbonMat = matteMaterial(0xfff6e0, { roughness: 0.5 });
-  const ribbonA = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.05, 0.07), ribbonMat);
-  ribbonA.position.y = 0.29;
-  group.add(ribbonA);
-  const ribbonB = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.05, 0.34), ribbonMat);
-  ribbonB.position.y = 0.29;
-  group.add(ribbonB);
-  const bowA = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), ribbonMat);
-  bowA.position.set(-0.06, 0.32, 0);
-  group.add(bowA);
-  const bowB = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), ribbonMat);
-  bowB.position.set(0.06, 0.32, 0);
-  group.add(bowB);
-  return group;
-}
-
-// 6. 特別(星形トロフィー)。job/payday/shop/restの4種は土台・形状を共有し、アクセントカラーのみ変える。
-function createSpecialSymbol(nodeType) {
-  const accent = SNACK_SPECIAL_ACCENT_COLORS[nodeType] || 0xd4af37;
-  const group = new THREE.Group();
-  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.045, 0.16, 10), matteMaterial(0xd8b566, { roughness: 0.5 }));
-  stem.position.y = 0.08;
-  group.add(stem);
-  const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.06, 0.09, 10), matteMaterial(0xd8b566, { roughness: 0.5 }));
-  cup.position.y = 0.2;
-  group.add(cup);
-  const star = new THREE.Mesh(createStarGeometry(0.15, 0.06, 0.05), matteMaterial(accent, { roughness: 0.45 }));
-  star.position.y = 0.3;
-  group.add(star);
-  return group;
-}
-
-// 7. 分岐(木製案内板)
-function createBranchSymbol() {
-  const group = new THREE.Group();
-  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.4, 8), matteMaterial(0x9b6b43));
-  post.position.y = 0.2;
-  group.add(post);
-  const plankMat = matteMaterial(0xe4c391);
-  const plankA = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.08, 0.02), plankMat);
-  plankA.position.set(0.09, 0.34, 0);
-  plankA.rotation.y = 0.25;
-  group.add(plankA);
-  const plankB = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.02), plankMat);
-  plankB.position.set(-0.08, 0.26, 0);
-  plankB.rotation.y = -0.35;
-  group.add(plankB);
-  return group;
-}
-
-// 8. ガブリオン(爪痕の石碑+紫の小さな炎)。炎は常時演出(updateSnackSpaceSymbolsで脈動させる)。
+// ガブリオンマス用の爪痕の石碑+紫の小さな炎(唯一プリミティブ形状のまま残す装飾)。
+// 通常のフェルトパックモデルの上に追加で重ねて表示する(仕様書10章「通常マスシンボルより上書き表示」)。
+// 炎は常時演出(updateSnackSpaceSymbolsで脈動させる)。
 function createGaburionSymbol() {
   const group = new THREE.Group();
   const tablet = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 0.32, 6), matteMaterial(0x6b6b76, { roughness: 0.95 }));
@@ -451,74 +302,36 @@ function createGaburionSymbol() {
   return group;
 }
 
-function buildSpaceSymbol(node) {
-  const family = snackFamilyForNode(node);
-  switch (family) {
-    case "start":
-      return createStartSymbol();
-    case "plus":
-      return createPlusSymbol();
-    case "minus":
-      return createMinusSymbol();
-    case "item":
-      return createItemSymbol();
-    case "special":
-      return createSpecialSymbol(node.nodeType);
-    case "branch":
-      return createBranchSymbol();
-    case "gaburion":
-      return createGaburionSymbol();
-    case "event":
-    default:
-      return createEventSymbol();
-  }
-}
-
-let spaceBaseMesh = null; // 全マス共通のクリーム色シリンダー土台(InstancedMesh)
 let spaceSymbols = []; // [{ nodeId, group, family, node }]
 let lastSymbolLodCameraPos = new THREE.Vector3();
 let symbolLodInitialized = false;
 
-// 各ノードへ、共通シリンダー土台(1個のInstancedMeshをノード数ぶんインスタンス化)と、
-// 種類別の立体シンボル(9ファミリー、buildSpaceSymbolで生成)を配置する。
+// 各ノードへ、種類別のフェルトパックモデル(SNACK_SPACE_MODEL_ASSETS、土台+アイコン一体型)を
+// 配置する。ガブリオンマスにはさらに石碑+炎を重ねて追加する。モデル読み込みはloadDecorationModel
+// (既存の建物・小道具と同じ、キャッシュ済みテンプレートをcloneして非同期に追加するパターン)を使う。
 function buildSpaceGroups(nodes) {
-  const geometry = new THREE.CylinderGeometry(SPACE_METRICS.diameter / 2, SPACE_METRICS.diameter / 2, SPACE_METRICS.baseHeight, 24);
-  const material = new THREE.MeshStandardMaterial({ color: 0xead7b6, roughness: 0.88, metalness: 0 });
-  spaceBaseMesh = new THREE.InstancedMesh(geometry, material, nodes.length);
-  spaceBaseMesh.receiveShadow = true;
-  spaceBaseMesh.castShadow = false;
-  const dummy = new THREE.Object3D();
-  nodes.forEach((n, i) => {
-    const pos = nodePositions.get(n.id);
-    dummy.position.set(pos.x, SPACE_GROUND_Y - SPACE_METRICS.baseHeight / 2, pos.z);
-    dummy.updateMatrix();
-    spaceBaseMesh.setMatrixAt(i, dummy.matrix);
-  });
-  spaceBaseMesh.instanceMatrix.needsUpdate = true;
-  scene.add(spaceBaseMesh);
-
   spaceSymbols = [];
   nodes.forEach((n) => {
     const pos = nodePositions.get(n.id);
-    const group = buildSpaceSymbol(n);
-    group.position.set(pos.x, SPACE_GROUND_Y + SPACE_METRICS.baseHeight / 2, pos.z);
-    group.traverse((child) => {
-      if (child.isMesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-      }
-    });
+    const group = new THREE.Group();
+    group.position.set(pos.x, 0, pos.z);
     scene.add(group);
-    spaceSymbols.push({ nodeId: n.id, group, family: snackFamilyForNode(n), node: n });
+    loadDecorationModel(group, SNACK_SPACE_MODEL_ASSETS[snackSpaceModelKeyForNode(n)]);
+    if (n.gaburion) {
+      const tablet = createGaburionSymbol();
+      group.add(tablet);
+      group.userData.flame = tablet.userData.flame;
+    }
+    spaceSymbols.push({ nodeId: n.id, group, family: n.gaburion ? "gaburion" : "space-model", node: n });
   });
   symbolLodInitialized = false;
 }
 
-// LOD(距離段階に応じた見え方の調整)とガブリオン/スタートの常時演出。
+// LOD(距離段階に応じた見え方の調整)とガブリオンの常時演出。
 // - 近距離: 等倍表示。中〜遠距離: 画面上で小さく潰れないよう緩やかに拡大する(仕様書9章の
 //   「画面上のマス直径が18〜22px未満にならないよう補正」の簡易実装、正確なpx計測はせず
 //   カメラ距離から連続的にスケールする近似)。
-// - ガブリオンの炎は常時脈動、スタートの旗は常時わずかに揺れる(仕様書10章)。
+// - ガブリオンの炎は常時脈動(仕様書10章)。
 const SNACK_SYMBOL_LOD_NEAR = 14;
 const SNACK_SYMBOL_LOD_FAR = 40;
 const SNACK_SYMBOL_LOD_MAX_SCALE = 1.8;
@@ -541,8 +354,6 @@ function updateSnackSpaceSymbols(now) {
       const pulse = 0.75 + Math.sin(now / 260) * 0.25;
       group.userData.flame.scale.setScalar(pulse);
       group.userData.flame.material.emissiveIntensity = 0.45 + pulse * 0.3;
-    } else if (family === "start" && group.userData.flag) {
-      group.userData.flag.rotation.y = Math.sin(now / 700) * 0.25;
     }
   });
 }
@@ -1871,7 +1682,6 @@ function dispose() {
   scene = null;
   camera = null;
   characters = new Map();
-  spaceBaseMesh = null;
   spaceSymbols = [];
   symbolLodInitialized = false;
   mascotEntries = new Map();

@@ -276,3 +276,21 @@
 - 軽量化: 納品時点で既に300〜700px程度とUI用途として十分小さいサイズだったため、追加のリサイズは行っていない(合計約5.4MB)
 - 配置先: `docs/images/snack/gaburion/`
 - 組み込み: `docs/ui.js`の`SNACK_GABURION_IMAGES`/`SNACK_GABURION_RESULT_ICONS`経由で、`GABURION_INTRO`/`GABURION_ROULETTE_READY`/`GABURION_ROULETTE_SPIN`/`GABURION_RESULT`/`GABURION_APPLY`/`FINAL_THREE_WARNING`/`FINAL_THREE_TRANSFORM`の各フェーズ専用render関数から参照。一覧用シート・クロマキー素材(`gaburion-character-sheet.png`等)は取り込んでいない
+
+## space-normal.glb 〜 space-junction.glb(おやつ集めモード・通常マスの完全3Dモデル化 第2版、11種)
+
+- 2026-08-14〜15、「マスが思ったのと違う」という指摘を受け、2026-08-13に実装したプリミティブ形状合成(コイン・矢印・箱等をThree.jsの基本図形で組み立てる方式)から、`docs/images/snack-spaces/*.png`(2026-08-13納品済みだが未使用のまま残っていたフェルトパック調2.5D素材16枚)をMeshyで画像→3D変換した本物のモデルへ差し替えた。実際にゲームで使う11種(normal/coin/income/expense/choice/item/job/payday/shop/rest/junction、残り5種`event`/`family`/`investment`/`paid-gate`/`warp`は未使用のため対象外)のみ変換
+- 生成: 既存の街灯/ベンチ/看板/マス目印アイコンと同じ簡易パイプライン(Meshy AI API Image-to-3D、`ai_model: meshy-5`、単一画像、`enable_pbr: false`、`should_remesh: true`、`topology: triangle`、`target_polycount: 6000`)。11点を並行リクエスト
+- 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)。最終ファイルサイズ96〜148KB
+- **土台+アイコンの2層構成をやめ、1個の完成モデル(=フェルトパックそのもの)に統合**。scale/yOffsetはThree.js Box3実機実測から算出。item/job/payday/shopは単一画像からの立体復元でY方向(高さ)が誇張され、そのままだとキャラクターより高くなってしまったため、表示高さの上限(0.62)を超えないよう個別にscaleを絞った(それ以外はscale=0.5で統一)
+- 組み込み・commit済み(`docs/snack-board3d.js`の`SNACK_SPACE_MODEL_ASSETS`/`SNACK_SPACE_MODEL_KEY_MAP`/`buildSpaceGroups()`)。ガブリオンマスは石碑+紫炎のプリミティブ形状(`createGaburionSymbol`)のまま、puckモデルの上に追加で重ねて表示する設計に変更(以前は完全に置き換えていた)
+- 参考画像(切り出し前の元シート)は`docs/images/snack-spaces/`に残置。個別に切り出したものではなく直接そのままMeshyへ渡した
+
+## road-straight.glb 〜 road-gate.glb / cluster-flowerbed-oval.glb 〜 cluster-shrub.glb(地面・道路のフェルト調改修用素材、12種)
+
+- 2026-08-14、地面(単色平坦な緑地)・道路(薄茶色の平面帯)をフェルト調ミニチュアジオラマの質感に合わせる全面改修のため作成。飯田さんが別のCodexチャットで方向性確認用のプレビューシート4枚(道路パーツ6種・ground-clusters6種・地区別フェルト芝カラースワッチ・タイル可能な芝テクスチャ)を作成し`クロコ確認フォルダ/アプリ素材/`に配置、進行用チャット側で内容を確認・採用した
+- 参考イラストの切り出し: プレビューシートはクロマキー背景(道路パーツ=緑、ground-clusters=ピンク)の一覧絵だったため、Python(PIL)で境界と連結した背景色領域のみをflood-fillで透明化(内部に似た色があっても穴を開けない手法)+アルファ収縮でエッジのフリンジ除去し、個別の透過PNGに切り出した。保存先: `docs/models/reference/road-pieces/`(6枚: straight/curve/t-junction/y-junction/cross/gate)・`docs/models/reference/ground-clusters/`(6枚: flowerbed-oval/flowerbed-crescent/flowerbed-ring/pond/paving/shrub-cluster)
+- 生成: 既存の街灯/ベンチ/マス目印アイコンと同じ簡易パイプライン(Meshy AI API Image-to-3D、`ai_model: meshy-5`、単一画像、`enable_pbr: false`、`should_remesh: true`、`topology: triangle`)。`target_polycount`は道路パーツ8000〜10000(形状の複雑さに応じて個別設定)・ground-clusters6000〜8000
+- 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)。最終ファイルサイズ102〜191KB。保存先: `docs/models/terrain/`
+- 地区別フェルト芝カラースワッチ(Base/Station/Civic/Residential/Church/Park/Centralの7色)は画像から平均色をサンプリングしてhex値を抽出済み(いずれもオリーブ系の近似色、5〜10%程度の差)。Roughness/Normalのセルは単色のプレースホルダーだったため実際のテクスチャマップとしては使わず、既存踏襲の固定roughness値で対応する方針
+- **このセッション時点では`docs/snack-board3d.js`への組み込みは未実施**。地面ジオメトリの高低差・フェルト芝適用・道路のroad-piece連結配置・ground-clustersの8〜12箇所配置は次回以降の作業
