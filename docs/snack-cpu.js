@@ -27,6 +27,16 @@ function snackGraphDistance(fromId, toId) {
   return Infinity;
 }
 
+// 複数出現しているおやつのうち、最も近いものまでの歩数を返す(フェーズE、同時出現数2以上化)。
+function nearestSnackDistance(fromId, activeSnackNodeIds) {
+  let best = Infinity;
+  for (const id of activeSnackNodeIds) {
+    const d = snackGraphDistance(fromId, id);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
 // 分岐(外周を進み続けるか、通行料を払って内周のショートカットに入るか)の判断。
 // 内周を使った場合に「おやつまでの歩数」がどれだけ縮むかと、通行料に見合うコインがあるかを見る。
 // 戻り値を{choice, reason}にしているのは、仕様書14章「CPU判断理由の吹き出し」用に、
@@ -37,8 +47,8 @@ function cpuChooseSnackBranch(state, player) {
   const options = branch.nextNodeIds;
   if (options.length === 1) return { choice: options[0], reason: null };
   const [stayOuter, takeShortcut] = options;
-  const distStay = snackGraphDistance(stayOuter, state.activeSnackNodeId);
-  const distShortcut = snackGraphDistance(takeShortcut, state.activeSnackNodeId);
+  const distStay = nearestSnackDistance(stayOuter, state.activeSnackNodeIds);
+  const distShortcut = nearestSnackDistance(takeShortcut, state.activeSnackNodeIds);
   const canAffordToll = player.matchCoins >= branch.tollCost;
   // 残りラウンドが少ないほど、多少無理をしてでも近道を優先する
   const roundsLeft = state.totalRounds - state.round + 1;
@@ -64,7 +74,7 @@ function cpuDecideSnackPurchase() {
 // - 鼻きき草・いたずらの実: 手元に余裕があれば早めに使い切る(在庫を腐らせない)
 function cpuDecideItemToUse(state, player) {
   if (!player.items.length) return { choice: null, reason: null };
-  const distToSnack = snackGraphDistance(player.currentNodeId, state.activeSnackNodeId);
+  const distToSnack = nearestSnackDistance(player.currentNodeId, state.activeSnackNodeIds);
   const diceItem = player.items.find((id) => {
     const item = SNACK_ITEMS.find((it) => it.id === id);
     return item && item.effect === "extraDice";
@@ -91,6 +101,7 @@ function cpuDecideItemToUse(state, player) {
 
 window.LifeRoadSnackCPU = {
   snackGraphDistance,
+  nearestSnackDistance,
   cpuChooseSnackBranch,
   cpuDecideSnackPurchase,
   cpuDecideItemToUse,

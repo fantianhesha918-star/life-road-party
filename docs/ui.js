@@ -56,7 +56,7 @@ function renderTitleScreen(hasSave, profile) {
       <button class="btn ${hasSave ? "" : "btn-primary"}" onclick="App.goSetup()">一人で遊ぶ(CPU対戦)</button>
       <button class="btn" onclick="App.goOnlineMenu()">友達と通信して遊ぶ</button>
       ${App.hasSnackSave() ? `<button class="btn btn-primary" onclick="App.continueSnackGame()">🍪 おやつ集めモードの続きから</button>` : ""}
-      <button class="btn" onclick="App.goSnackSetup()">🍪 おやつ集めモード(試作)で遊ぶ</button>
+      <button class="btn" onclick="App.goSnackSetup()">🍪 おやつ集めモードで遊ぶ</button>
       <button class="btn" onclick="App.goProfile()">キャラクターを編集</button>
       <button class="btn" onclick="App.goShop()">ショップ</button>
       <button class="btn" onclick="App.goHelp()">📖 遊び方</button>
@@ -861,7 +861,7 @@ function renderSnackSetupScreen() {
   const cpuOptions = [1, 2, 3].map((n) => `<option value="${n}">CPU ${n}人(合計${n + 1}人)</option>`).join("");
   return `
     <section class="screen screen-setup">
-      <h2>🍪 おやつ集めモード(試作)</h2>
+      <h2>🍪 おやつ集めモード</h2>
       <p class="lead">周回・分岐マップでおやつを取り合う、マリオパーティ風の新モードです。全${SNACK_TOTAL_ROUNDS}ラウンドで、おやつ数の多いプレイヤーが優勝(同数なら所持コイン、さらに同額なら歩いたマス数で決定)。</p>
       <label class="field">
         <span>あなたのニックネーム</span>
@@ -1351,7 +1351,7 @@ function renderSnackActionResultPopup(snack) {
 function renderSnackMapViewOverlay(snack, state) {
   const isZoom = snack.phase === "MAP_ZOOM";
   const hint = isZoom && !state.mapZoomHintShown
-    ? `<div class="snack-map-pan-hint"><img src="images/snack/map-pan-hint.png" alt=""/><p>ドラッグしてマップを動かせます</p></div>`
+    ? `<div class="snack-map-pan-hint"><img src="images/snack/map-pan-hint.png" alt=""/><p>ドラッグで移動</p></div>`
     : "";
   return `
     <div class="snack-map-view-overlay">
@@ -1459,7 +1459,7 @@ function renderSnackGaburionResultPanel(snack, state, showNextButton) {
   const nextBtn = showNextButton
     ? player.isCPU
       ? ""
-      : `<button class="btn btn-primary" onclick="App.snackFinishGaburion()">つぎへ</button>`
+      : snackNextButton("次へ", "App.snackFinishGaburion()")
     : "";
   // 悪い結果の初回表示(GABURION_RESULT)にだけ画面揺れを付ける(仕様書「被害結果」演出、
   // つぎへ待ちのGABURION_APPLYまで揺らし続けると煩わしいため最初の一回に限定)。
@@ -1654,7 +1654,12 @@ function renderSnackResultScreen(state, humanId, resultReveal) {
   const ranking = getSnackRanking(state);
   const total = ranking.length;
   const stage = resultReveal ? resultReveal.stage : total;
-  const fullyRevealed = stage >= total;
+  const winnerRevealed = stage >= total;
+  const awards = buildSnackSpecialAwards(state);
+  const awardTotal = resultReveal ? resultReveal.awardTotal : awards.length;
+  const awardStage = resultReveal ? resultReveal.awardStage : awardTotal;
+  const spotlightActive = !!(resultReveal && resultReveal.spotlight);
+  const allDone = winnerRevealed && awardStage >= awardTotal && !spotlightActive;
   const rows = ranking
     .map((p, i) => {
       const rank = i + 1;
@@ -1679,15 +1684,39 @@ function renderSnackResultScreen(state, humanId, resultReveal) {
       `;
     })
     .join("");
-  const awardsHtml = fullyRevealed
-    ? `
+  // 優勝者スポットライト(仕様書14章の「1位発表時に中央拡大+台座+王冠+紙吹雪」)。
+  // 1位公開の直後、順位表とは別にオーバーレイとして短時間だけ被せる演出。
+  const winnerSpotlightHtml = spotlightActive
+    ? (() => {
+        const winner = ranking[0];
+        const visual = winner.avatar || { color: "#e4572e", speciesEmoji: null, costumeImage: null };
+        const confetti = Array.from({ length: 14 })
+          .map((_, i) => `<span class="snack-confetti-piece" style="--i:${i}"></span>`)
+          .join("");
+        return `
+          <div class="snack-winner-spotlight">
+            <div class="snack-confetti">${confetti}</div>
+            <div class="snack-winner-podium">
+              <span class="snack-winner-crown">👑</span>
+              ${renderAvatarBadge(visual, 64)}
+              <p class="snack-winner-name">${escapeHtml(winner.name)}${winner.isCPU ? "(CPU)" : ""}</p>
+              <p class="snack-winner-caption">1位！ 🍪${winner.snacks}個ゲット</p>
+            </div>
+          </div>
+        `;
+      })()
+    : "";
+  const awardsHtml =
+    winnerRevealed && !spotlightActive && awardStage > 0
+      ? `
       <div class="snack-special-awards">
         <p class="snack-special-awards-heading">特別賞</p>
         <ul class="snack-special-awards-list">
-          ${buildSnackSpecialAwards(state)
+          ${awards
+            .slice(0, awardStage)
             .map(
               (a) => `
-                <li class="snack-special-award-row">
+                <li class="snack-special-award-row snack-special-award-row-in">
                   <span>${a.emoji} ${escapeHtml(a.label)}</span>
                   <span class="snack-special-award-name">${escapeHtml(a.name)}</span>
                 </li>
@@ -1697,8 +1726,8 @@ function renderSnackResultScreen(state, humanId, resultReveal) {
         </ul>
       </div>
     `
-    : "";
-  const actionsHtml = fullyRevealed
+      : "";
+  const actionsHtml = allDone
     ? `
       <button class="btn btn-primary" onclick="App.goSnackSetup()">もう一度遊ぶ</button>
       <button class="btn" onclick="App.goTitle()">タイトルへ</button>
@@ -1707,6 +1736,7 @@ function renderSnackResultScreen(state, humanId, resultReveal) {
   return `
     <section class="screen screen-result">
       <h2>おやつ集め結果発表</h2>
+      ${winnerSpotlightHtml}
       <ul class="result-list">${rows}</ul>
       ${awardsHtml}
       ${actionsHtml}

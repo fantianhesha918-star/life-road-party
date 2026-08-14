@@ -10,7 +10,8 @@ const SKY_BACKDROP_URL = new URL("./images/sky-backdrop.jpg", import.meta.url).h
 const GROUND_TEXTURE_URL = new URL("./images/ground-grass.jpg", import.meta.url).href;
 const ROAD_TEXTURE_URL = new URL("./images/road-path.jpg", import.meta.url).href;
 
-const ROAD_HALF_WIDTH = 0.9;
+// 2026-08-13(第3弾)、利用者仕様書「道路幅を現在の65〜75%程度へ縮小」に沿って0.9→0.65(72%)に変更。
+const ROAD_HALF_WIDTH = 0.65;
 const HOP_HEIGHT = 0.5;
 const HOP_DURATION_MS = 450; // syncPlayersが差分から直接1回ホップさせるフォールバック用
 // 1マスずつの逐次ホップ(hopPath)専用の短めの時間。旧来の「移動元→移動先を1回で結ぶ」演出用
@@ -20,8 +21,38 @@ const HOP_STEP_DURATION_MS = 260;
 // 真後ろから追う三人称視点」の2段構成にする(2026-08-11、ユーザー指示で本編と統一)。
 // ループ型マップでも、追従先はあくまで現在の手番プレイヤー1人なので同じ値をそのまま使える。
 const CAMERA_IDLE = { back: 6.0, up: 5.2, trail: 3.4 };
-const CAMERA_MOVE = { up: 1.7, trail: 2.5 };
+// lookAhead: 2026-08-13追加。移動中、注視点をキャラクターより少し進行方向へ先読みし、
+// 次の経路が画面内に見えるようにする(Codexレビュー「移動中に次の2〜3マスが見える」対応)。
+const CAMERA_MOVE = { up: 1.7, trail: 2.5, lookAhead: 2.1 };
 const CAMERA_LERP = 0.08;
+
+// カメラ⇔対象の間に建物・木等が入り込んだ場合の簡易遮蔽対策(2026-08-13新規)。
+// このプロジェクトに既存のraycast実装が無いため、まずは「経路上に高さ0.5を超える
+// 何かがあればカメラを一定量持ち上げる」という最小限のしきい値判定から始める
+// (精密な形状回避や横方向への回避は未実装、将来の改善余地として残す)。
+const snackOcclusionRaycaster = new THREE.Raycaster();
+let lastOcclusionCheckTime = 0;
+let lastOcclusionLift = 0;
+function computeCameraOcclusionLift(cameraPos, targetPos) {
+  if (!scene) return 0;
+  const now = performance.now();
+  if (now - lastOcclusionCheckTime < 150) return lastOcclusionLift;
+  lastOcclusionCheckTime = now;
+  const toTarget = targetPos.clone().sub(cameraPos);
+  const dist = toTarget.length();
+  if (dist < 0.6) {
+    lastOcclusionLift = 0;
+    return 0;
+  }
+  const dir = toTarget.clone().normalize();
+  snackOcclusionRaycaster.set(cameraPos, dir);
+  snackOcclusionRaycaster.near = 0.4;
+  snackOcclusionRaycaster.far = Math.max(0.5, dist - 0.4);
+  const hits = snackOcclusionRaycaster.intersectObjects(scene.children, true);
+  const blocked = hits.some((h) => h.point.y > 0.5);
+  lastOcclusionLift = blocked ? 1.4 : 0;
+  return lastOcclusionLift;
+}
 
 // マリオパーティ風、頭上でサイコロが回転→ジャンプしながら着地して出目を確定させる演出用の定数。
 const DICE_SIZE = 0.42;
@@ -97,11 +128,13 @@ const SNACK_STAGE_MODELS = {
     scale: 0.718,
     yOffset: 0.175,
   },
-  // 中央広場の円形タイル。目標直径3.0
+  // 中央広場の円形タイル。目標直径3.0だったが、2026-08-13(第3弾)の利用者仕様書で
+  // 「現状比2〜2.5倍を目安に主役化」と指定されたため2.2倍(目標直径6.6)へ拡大。
+  // scale/yOffsetは同じ比率で拡大し、地面への接地位置がずれないようにする。
   plazaCircle: {
     url: new URL("./models/facility-plaza-circle.glb", import.meta.url).href,
-    scale: 1.5,
-    yOffset: 0.173,
+    scale: 1.5 * 2.2,
+    yOffset: 0.173 * 2.2,
   },
   // 遠景の丘(背景装飾)。目標幅6.0
   distantHill: {
@@ -109,11 +142,12 @@ const SNACK_STAGE_MODELS = {
     scale: 3.0,
     yOffset: 0.381,
   },
-  // 中央広場の肉球噴水(花壇部分と差し替え設置)。目標直径1.4
+  // 中央広場の肉球噴水(花壇部分と差し替え設置)。目標直径1.4だったが、plazaCircleと同じ理由・
+  // 同じ倍率(2.2倍、目標直径3.08)で拡大。
   pawFountain: {
     url: new URL("./models/prop-paw-fountain.glb", import.meta.url).href,
-    scale: 0.7,
-    yOffset: 0.135,
+    scale: 0.7 * 2.2,
+    yOffset: 0.135 * 2.2,
   },
   // ショップの出店(shopノード脇)。目標高さ1.8
   shopKiosk: {
@@ -153,9 +187,11 @@ const SNACK_STAGE_MODELS = {
   },
 };
 
-// 方角ゾーン(見本の北西=駅、北=オフィス、東=学校/病院/集合住宅、南=教会/住宅、西=公園)の
-// 建物・小物。本編(board3d.js)で使用中の素材・scale/yOffsetをそのまま再利用する
-// (2026-08-12、Box3実測をやり直さず本編の実測値を流用。値は board3d.js の STAGE_PROP_MODELS 参照)。
+// 地区ゾーン(見本の上=駅・商店・カフェ、右上〜右=役所・病院・学校、右下=住宅・庭・郵便局、
+// 下=教会・結婚式広場、左=公園)の建物・小物。本編(board3d.js)で使用中の素材・scale/yOffsetを
+// そのまま再利用する(2026-08-12、Box3実測をやり直さず本編の実測値を流用。値は board3d.js の
+// STAGE_PROP_MODELS 参照)。ゾーン名(civic/residential等)は2026-08-13の32マス化・地区再編で
+// station/office/school/church/parkから改名。
 const SNACK_ZONE_MODELS = {
   "building-station": { url: new URL("./models/building-station.glb", import.meta.url).href, scale: 1.15, yOffset: 0.775 },
   "building-office": { url: new URL("./models/building-office.glb", import.meta.url).href, scale: 1.3, yOffset: 1.3 },
@@ -175,8 +211,8 @@ const SNACK_ZONE_MODELS = {
 };
 // ゾーンごとに巡回配置する建物候補(stationゾーンは駅を専用配置するため対象外)
 const SNACK_ZONE_BUILDING_THEMES = {
-  office: ["building-office", "building-shop"],
-  school: ["building-school", "building-hospital", "building-apartment"],
+  civic: ["building-office", "building-school", "building-hospital"],
+  residential: ["building-house", "building-apartment", "building-shop"],
   church: ["facility-church", "building-house"],
   park: ["facility-park"],
 };
@@ -187,70 +223,264 @@ const SNACK_ZONE_PROP_MIN_GAP = 2.4;
 
 const textureLoader = new THREE.TextureLoader();
 
-// ==================== 通常マス2.5D(共通シリンダー土台+種類別PNGインポスター) ====================
-// 2026-08-13、Codexの「通常マス2.5D実装仕様書」により正式採用。個別3Dモデル化やマテリアル色分け
-// (旧SNACK_NODE_TYPE_COLORS)ではなく、全マス共通のクリーム色シリンダー土台(InstancedMesh、
-// 1ジオメトリ・1マテリアルを共有)+種類別の透過PNGを貼ったカメラ追従インポスターで16種類を表現する。
+// ==================== 通常マスの土台(共通シリンダー、全ファミリー共通) ====================
+// 全マス共通のクリーム色シリンダー土台(InstancedMesh、1ジオメトリ・1マテリアルを共有)。
+// 2026-08-13、この上に載せる表示は2.5D画像インポスターから9種類の立体シンボルへ置き換えた
+// (下記「通常マスの完全3D化」ブロック参照)。土台自体の形状は変更していない。
 const SPACE_METRICS = {
   diameter: 1.0,
   baseHeight: 0.16,
-  visualWidth: 1.12,
-  visualLift: 0.015,
 };
 // 旧プレースホルダー円柱(高さ0.14、中心y=-0.38)の上面(-0.31)を踏襲し、キャラクター(y=0基準)
 // との相対位置が変わらないようにする土台上面の基準高さ。実機確認の上で微調整すること。
 const SPACE_GROUND_Y = -0.31;
 
-// ロジック側のnodeType(snack-data.js)と表示用PNGファイル名を直結させないための対応表
-// (仕様書11章)。snack-data.jsで実際に使われているnodeTypeは12種のみ(仕様書側は16種、
-// event/paidGate/warp/family/investmentは現行データに存在しない予備枠)。branchは「分岐」の
-// 意味でjunction画像、item-boxはitem画像、startは既存のgate-start.glbで既に区別済みのため
-// normal画像へフォールバックする。
-const SPACE_VISUAL_MAP = {
-  start: "space-normal.png",
-  normal: "space-normal.png",
-  job: "space-job.png",
-  coin: "space-coin.png",
-  payday: "space-payday.png",
-  shop: "space-shop.png",
-  branch: "space-junction.png",
-  income: "space-income.png",
-  choice: "space-choice.png",
-  rest: "space-rest.png",
-  expense: "space-expense.png",
-  "item-box": "space-item.png",
+// ==================== 通常マスの完全3D化(9種類のシンボル、2026-08-13第3弾) ====================
+// 2D画像板のカメラ追従インポスターを廃止し、Three.jsのプリミティブ形状合成による立体シンボルに
+// 置き換える(board3d.jsのcreateBuildingPlaceholder/createTreePlaceholderと同じ「Group+
+// プリミティブ、共通マテリアル方針」を踏襲)。ロジック側のnodeType(12種)はそのまま維持し、
+// 表示だけ9つの視覚ファミリーへ集約する対応表(利用者仕様書5章の9種類に対応)。
+const SNACK_SPACE_FAMILY_MAP = {
+  start: "start",
+  coin: "plus",
+  income: "plus",
+  expense: "minus",
+  normal: "event",
+  choice: "event",
+  "item-box": "item",
+  job: "special",
+  payday: "special",
+  shop: "special",
+  rest: "special",
+  branch: "branch",
 };
-const SPACE_IMAGE_BASE = new URL("./images/snack-spaces/", import.meta.url).href;
-const spaceTextureCache = new Map(); // ファイル名 -> Promise<Texture>(同じ種類のマスでTexture/Materialを共有する)
+// "special"ファミリー内の種類差はシンボル上面の色で区別する(共有ジオメトリ+色分けの既存方針)
+const SNACK_SPECIAL_ACCENT_COLORS = { job: 0x5b8def, payday: 0x63c17a, shop: 0xe98cc9, rest: 0x5fb8b0 };
 
-function loadSpaceTexture(fileName) {
-  if (spaceTextureCache.has(fileName)) return spaceTextureCache.get(fileName);
-  const promise = new Promise((resolve, reject) => {
-    textureLoader.load(
-      SPACE_IMAGE_BASE + fileName,
-      (tex) => {
-        tex.colorSpace = THREE.SRGBColorSpace;
-        tex.minFilter = THREE.LinearMipmapLinearFilter;
-        tex.anisotropy = 4;
-        resolve(tex);
-      },
-      undefined,
-      reject
-    );
+function snackFamilyForNode(node) {
+  if (node.gaburion) return "gaburion";
+  return SNACK_SPACE_FAMILY_MAP[node.nodeType] || "event";
+}
+
+function matteMaterial(color, opts) {
+  return new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 0.82, metalness: 0 }, opts || {}));
+}
+
+// 星形(トロフィー用)。THREE.Shape+ExtrudeGeometryで5稜の星を作り、平置き(上面が見える向き)に
+// 回転させる(玩具の勲章のような、平たいシルエットで見分けられる形を狙う)。
+function createStarGeometry(outerR, innerR, depth) {
+  const shape = new THREE.Shape();
+  const points = 5;
+  const step = Math.PI / points;
+  for (let i = 0; i < points * 2; i++) {
+    const r = i % 2 === 0 ? outerR : innerR;
+    const angle = i * step - Math.PI / 2;
+    const x = Math.cos(angle) * r;
+    const y = Math.sin(angle) * r;
+    if (i === 0) shape.moveTo(x, y);
+    else shape.lineTo(x, y);
+  }
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 6 });
+  geo.rotateX(-Math.PI / 2);
+  geo.translate(0, -depth / 2, 0);
+  return geo;
+}
+
+// 肉球(スタート以外の各種装飾で使い回す既存の意匠、prop-paw-fountain等と統一)。
+function addPawMark(group, y, scale, color) {
+  const mat = matteMaterial(color);
+  const pad = new THREE.Mesh(new THREE.SphereGeometry(0.09 * scale, 10, 8), mat);
+  pad.position.set(0, y, 0.03 * scale);
+  group.add(pad);
+  const toeOffsets = [
+    [-0.09, 0.1],
+    [-0.03, 0.14],
+    [0.03, 0.14],
+    [0.09, 0.1],
+  ];
+  toeOffsets.forEach(([dx, dz]) => {
+    const toe = new THREE.Mesh(new THREE.SphereGeometry(0.045 * scale, 8, 6), mat);
+    toe.position.set(dx * scale, y, dz * scale);
+    group.add(toe);
   });
-  spaceTextureCache.set(fileName, promise);
-  return promise;
+}
+
+// 1. スタート(旗)。ゲート本体は既存gate-start.glbが別途配置されるため、ここは旗だけの簡素な意匠。
+function createStartSymbol() {
+  const group = new THREE.Group();
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.42, 8), matteMaterial(0xcbb27a));
+  pole.position.y = 0.21;
+  group.add(pole);
+  const flagShape = new THREE.Shape();
+  flagShape.moveTo(0, 0);
+  flagShape.lineTo(0.18, -0.05);
+  flagShape.lineTo(0, -0.1);
+  flagShape.closePath();
+  const flagGeo = new THREE.ExtrudeGeometry(flagShape, { depth: 0.01, bevelEnabled: false });
+  const flag = new THREE.Mesh(flagGeo, matteMaterial(0xe0574f, { side: THREE.DoubleSide }));
+  flag.position.set(0.018, 0.36, 0);
+  flag.userData.isFlag = true;
+  group.add(flag);
+  group.userData.flag = flag;
+  return group;
+}
+
+// 2. プラス(金貨+上向き矢印)
+function createPlusSymbol() {
+  const group = new THREE.Group();
+  const coinMat = matteMaterial(0xf5c451, { roughness: 0.55 });
+  [
+    [0, 0.05, 0],
+    [0.09, 0.11, 0.05],
+    [-0.07, 0.17, -0.04],
+  ].forEach(([x, y, z]) => {
+    const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.035, 14), coinMat);
+    coin.position.set(x, y, z);
+    coin.rotation.x = Math.PI / 2;
+    group.add(coin);
+  });
+  const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.24, 4), matteMaterial(0xffe27a));
+  arrow.position.set(0, 0.38, 0);
+  arrow.rotation.y = Math.PI / 4;
+  group.add(arrow);
+  return group;
+}
+
+// 3. マイナス(傾いた金貨+下向き矢印)
+function createMinusSymbol() {
+  const group = new THREE.Group();
+  const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.035, 14), matteMaterial(0xcbb27a, { roughness: 0.6 }));
+  coin.position.set(0, 0.09, 0);
+  coin.rotation.set(Math.PI / 2.3, 0, 0.3);
+  group.add(coin);
+  const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.22, 4), matteMaterial(0xe0574f));
+  arrow.position.set(0.02, 0.3, 0);
+  arrow.rotation.set(Math.PI, Math.PI / 4, 0);
+  group.add(arrow);
+  return group;
+}
+
+// 4. イベント(肉球付きブロック)。文字「？」は専用フォント読み込みが要るため、既存の肉球意匠で
+// 「何が起きるか分からない」ミステリー感を表現する簡略化(このセッションでの設計判断)。
+function createEventSymbol() {
+  const group = new THREE.Group();
+  const block = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.28, 0.32), matteMaterial(0xf3a953));
+  block.position.y = 0.16;
+  group.add(block);
+  addPawMark(group, 0.32, 1.1, 0xfff3e0);
+  return group;
+}
+
+// 5. アイテム(リボン付きプレゼント箱)
+function createItemSymbol() {
+  const group = new THREE.Group();
+  const box = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.26, 0.3), matteMaterial(0xdba6f0));
+  box.position.y = 0.15;
+  group.add(box);
+  const ribbonMat = matteMaterial(0xfff6e0, { roughness: 0.5 });
+  const ribbonA = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.05, 0.07), ribbonMat);
+  ribbonA.position.y = 0.29;
+  group.add(ribbonA);
+  const ribbonB = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.05, 0.34), ribbonMat);
+  ribbonB.position.y = 0.29;
+  group.add(ribbonB);
+  const bowA = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), ribbonMat);
+  bowA.position.set(-0.06, 0.32, 0);
+  group.add(bowA);
+  const bowB = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), ribbonMat);
+  bowB.position.set(0.06, 0.32, 0);
+  group.add(bowB);
+  return group;
+}
+
+// 6. 特別(星形トロフィー)。job/payday/shop/restの4種は土台・形状を共有し、アクセントカラーのみ変える。
+function createSpecialSymbol(nodeType) {
+  const accent = SNACK_SPECIAL_ACCENT_COLORS[nodeType] || 0xd4af37;
+  const group = new THREE.Group();
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.045, 0.16, 10), matteMaterial(0xd8b566, { roughness: 0.5 }));
+  stem.position.y = 0.08;
+  group.add(stem);
+  const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.06, 0.09, 10), matteMaterial(0xd8b566, { roughness: 0.5 }));
+  cup.position.y = 0.2;
+  group.add(cup);
+  const star = new THREE.Mesh(createStarGeometry(0.15, 0.06, 0.05), matteMaterial(accent, { roughness: 0.45 }));
+  star.position.y = 0.3;
+  group.add(star);
+  return group;
+}
+
+// 7. 分岐(木製案内板)
+function createBranchSymbol() {
+  const group = new THREE.Group();
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.4, 8), matteMaterial(0x9b6b43));
+  post.position.y = 0.2;
+  group.add(post);
+  const plankMat = matteMaterial(0xe4c391);
+  const plankA = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.08, 0.02), plankMat);
+  plankA.position.set(0.09, 0.34, 0);
+  plankA.rotation.y = 0.25;
+  group.add(plankA);
+  const plankB = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.02), plankMat);
+  plankB.position.set(-0.08, 0.26, 0);
+  plankB.rotation.y = -0.35;
+  group.add(plankB);
+  return group;
+}
+
+// 8. ガブリオン(爪痕の石碑+紫の小さな炎)。炎は常時演出(updateSnackSpaceSymbolsで脈動させる)。
+function createGaburionSymbol() {
+  const group = new THREE.Group();
+  const tablet = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 0.32, 6), matteMaterial(0x6b6b76, { roughness: 0.95 }));
+  tablet.position.y = 0.16;
+  group.add(tablet);
+  const clawMat = matteMaterial(0x5a2a5e, { roughness: 0.7 });
+  [-0.06, 0, 0.06].forEach((dx, i) => {
+    const claw = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.2, 0.01), clawMat);
+    claw.position.set(dx, 0.2, 0.16);
+    claw.rotation.z = 0.15 * (i - 1);
+    group.add(claw);
+  });
+  const flame = new THREE.Mesh(
+    new THREE.ConeGeometry(0.06, 0.16, 8),
+    new THREE.MeshStandardMaterial({ color: 0x9b51e0, emissive: 0x6a1b9a, emissiveIntensity: 0.6, roughness: 0.4 })
+  );
+  flame.position.y = 0.42;
+  group.add(flame);
+  group.userData.flame = flame;
+  return group;
+}
+
+function buildSpaceSymbol(node) {
+  const family = snackFamilyForNode(node);
+  switch (family) {
+    case "start":
+      return createStartSymbol();
+    case "plus":
+      return createPlusSymbol();
+    case "minus":
+      return createMinusSymbol();
+    case "item":
+      return createItemSymbol();
+    case "special":
+      return createSpecialSymbol(node.nodeType);
+    case "branch":
+      return createBranchSymbol();
+    case "gaburion":
+      return createGaburionSymbol();
+    case "event":
+    default:
+      return createEventSymbol();
+  }
 }
 
 let spaceBaseMesh = null; // 全マス共通のクリーム色シリンダー土台(InstancedMesh)
-let spaceImpostors = []; // [{ nodeId, mesh }]
-let lastImpostorCameraPos = new THREE.Vector3();
-let impostorsInitialized = false;
+let spaceSymbols = []; // [{ nodeId, group, family, node }]
+let lastSymbolLodCameraPos = new THREE.Vector3();
+let symbolLodInitialized = false;
 
 // 各ノードへ、共通シリンダー土台(1個のInstancedMeshをノード数ぶんインスタンス化)と、
-// 種類別PNGを貼ったカメラ追従インポスター(仕様書5章のupdateSpaceImpostor例に準拠、
-// 水平回転はカメラ方位へ追従・垂直角度は固定)を生成する。PNG読込失敗時は通常マスへ
-// フォールバックし進行を止めない(仕様書9章)。
+// 種類別の立体シンボル(9ファミリー、buildSpaceSymbolで生成)を配置する。
 function buildSpaceGroups(nodes) {
   const geometry = new THREE.CylinderGeometry(SPACE_METRICS.diameter / 2, SPACE_METRICS.diameter / 2, SPACE_METRICS.baseHeight, 24);
   const material = new THREE.MeshStandardMaterial({ color: 0xead7b6, roughness: 0.88, metalness: 0 });
@@ -267,46 +497,53 @@ function buildSpaceGroups(nodes) {
   spaceBaseMesh.instanceMatrix.needsUpdate = true;
   scene.add(spaceBaseMesh);
 
-  spaceImpostors = [];
-  const planeGeo = new THREE.PlaneGeometry(SPACE_METRICS.visualWidth, SPACE_METRICS.visualWidth);
+  spaceSymbols = [];
   nodes.forEach((n) => {
-    const fileName = SPACE_VISUAL_MAP[n.nodeType] || "space-normal.png";
-    const impostorMaterial = new THREE.MeshBasicMaterial({
-      transparent: true,
-      alphaTest: 0.03,
-      depthTest: true,
-      depthWrite: true,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-    });
-    const mesh = new THREE.Mesh(planeGeo, impostorMaterial);
     const pos = nodePositions.get(n.id);
-    mesh.position.set(pos.x, SPACE_GROUND_Y + SPACE_METRICS.visualLift, pos.z);
-    mesh.rotation.set(-Math.PI * 0.34, 0, 0);
-    scene.add(mesh);
-    spaceImpostors.push({ nodeId: n.id, mesh });
-    loadSpaceTexture(fileName)
-      .then((tex) => {
-        impostorMaterial.map = tex;
-        impostorMaterial.needsUpdate = true;
-      })
-      .catch((err) => {
-        console.warn("おやつ集めモード: マス表示画像の読み込みに失敗、種類なしのまま続行します", fileName, err);
-      });
+    const group = buildSpaceSymbol(n);
+    group.position.set(pos.x, SPACE_GROUND_Y + SPACE_METRICS.baseHeight / 2, pos.z);
+    group.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+    scene.add(group);
+    spaceSymbols.push({ nodeId: n.id, group, family: snackFamilyForNode(n), node: n });
   });
-  impostorsInitialized = false;
+  symbolLodInitialized = false;
 }
 
-// カメラが一定量動いた時だけ全マスのインポスター向きを再計算する(仕様書9章、標準プレイ中は
-// 毎フレーム全マス一括更新しない、という指示に対応)。
-function updateSpaceImpostors() {
-  if (!camera || !spaceImpostors.length) return;
-  if (impostorsInitialized && camera.position.distanceToSquared(lastImpostorCameraPos) < 0.01) return;
-  lastImpostorCameraPos.copy(camera.position);
-  impostorsInitialized = true;
-  spaceImpostors.forEach(({ mesh }) => {
-    const cameraYaw = Math.atan2(camera.position.x - mesh.position.x, camera.position.z - mesh.position.z);
-    mesh.rotation.set(-Math.PI * 0.34, cameraYaw, 0);
+// LOD(距離段階に応じた見え方の調整)とガブリオン/スタートの常時演出。
+// - 近距離: 等倍表示。中〜遠距離: 画面上で小さく潰れないよう緩やかに拡大する(仕様書9章の
+//   「画面上のマス直径が18〜22px未満にならないよう補正」の簡易実装、正確なpx計測はせず
+//   カメラ距離から連続的にスケールする近似)。
+// - ガブリオンの炎は常時脈動、スタートの旗は常時わずかに揺れる(仕様書10章)。
+const SNACK_SYMBOL_LOD_NEAR = 14;
+const SNACK_SYMBOL_LOD_FAR = 40;
+const SNACK_SYMBOL_LOD_MAX_SCALE = 1.8;
+
+function updateSnackSpaceSymbols(now) {
+  if (!camera || !spaceSymbols.length) return;
+  const cameraMoved = !symbolLodInitialized || camera.position.distanceToSquared(lastSymbolLodCameraPos) > 0.04;
+  if (cameraMoved) {
+    lastSymbolLodCameraPos.copy(camera.position);
+    symbolLodInitialized = true;
+  }
+  spaceSymbols.forEach(({ group, family }) => {
+    if (cameraMoved) {
+      const dist = camera.position.distanceTo(group.position);
+      const t = THREE.MathUtils.clamp((dist - SNACK_SYMBOL_LOD_NEAR) / (SNACK_SYMBOL_LOD_FAR - SNACK_SYMBOL_LOD_NEAR), 0, 1);
+      const scale = 1 + t * (SNACK_SYMBOL_LOD_MAX_SCALE - 1);
+      group.scale.setScalar(scale);
+    }
+    if (family === "gaburion" && group.userData.flame) {
+      const pulse = 0.75 + Math.sin(now / 260) * 0.25;
+      group.userData.flame.scale.setScalar(pulse);
+      group.userData.flame.material.emissiveIntensity = 0.45 + pulse * 0.3;
+    } else if (family === "start" && group.userData.flag) {
+      group.userData.flag.rotation.y = Math.sin(now / 700) * 0.25;
+    }
   });
 }
 
@@ -324,7 +561,7 @@ let camera = null;
 let characters = new Map(); // playerId -> entry
 let nodeMap = new Map(); // nodeId -> node
 let nodePositions = new Map(); // nodeId -> THREE.Vector3
-let mascotState = null; // { nodeId, entry: { group, model, baseY } }
+let mascotEntries = new Map(); // nodeId -> { group, model, baseY } (フェーズE: 同時出現数2以上化)
 let focusPlayerId = null;
 let isMoving = false; // 追従対象(focusPlayerId)が現在ホップ移動中かどうか
 let animationFrameId = null;
@@ -343,6 +580,13 @@ const diceFaceTextureCache = {};
 // "snackReveal"(おやつ地点を周回して見せる演出)
 let cameraMode = "follow";
 let mapBounds = null; // { centerX, centerZ, halfX, halfZ }
+// 浮島本体(地面+外周スカート)の実半径。ノード座標だけのmapBounds.halfX/halfZより一回り
+// 大きい(建物・木・岩が浮島の縁付近まで並ぶため)。全体表示カメラの距離計算はノード座標では
+// なくこちらを基準にする(2026-08-13、Codexレビュー「全体表示でも中央部分しか見えない」対応)。
+let islandRadius = { x: 14, z: 10 };
+const SNACK_FOG_FOLLOW = { near: 16, far: 40 };
+// 全体表示・ズーム中は追従時より奥行きが必要なため霞を大幅に弱める(利用者仕様書11章)。
+const SNACK_FOG_OVERVIEW = { near: 40, far: 140 };
 let zoomState = { level: 1.9, panX: 0, panZ: 0 };
 let zoomPointerActive = false;
 let zoomLastX = 0;
@@ -394,21 +638,41 @@ function computeLoopPoints(startId, zoneName) {
   return points;
 }
 
-// 外周⇔内周を結ぶ接続区間(4方向の入口+4方向の出口、計8本)の両端点列を作る。
-// 入口: 外周の分岐ノード→対応する内周ノード(有料)。出口: 内周ノード→合流する外周ノード(無料)。
+// 外周⇔接続⇔内周を結ぶ区間の両端点列を作る。zone(outer/connector/inner)をまたぐ
+// nextNodeIdsの辺をすべて拾う汎用実装(2026-08-13、32マス化で接続マスが外周・内周とは
+// 別の独立ノードになったため、「outerノードのzoneをまたぐ辺」という一般化した条件に変更。
+// 特定のzone名を決め打ちしないため、将来zoneの種類が増えても変更不要)。
 function computeConnectorSegments() {
   const segments = [];
   nodeMap.forEach((node) => {
-    if (node.zone !== "outer") return;
-    const innerNextId = node.nextNodeIds.find((id) => nodeMap.get(id) && nodeMap.get(id).zone === "inner");
-    if (innerNextId) segments.push([nodeVec3(node), nodeVec3(nodeMap.get(innerNextId))]);
-  });
-  nodeMap.forEach((node) => {
-    if (node.zone !== "inner") return;
-    const outerNextId = node.nextNodeIds.find((id) => nodeMap.get(id) && nodeMap.get(id).zone === "outer");
-    if (outerNextId) segments.push([nodeVec3(node), nodeVec3(nodeMap.get(outerNextId))]);
+    node.nextNodeIds.forEach((nextId) => {
+      const next = nodeMap.get(nextId);
+      if (next && next.zone !== node.zone) segments.push([nodeVec3(node), nodeVec3(next)]);
+    });
   });
   return segments;
+}
+
+// 外周ループを順序復元しつつ、分岐ノード(接続マスへの入口)がループの何%地点にあるかを返す。
+// playMapIntroの「分岐点付近で速度を落とす」演出用(2026-08-13、32マス化でノード数・分岐位置が
+// 変わったため、id命名規則やノード数を決め打ちしないId順序復元ベースの汎用実装に変更)。
+function computeBranchSlowPoints() {
+  const outerNodes = [...nodeMap.values()].filter((n) => n.zone === "outer");
+  if (!outerNodes.length) return [];
+  const start = outerNodes.find((n) => n.nodeType === "start") || outerNodes[0];
+  const orderedIds = [];
+  const seen = new Set();
+  let cur = start;
+  while (cur && !seen.has(cur.id)) {
+    orderedIds.push(cur.id);
+    seen.add(cur.id);
+    const nextId = cur.nextNodeIds.find((id) => nodeMap.get(id) && nodeMap.get(id).zone === "outer");
+    cur = nextId ? nodeMap.get(nextId) : null;
+  }
+  const total = orderedIds.length || 1;
+  return orderedIds
+    .map((id, idx) => (nodeMap.get(id).nodeType === "branch" ? idx / total : null))
+    .filter((v) => v !== null);
 }
 
 // board3d.jsのcreateRoadRibbonと同じ考え方(接線の法線方向に道幅ぶん左右へ広げてリボン化)を
@@ -577,6 +841,9 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
   }
 
   // 中央広場(円形タイル+肉球噴水)。CREDITS.mdの用途通り、マップの中心にまとめて設置する。
+  // 2026-08-13(第3弾)、利用者仕様書に沿って2.2倍(SNACK_STAGE_MODELS側でscale調整済み)に
+  // 拡大し、マップ全体の視線の中心として主役化。周囲に花壇・ベンチ・街灯をリング状に配置し、
+  // 内周ルートから庭園がよく見えるよう高い建物は寄せない(周辺装飾は花壇・ベンチ・街灯のみ)。
   const plazaGroup = new THREE.Group();
   plazaGroup.position.set(centerX, 0, centerZ);
   scene.add(plazaGroup);
@@ -586,13 +853,52 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
   scene.add(fountainGroup);
   loadDecorationModel(fountainGroup, SNACK_STAGE_MODELS.pawFountain);
 
+  const plazaRingRadius = 3.7; // 拡大後のplazaCircle(目標直径6.6)の外側に収まる半径
+  const plazaRingCount = 6;
+  for (let i = 0; i < plazaRingCount; i++) {
+    const angle = (i / plazaRingCount) * Math.PI * 2 + Math.PI / plazaRingCount;
+    const px = centerX + Math.cos(angle) * plazaRingRadius;
+    const pz = centerZ + Math.sin(angle) * plazaRingRadius;
+    const group = new THREE.Group();
+    group.position.set(px, 0, pz);
+    group.rotation.y = angle;
+    scene.add(group);
+    // 花壇・ベンチ・街灯を交互に配置(低木の専用素材は無いため、既存の花壇素材で代替)
+    const modelKey = i % 3 === 0 ? "prop-bench" : i % 3 === 1 ? "prop-streetlamp" : null;
+    if (modelKey) loadDecorationModel(group, SNACK_ZONE_MODELS[modelKey]);
+    else loadDecorationModel(group, SNACK_STAGE_MODELS.flowerbed);
+    zonePropPositions.push(group.position);
+  }
+
+  // おやつ候補・ガブリオン等の重要マスは避け、それ以外の外周マス(通常/収入/支出/選択)を
+  // 幅広く花壇候補にする(2026-08-13、32マス化で純粋な"normal"ノードが2箇所しかなく
+  // 従来の絞り込みでは花壇がほぼ置けなくなっていたため対象種別を広げた)。
   const flowerNodes = nodes
-    .filter((n) => n.zone === "outer" && n.nodeType === "normal" && !n.snackSpawnCandidate)
+    .filter((n) => n.zone === "outer" && !n.snackSpawnCandidate && !n.gaburion && ["normal", "income", "expense", "choice"].includes(n.nodeType))
     .slice(0, 6);
   flowerNodes.forEach((n) => {
     const pos = nodePositions.get(n.id);
     zonePropPositions.push(placeOutwardDecoration(pos, centerX, centerZ, 1.3, SNACK_STAGE_MODELS.flowerbed));
   });
+
+  // 島の縁に沿って点在させる簡易な岩(専用GLBが無いため、低ポリの正二十面体を粗いグレー
+  // マテリアルで手続き生成する。利用者仕様書4章「部分的な岩」への簡易対応)。
+  const rockCount = 10;
+  const rockGeo = new THREE.IcosahedronGeometry(0.4, 0);
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x9c948a, roughness: 1, flatShading: true });
+  for (let i = 0; i < rockCount; i++) {
+    const angle = (i / rockCount) * Math.PI * 2 + 0.4;
+    const rx = centerX + Math.cos(angle) * (halfX * 1.28 + 1.5);
+    const rz = centerZ + Math.sin(angle) * (halfZ * 1.28 + 1.5);
+    const rock = new THREE.Mesh(rockGeo, rockMat);
+    const s = 0.35 + (i % 3) * 0.18;
+    rock.scale.set(s, s * 0.7, s);
+    rock.position.set(rx, -0.42, rz);
+    rock.rotation.set(i * 0.7, i * 1.3, i * 0.4);
+    rock.receiveShadow = true;
+    rock.castShadow = true;
+    scene.add(rock);
+  }
 
   const hillCount = 6;
   for (let i = 0; i < hillCount; i++) {
@@ -666,7 +972,10 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
       tryPlaceZoneProp(pos, 1.6, SNACK_TREE_MODEL_KEYS[idx % SNACK_TREE_MODEL_KEYS.length]);
     } else if (zoneName === "station") {
       // 駅・ゲートは上で個別配置済みのため、街灯等の小物のみ巡回配置する
-    } else if (idx % 2 === 0) {
+    } else {
+      // 2026-08-13(第3弾)、32マス化で1地区あたりのノード数が3〜4個と少なくなったため、
+      // 従来の「半分だけ配置」ではまばらすぎる。地区ごとに小さな街としてまとまって見えるよう、
+      // 対象ノード全てに建物を配置する(利用者仕様書3章「地区ごとに小さな街としてまとめる」)。
       const themeModels = SNACK_ZONE_BUILDING_THEMES[zoneName];
       if (themeModels) {
         const used = themeCounters[zoneName] || 0;
@@ -758,20 +1067,21 @@ function updatePlayerRings() {
 }
 
 function createMascotEntry(nodeId) {
-  if (!nodeId) return;
+  if (!nodeId || mascotEntries.has(nodeId)) return;
   const pos = nodePositions.get(nodeId);
   if (!pos) return;
   const group = new THREE.Group();
   group.position.set(pos.x, 0, pos.z);
   scene.add(group);
-  mascotState = { nodeId, entry: { group, model: null, baseY: SNACK_STAGE_MODELS.mascot.yOffset } };
+  const entry = { group, model: null, baseY: SNACK_STAGE_MODELS.mascot.yOffset };
+  mascotEntries.set(nodeId, entry);
   // 台座はgroup直下の別要素として追加する(マスコット本体だけを上下バウンドさせるため、
   // マスコットのモデル読み込み完了後にentry.modelへ参照を残し、groupごと動かさないようにする)。
   loadDecorationModel(group, SNACK_STAGE_MODELS.spawnPedestal);
   const generation = sceneGeneration;
   loadGLTFSceneCached(SNACK_STAGE_MODELS.mascot.url)
     .then((template) => {
-      if (generation !== sceneGeneration) return;
+      if (generation !== sceneGeneration || mascotEntries.get(nodeId) !== entry) return;
       const model = template.clone(true);
       model.scale.setScalar(SNACK_STAGE_MODELS.mascot.scale);
       model.position.y = SNACK_STAGE_MODELS.mascot.yOffset;
@@ -779,21 +1089,24 @@ function createMascotEntry(nodeId) {
         if (node.isMesh) node.castShadow = true;
       });
       group.add(model);
-      mascotState.entry.model = model;
+      entry.model = model;
     })
     .catch((err) => {
       console.warn("おやつマスコットモデルの読み込みに失敗", err);
     });
 }
 
-function syncMascot(activeSnackNodeId) {
-  if (!activeSnackNodeId || !mascotState) return;
-  if (mascotState.nodeId === activeSnackNodeId) return;
-  const pos = nodePositions.get(activeSnackNodeId);
-  if (!pos) return;
-  mascotState.nodeId = activeSnackNodeId;
-  mascotState.entry.group.position.x = pos.x;
-  mascotState.entry.group.position.z = pos.z;
+// activeSnackNodeIds: 現在おやつが出現しているノードIdの配列(フェーズE、同時出現数2以上化)。
+// もう出現していないノードのマスコットは破棄し、新しく出現したノードには新規作成する。
+function syncMascots(activeSnackNodeIds) {
+  if (!activeSnackNodeIds) return;
+  const activeSet = new Set(activeSnackNodeIds);
+  mascotEntries.forEach((entry, nodeId) => {
+    if (activeSet.has(nodeId)) return;
+    scene.remove(entry.group);
+    mascotEntries.delete(nodeId);
+  });
+  activeSnackNodeIds.forEach((nodeId) => createMascotEntry(nodeId));
 }
 
 function createCharacterPlaceholder(color) {
@@ -885,6 +1198,11 @@ function hopToNode(entry, fromPos, toPos, toNodeId, durationMs) {
   });
 }
 
+// 停止マス間を見た目上何分割して歩かせるか(2026-08-13、32マス化でマス間隔が2倍近くに
+// なったため導入。中間ウェイポイントはこの関数内の見た目補間だけで完結し、snack-engine.js側の
+// 停止判定・イベント・所持金増減には一切関わらない(利用者仕様書どおり)。
+const HOP_WAYPOINT_SUBSTEPS = 2;
+
 // snack-engine.jsの移動結果に含まれるpath(通過したノードIdの配列)を1マスずつ順番に
 // ホップさせる(本編board3d.jsのhopStepsと同じ考え方、2026-08-12追加)。
 // pathが空(分岐選択のみ等で移動が発生しなかった手番)なら何もしない。
@@ -902,14 +1220,24 @@ async function hopPath(playerId, pathNodeIds, options) {
     const nodeId = pathNodeIds[i];
     const toPos = nodePositions.get(nodeId);
     if (!toPos) break;
-    await hopToNode(entry, fromPos, toPos, nodeId, stepDurationMs);
+    const subDurationMs = Math.max(60, stepDurationMs / HOP_WAYPOINT_SUBSTEPS);
+    let subFrom = fromPos;
+    for (let s = 1; s <= HOP_WAYPOINT_SUBSTEPS; s++) {
+      const isLastSub = s === HOP_WAYPOINT_SUBSTEPS;
+      const subTo = isLastSub ? toPos : fromPos.clone().lerp(toPos, s / HOP_WAYPOINT_SUBSTEPS);
+      // 中間サブステップではtoNodeIdを実ノードidに進めず、最後のサブステップでのみ
+      // entry.currentNodeIdが本当の到着先へ更新されるようにする(updateHopForEntryが
+      // t>=1でentry.currentNodeId=hop.toNodeIdを設定するため)。
+      await hopToNode(entry, subFrom, subTo, isLastSub ? nodeId : entry.currentNodeId, subDurationMs);
+      subFrom = subTo;
+    }
     fromPos = toPos;
     if (opts.onStep) opts.onStep(i + 1, pathNodeIds.length);
   }
   if (isFocus) isMoving = false;
 }
 
-function syncPlayers(players, activeSnackNodeId) {
+function syncPlayers(players, activeSnackNodeIds) {
   if (!scene) return;
   (players || []).forEach((p) => {
     let entry = characters.get(p.id);
@@ -929,7 +1257,7 @@ function syncPlayers(players, activeSnackNodeId) {
       }
     }
   });
-  syncMascot(activeSnackNodeId);
+  syncMascots(activeSnackNodeIds);
   syncTrapMarkers();
 }
 
@@ -941,10 +1269,14 @@ function focusCamera(playerId) {
 // (1=全体表示相当、最大3倍)。panX/panZはズーム時のドラッグパン量(ワールド座標オフセット)。
 // 見下ろし俯角は08_全体マップ再現指針の「42〜52度」を目安に、中間の48度付近
 // (atan(0.67/0.6)≈48.2度)へ調整した(2026-08-13、旧値0.85は約54.8度でやや急すぎた)。
-// 64ノードのノード数・構造自体はこの調整では変更しない。
+// 2026-08-13(第3弾)、距離の基準をノード座標(mapBounds)ではなく浮島本体の実半径
+// (islandRadius、建物・木・岩を含む本当の見た目の広さ)に変更し、外周に5〜8%の
+// 余白が残るようマージン係数を掛けた(Codexレビュー「全体表示で島の輪郭が切れる」対応)。
 function overviewCameraTarget(zoomLevel, panX, panZ) {
   const b = mapBounds || computeMapBounds();
-  const baseDist = Math.max(b.halfX, b.halfZ) * 1.6 + 6;
+  const margin = 1.07; // 外周に約7%の余白
+  const radius = Math.max(islandRadius.x, islandRadius.z) * margin;
+  const baseDist = radius * 1.6 + 4;
   const dist = baseDist / (zoomLevel || 1);
   const cx = b.centerX + panX;
   const cz = b.centerZ + panZ;
@@ -989,22 +1321,28 @@ function updateCamera() {
   if (!entry) return;
   const focusGroup = entry.group;
   let desired;
+  let lookAtPos;
   if (isMoving) {
     const forward = new THREE.Vector3(Math.sin(focusGroup.rotation.y), 0, Math.cos(focusGroup.rotation.y));
     desired = focusGroup.position
       .clone()
       .addScaledVector(forward, -CAMERA_MOVE.trail)
       .add(new THREE.Vector3(0, CAMERA_MOVE.up, 0));
+    // 注視点を進行方向へ先読みし、次の経路が画面内に見えるようにする。
+    lookAtPos = focusGroup.position.clone().addScaledVector(forward, CAMERA_MOVE.lookAhead).add(new THREE.Vector3(0, 0.5, 0));
   } else {
     desired = new THREE.Vector3(
       focusGroup.position.x - CAMERA_IDLE.trail,
       CAMERA_IDLE.up,
       focusGroup.position.z + CAMERA_IDLE.back
     );
+    lookAtPos = new THREE.Vector3(focusGroup.position.x, 0.5, focusGroup.position.z);
   }
+  const lift = computeCameraOcclusionLift(cameraCurrentPos, lookAtPos);
+  desired = desired.clone().add(new THREE.Vector3(0, lift, 0));
   cameraCurrentPos.lerp(desired, CAMERA_LERP);
   camera.position.copy(cameraCurrentPos);
-  camera.lookAt(focusGroup.position.x, 0.5, focusGroup.position.z);
+  camera.lookAt(lookAtPos.x, lookAtPos.y, lookAtPos.z);
 }
 
 // サイコロを振る手番プレイヤーへ少し寄って見下ろす演出用カメラ。対象が見つからない場合は
@@ -1016,7 +1354,10 @@ function updateDiceFocusCamera() {
     return;
   }
   const p = entry.group.position;
-  const desired = new THREE.Vector3(p.x - 1.15, 2.15, p.z + 1.65);
+  // 2026-08-13、Codexレビュー(サイコロが画面上端で切れる)対応で少し引いて画面幅20〜28%目安に収める。
+  const desired = new THREE.Vector3(p.x - 1.5, 2.55, p.z + 2.05);
+  const lift = computeCameraOcclusionLift(cameraCurrentPos, new THREE.Vector3(p.x, 0.9, p.z));
+  desired.y += lift;
   cameraCurrentPos.lerp(desired, CAMERA_LERP * 1.6);
   camera.position.copy(cameraCurrentPos);
   camera.lookAt(p.x, 0.9, p.z);
@@ -1146,21 +1487,32 @@ function detachZoomPointerHandlers() {
   el.removeEventListener("wheel", onZoomWheel);
 }
 
+// 全体表示・ズーム中だけ霞を弱め、通常プレイに戻ると元の近距離用の霞に戻す。
+function applySnackFogForMode(mode) {
+  if (!scene || !scene.fog) return;
+  const target = mode === "overview" || mode === "zoom" ? SNACK_FOG_OVERVIEW : SNACK_FOG_FOLLOW;
+  scene.fog.near = target.near;
+  scene.fog.far = target.far;
+}
+
 function enterOverview() {
   detachZoomPointerHandlers();
   cameraMode = "overview";
+  applySnackFogForMode("overview");
 }
 
 function enterZoom() {
   zoomState = { level: 1.9, panX: zoomState.panX || 0, panZ: zoomState.panZ || 0 };
   cameraMode = "zoom";
   attachZoomPointerHandlers();
+  applySnackFogForMode("zoom");
 }
 
 function exitMapView() {
   detachZoomPointerHandlers();
   cameraMode = "follow";
   zoomState = { level: 1.9, panX: 0, panZ: 0 };
+  applySnackFogForMode("follow");
 }
 
 // ==================== マップ紹介フライスルー ====================
@@ -1188,7 +1540,9 @@ function playMapIntro() {
   const RETURN_MS = 1400;
   const TOTAL_MS = ORBIT_MS + OVERVIEW_HOLD_MS + RETURN_MS;
   // 分岐点(外周4箇所、周回に対する割合)付近で少し速度を落とす(仕様書5章)。
-  const slowPoints = [0.125, 0.375, 0.625, 0.875];
+  // 2026-08-13、32マス化に伴いcomputeBranchSlowPointsで動的算出する形に変更(旧実装は
+  // 48ノード前提の比率をハードコードしており、ノード数が変わると分岐位置とズレていた)。
+  const slowPoints = computeBranchSlowPoints();
   function angularSpeedFactor(progress) {
     let factor = 1;
     slowPoints.forEach((p) => {
@@ -1260,7 +1614,7 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 
-function buildScene(nodes, players, activeSnackNodeId) {
+function buildScene(nodes, players, activeSnackNodeIds) {
   scene = new THREE.Scene();
   trapMarkerEntries = new Map();
   playerRings = new Map();
@@ -1283,6 +1637,8 @@ function buildScene(nodes, players, activeSnackNodeId) {
 
   const groundRadiusX = halfX * 1.35 + 4;
   const groundRadiusZ = halfZ * 1.35 + 4;
+  // 全体表示カメラの距離計算(overviewCameraTarget)が参照する実際の浮島半径を記録する。
+  islandRadius = { x: groundRadiusX, z: groundRadiusZ };
   const ground = new THREE.Mesh(
     createIslandGroundGeometry(groundRadiusX, groundRadiusZ),
     new THREE.MeshStandardMaterial({ map: loadGroundTexture(groundRadiusX * 2, groundRadiusZ * 2) })
@@ -1308,7 +1664,8 @@ function buildScene(nodes, players, activeSnackNodeId) {
   buildSpaceGroups(nodes);
 
   placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ);
-  createMascotEntry(activeSnackNodeId);
+  mascotEntries = new Map();
+  (activeSnackNodeIds || []).forEach((nodeId) => createMascotEntry(nodeId));
 
   characters = new Map();
   (players || []).forEach((p) => createCharacterEntry(p));
@@ -1455,19 +1812,19 @@ function animate() {
   animationFrameId = requestAnimationFrame(animate);
   const now = performance.now();
   characters.forEach((entry) => updateHopForEntry(entry, now));
-  if (mascotState && mascotState.entry && mascotState.entry.model) {
-    mascotState.entry.model.position.y = mascotState.entry.baseY + Math.sin(now / 500) * 0.08;
-  }
+  mascotEntries.forEach((entry) => {
+    if (entry.model) entry.model.position.y = entry.baseY + Math.sin(now / 500) * 0.08;
+  });
   updatePlayerRings();
   updateDiceAnim(now);
   updateCamera();
-  updateSpaceImpostors();
+  updateSnackSpaceSymbols(now);
   renderer.render(scene, camera);
 }
 
 // canvasEl: マウント先の<canvas>。options.nodes: SNACK_STAGE_NODES(snack-data.js)。
 // options.players: state.players([{id, currentNodeId, avatar:{color,speciesId,...}}, ...])。
-// options.currentTurnIndex: 初期カメラの追従対象。options.activeSnackNodeId: おやつ出現地点。
+// options.currentTurnIndex: 初期カメラの追従対象。options.activeSnackNodeIds: おやつ出現地点(配列)。
 function mount(canvasEl, options) {
   if (renderer) dispose();
   sceneGeneration += 1;
@@ -1496,7 +1853,7 @@ function mount(canvasEl, options) {
   cameraCurrentPos.set(focusStartPos.x - CAMERA_IDLE.trail, CAMERA_IDLE.up, focusStartPos.z + CAMERA_IDLE.back);
   camera.position.copy(cameraCurrentPos);
 
-  buildScene(nodes, players, opts.activeSnackNodeId);
+  buildScene(nodes, players, opts.activeSnackNodeIds);
 
   resize();
   window.addEventListener("resize", resize);
@@ -1515,9 +1872,9 @@ function dispose() {
   camera = null;
   characters = new Map();
   spaceBaseMesh = null;
-  spaceImpostors = [];
-  impostorsInitialized = false;
-  mascotState = null;
+  spaceSymbols = [];
+  symbolLodInitialized = false;
+  mascotEntries = new Map();
   trapMarkerEntries = new Map();
   playerRings = new Map();
   diceMesh = null;

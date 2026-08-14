@@ -3,8 +3,15 @@
 // 通貨・イベント・マップとも独立して新規定義する(既存データは一切変更しない)。
 
 const SNACK_TOTAL_ROUNDS = 10; // 1ラウンド = 全員が1回ずつ動く(既存メモの確定定義)
-const SNACK_START_COINS = 10;
-const SNACK_SNACK_PRICE = 20;
+const SNACK_START_COINS = 14;
+const SNACK_SNACK_PRICE = 8;
+// フェーズE(経済バランス再調整): 32マス化後もおやつが同時に1個(旧価格20・開始10コイン)
+// だと、実機シミュレーション(CPUのみ・4人・100〜200試合)で「平均0.14〜0.16個/プレイヤー・
+// 全員0個で終わる対局が57〜64%」という致命的な希少性になった。同時出現数・価格・開始コイン
+// の3変数を組み合わせて50件以上のシミュレーションで比較した結果(詳細はlife-road-party/
+// 作業状況.md参照)、同時出現数3・価格8・開始コイン14の組み合わせが2〜4人いずれでも
+// 平均2.2〜2.7個/プレイヤー(目標1〜3の範囲内)・全員0個の対局0%を安定して達成した。
+const SNACK_ACTIVE_SNACK_COUNT = 3;
 const SNACK_BRANCH_TOLL = 5; // 内周(近道)へ入る際の通行料
 
 // ラストスパート(仕様書14章FINAL_SPRINT)。「残り3ラウンド」からを対象とするので
@@ -90,32 +97,38 @@ function snackPlayerColor(seatNumber) {
   return SNACK_PLAYER_COLORS[(seatNumber - 1 + SNACK_PLAYER_COLORS.length) % SNACK_PLAYER_COLORS.length];
 }
 
-// ==================== ノードグラフ(外周48+内周16=64ノード) ====================
-// Codex連携チャットが試作着手前に用意していたマップ見本(map-stage1-animal-town-ring-park.png)・
-// 引き継ぎ書(ClaudeCode向け_マップ制作引き継ぎ.md)に沿って、外周48+内周16ノード・
-// 4方向の外周⇄内周接続に作り直したもの(2026-08-12、初版は見本を参照せず外周24+内周8・
-// 分岐1箇所の簡易版で実装していたことが判明し、見た目を見本相当に近づけるため再設計した)。
+// ==================== ノードグラフ(外周18+内周10+接続4=32停止マス) ====================
+// Codexレビュー(2026-08-13)で、64ノード版(外周48+内周16)が見本マップ
+// (08_全体マップ再現指針)の構図に遠く、おやつ取得も成立しないと指摘され、利用者の判断で
+// 32マス(外周18+内周10+接続4)へ作り直した(第3弾)。接続マスは外周・内周と重複カウントしない
+// 独立ノードとして新設し(利用者の正式仕様書「接続ノードは外周と内周で重複カウントせず」)、
+// マップの広さ・マス間隔(rx/rz)自体は変えず、見た目の移動距離は3D側の中間ウェイポイント
+// (snack-board3d.jsのhopPath、ゲームロジックには一切影響しない)で補う。
 // 内周は一方通行の近道ではなく、それ自体が閉じたループ(外周と同心円の内側の輪)。
-// 4箇所の分岐点(SNACK_BRANCH_OUTER_INDEXES)で内周へ入ると通行料(SNACK_BRANCH_TOLL)がかかり、
-// 内周を進んだ先の4箇所(出口は入口から2ノード先、SNACK_INNER_EXIT_OFFSET)で外周へ無料で
-// 戻れる(戻る際は入口から3ノード先の外周ノードへ合流し、近道した分だけ進む)。
+// 4箇所の分岐点(SNACK_BRANCH_OUTER_INDEXES)から接続マスへ入ると通行料(SNACK_BRANCH_TOLL)が
+// かかり、接続マス→内周入口(SNACK_INNER_ENTRY_INDEXES)→内周を進んだ先(出口は入口から
+// SNACK_INNER_EXIT_OFFSETノード先)で外周へ無料で戻れる(戻る際は分岐点からSNACK_OUTER_REJOIN_OFFSET
+// ノード先の外周ノードへ合流)。
 
-const SNACK_OUTER_COUNT = 48;
-const SNACK_INNER_COUNT = 16;
-const SNACK_BRANCH_OUTER_INDEXES = [6, 18, 30, 42]; // 内周への入口(4方向、各90度おき)
-const SNACK_INNER_ENTRY_INDEXES = [0, 4, 8, 12]; // 対応する内周側の入口(SNACK_BRANCH_OUTER_INDEXESと同じ並び順)
-const SNACK_INNER_EXIT_OFFSET = 2; // 入口から何ノード進んだ内周ノードに外周への出口を用意するか
+const SNACK_OUTER_COUNT = 18;
+const SNACK_INNER_COUNT = 10;
+const SNACK_BRANCH_OUTER_INDEXES = [2, 7, 11, 16]; // 接続マスへの入口(外周側、4方向)
+const SNACK_INNER_ENTRY_INDEXES = [0, 3, 5, 8]; // 対応する内周側の入口(SNACK_BRANCH_OUTER_INDEXESと同じ並び順)
+// 内周10ノードは分岐4箇所と間隔が近く、旧値(2)のままだと入口と出口が同じノードに重なる
+// 組み合わせが生じたため1に短縮した。合計移動コスト(接続1+内周1+出口合流1=3歩)は
+// 旧設計(内周2歩+出口合流1歩=3歩、外周直進が3歩で内周がむしろ1歩遅い)とほぼ同じ比率を保っている。
+const SNACK_INNER_EXIT_OFFSET = 1;
 const SNACK_OUTER_REJOIN_OFFSET = 3; // 出口が外周へ合流する際、対応する入口から何ノード先へ合流するか
 
-// マスの種類(見本の「北西=駅、北=オフィス/ショップ、東=学校/病院/集合住宅、南=教会/住宅、
-// 西=公園」という方角ゾーン)とは別に、3D側の建物配置だけに使う見た目専用の分類。
-// ゲームロジック(snack-engine.js/snack-cpu.js)はこの値を一切参照しない。
+// マスの種類(見本の「上=駅・商店・カフェ、右上〜右=役所・病院・学校、右下=住宅・庭・郵便局、
+// 下=教会・結婚式広場、左=公園」という地区ゾーン)とは別に、3D側の建物配置だけに使う
+// 見た目専用の分類。ゲームロジック(snack-engine.js/snack-cpu.js)はこの値を一切参照しない。
 const SNACK_OUTER_ZONES = [
-  { name: "station", from: 44, to: 3 }, // 北西: 駅・スタート地点(wrap)
-  { name: "office", from: 4, to: 11 }, // 北: 就職センター・ショップA
-  { name: "school", from: 12, to: 21 }, // 東: 学校・病院・集合住宅
-  { name: "church", from: 22, to: 33 }, // 南: 教会・住宅・ショップB
-  { name: "park", from: 34, to: 43 }, // 西: 公園
+  { name: "station", from: 16, to: 1 }, // 上: 駅・スタート地点(wrap)
+  { name: "civic", from: 2, to: 5 }, // 右上〜右: 役所・病院・学校
+  { name: "residential", from: 6, to: 8 }, // 右下: 住宅・庭・郵便局
+  { name: "church", from: 9, to: 12 }, // 下: 教会・結婚式広場
+  { name: "park", from: 13, to: 15 }, // 左: 公園
 ];
 
 function snackOuterZoneForIndex(i) {
@@ -127,54 +140,49 @@ function snackOuterZoneForIndex(i) {
 // 表示専用ラベルで、上のコメント通りゲームロジックへは影響しない。
 const SNACK_ZONE_LABELS = {
   station: "駅前エリア",
-  office: "オフィス街",
-  school: "学校エリア",
+  civic: "官公庁エリア",
+  residential: "住宅エリア",
   church: "教会エリア",
   park: "公園エリア",
 };
 
-// 外周のマス種別(index→種別の上書き。指定の無いindexは"normal")。
-// 現行(24ノード)の構成比を48ノードへ比例拡大しつつ、見本のゾーン配置
-// (北=ショップA、南=ショップB、就職センターは北)に寄せて配置した。
+// 外周のマス種別(index→種別の上書き。指定の無いindexは"normal")。分岐4箇所(branch)は
+// buildSnackStageNodes内で接続マス生成時にまとめて上書きするため、ここには含めない。
 const SNACK_OUTER_TYPE_OVERRIDES = {
   0: "start",
-  6: "branch", 18: "branch", 30: "branch", 42: "branch",
   8: "job",
-  10: "shop", 26: "shop",
-  5: "payday", 17: "payday", 29: "payday", 41: "payday",
-  2: "coin", 14: "coin", 20: "coin", 25: "coin", 37: "coin", 45: "coin",
-  9: "income", 33: "income",
-  13: "choice", 38: "choice",
-  21: "rest", 40: "rest",
-  24: "expense", 44: "expense",
-  3: "item-box", 16: "item-box", 28: "item-box", 39: "item-box",
+  13: "shop",
+  5: "payday", 14: "payday",
+  1: "coin", 9: "coin",
+  4: "income",
+  10: "choice",
+  12: "expense",
+  17: "item-box",
+  6: "rest",
 };
-// 内周のマス種別パターン(元の8ノード版のパターンを2周させて16ノード分にする)
+// 内周のマス種別パターン(既存の8種パターンをそのまま10ノードへ循環適用、ノード数非依存)
 const SNACK_INNER_TYPE_PATTERN = ["normal", "normal", "expense", "normal", "item-box", "expense", "normal", "normal"];
 
-// おやつ出現候補(見本の「外周8・内周2」に合わせ、5ゾーンへ均等に散らした)
-const SNACK_CANDIDATE_OUTER_INDEXES = [1, 7, 12, 19, 23, 31, 35, 43];
-const SNACK_CANDIDATE_INNER_INDEXES = [3, 11];
+// おやつ出現候補(外周3・内周2の計5箇所。32マス化に伴い、Phase Eの経済バランス調整で
+// 同時出現数・価格とあわせて見直す前提の暫定値)。
+const SNACK_CANDIDATE_OUTER_INDEXES = [4, 9, 14];
+const SNACK_CANDIDATE_INNER_INDEXES = [2, 7];
 
 function buildSnackStageNodes() {
   const nodes = [];
-  // 本編(board3d.js)のSQUARE_SPACING=2.2相当のマス間隔になるよう半径を設定
-  // (2026-08-12、旧値だとマス間隔が本編より広く間延びして見えたため調整)。
+  // マップの広さ・マス間隔は64ノード版から変更しない(利用者指示: 浮島・道路長・移動距離感は維持)。
   const rx = 17;
   const rz = 12.5;
   for (let i = 0; i < SNACK_OUTER_COUNT; i++) {
     const theta = -Math.PI / 2 + (i / SNACK_OUTER_COUNT) * Math.PI * 2;
-    const branchPos = SNACK_BRANCH_OUTER_INDEXES.indexOf(i);
-    const nextNodeIds = [`outer${(i + 1) % SNACK_OUTER_COUNT}`];
-    if (branchPos !== -1) nextNodeIds.push(`inner${SNACK_INNER_ENTRY_INDEXES[branchPos]}`);
     nodes.push({
       id: `outer${i}`,
       position: { x: Math.cos(theta) * rx, z: Math.sin(theta) * rz },
       zone: "outer",
       buildingZone: snackOuterZoneForIndex(i),
       nodeType: SNACK_OUTER_TYPE_OVERRIDES[i] || "normal",
-      nextNodeIds,
-      tollCost: branchPos !== -1 ? SNACK_BRANCH_TOLL : 0,
+      nextNodeIds: [`outer${(i + 1) % SNACK_OUTER_COUNT}`],
+      tollCost: 0,
       snackSpawnCandidate: SNACK_CANDIDATE_OUTER_INDEXES.includes(i),
       trap: false,
       gaburion: false,
@@ -182,9 +190,7 @@ function buildSnackStageNodes() {
   }
 
   // 内周は外周と同心円の内側の輪。入口(SNACK_INNER_ENTRY_INDEXES)の角度が対応する
-  // 外周の分岐点(SNACK_BRANCH_OUTER_INDEXES)と揃うよう、開始角をπ/4だけずらしてある
-  // (外周index6の角度=-π/4、内周index0の角度もこの式なら-π/4になり、接続の道が
-  // 短い直線で結べる。詳細はsnack-board3d.jsの接続リボン描画コメント参照)。
+  // 外周の分岐点(SNACK_BRANCH_OUTER_INDEXES)と揃うよう、開始角をπ/4だけずらしてある。
   const innerRx = rx * 0.4;
   const innerRz = rz * 0.4;
   const exitInnerIndexes = SNACK_INNER_ENTRY_INDEXES.map((k) => (k + SNACK_INNER_EXIT_OFFSET) % SNACK_INNER_COUNT);
@@ -205,10 +211,38 @@ function buildSnackStageNodes() {
       nextNodeIds,
       tollCost,
       snackSpawnCandidate: SNACK_CANDIDATE_INNER_INDEXES.includes(i),
-      trap: i === 6 || i === 14, // 内周の2箇所を罠を仕掛けやすい危険な近道の位置づけに(元は1箇所を比例拡大)
+      trap: false,
       gaburion: false,
     });
   }
+
+  // 接続マス(4個、外周・内周と重複カウントしない独立ノード)。外周と内周の中間(スポーク上)に
+  // 配置し、対応する外周の分岐点(SNACK_BRANCH_OUTER_INDEXES)から2本目の道としてつながる。
+  // 通行料は入口である外周ノード側に持たせる(resolveSnackBranchが「今立っているノードの
+  // tollCost」を参照する既存設計のため、接続マス自体のtollCostは0のままでよい)。
+  SNACK_BRANCH_OUTER_INDEXES.forEach((outerIdx, k) => {
+    const outerNode = nodes.find((n) => n.id === `outer${outerIdx}`);
+    const innerNode = nodes.find((n) => n.id === `inner${SNACK_INNER_ENTRY_INDEXES[k]}`);
+    const connectorId = `connector${k}`;
+    outerNode.nodeType = "branch";
+    outerNode.nextNodeIds.push(connectorId);
+    outerNode.tollCost = SNACK_BRANCH_TOLL;
+    nodes.push({
+      id: connectorId,
+      position: {
+        x: (outerNode.position.x + innerNode.position.x) / 2,
+        z: (outerNode.position.z + innerNode.position.z) / 2,
+      },
+      zone: "connector",
+      buildingZone: outerNode.buildingZone,
+      nodeType: "branch",
+      nextNodeIds: [innerNode.id],
+      tollCost: 0,
+      snackSpawnCandidate: false,
+      trap: false,
+      gaburion: false,
+    });
+  });
 
   return nodes;
 }
@@ -227,25 +261,25 @@ function findSnackNode(nodeId) {
 const SNACK_ORIGINAL_NODE_TYPES = new Map(SNACK_STAGE_NODES.map((n) => [n.id, n.nodeType]));
 
 // ステージ固有ギミック(仕様書14章、水路の橋)。4箇所ある分岐(SNACK_BRANCH_OUTER_INDEXES)の
-// うち1箇所(outer6=北エリアの近道)を対象に、第6ラウンド開始からは近道側を閉鎖する
+// うち1箇所(outer7=接続マスconnector1側の近道)を対象に、第6ラウンド開始からは近道側を閉鎖する
 // 「特定ラウンドで一度だけ閉じる橋」として実装(仕様の「開閉」を毎ラウンド反復させると
 // 経路探索・CPU判断・保存項目が複雑になるため、今回は一方向の閉鎖のみに絞った簡略版)。
 // nextNodeIdsを直接ミューテートすることで、経路探索(BFS)・分岐判定・CPU判断・ルート選択UIの
 // いずれも追加コード無しで閉鎖状態に追従する(既存のactiveTrapと同じ「実行時ミューテート可能な
 // シングルトンノード」パターンを踏襲)。
-const SNACK_GIMMICK_NODE_ID = "outer6";
+const SNACK_GIMMICK_NODE_ID = "outer7";
 const SNACK_GIMMICK_CLOSE_ROUND = 6;
 const SNACK_GIMMICK_ORIGINAL_NEXT_IDS = Object.freeze(
   (findSnackNode(SNACK_GIMMICK_NODE_ID) ? findSnackNode(SNACK_GIMMICK_NODE_ID).nextNodeIds : []).slice()
 );
 
 // ガブリオンイベント(05_ガブリオンイベント確定仕様書)。仕様は「32マス中2箇所」を前提に
-// 数を決めているため、ユーザー確認の上でこの絶対数(初期2箇所・第8ラウンドの変化上限4箇所)を
-// そのまま採用し、64ノードへの比例拡大はしない。既存nodeTypeを上書きしない追加フラグとして
-// node.gaburionを持たせる(activeTrap/snackSpawnCandidateと同じ「上書きしない別フラグ」方式)。
+// 数を決めており、32マス化(第3弾)によりこの前提がそのまま成立するようになった
+// (初期2箇所・第8ラウンドの変化上限4箇所は据え置き)。既存nodeTypeを上書きしない追加
+// フラグとしてnode.gaburionを持たせる(activeTrap/snackSpawnCandidateと同じ方式)。
 // 選定基準: スタート・分岐・ショップ・ギミック制御マス・おやつ出現候補マスと重複しない
-// normal種別のノードを、外周上でなるべく離れた2箇所から選んだ。
-const SNACK_GABURION_INITIAL_NODE_IDS = ["outer11", "outer34"];
+// normal種別のノードを、外周上でなるべく離れた2箇所(outer3/outer15、約半周ずつ離れている)から選んだ。
+const SNACK_GABURION_INITIAL_NODE_IDS = ["outer3", "outer15"];
 
 SNACK_GABURION_INITIAL_NODE_IDS.forEach((id) => {
   const n = findSnackNode(id);

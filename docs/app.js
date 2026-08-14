@@ -1389,7 +1389,7 @@ const App = {
             nodes: SNACK_STAGE_NODES,
             players: snack.players,
             currentTurnIndex: snack.currentTurnIndex,
-            activeSnackNodeId: snack.activeSnackNodeId,
+            activeSnackNodeIds: snack.activeSnackNodeIds,
           });
           this.snackBoard3dMounted = true;
         }
@@ -1411,7 +1411,7 @@ const App = {
     const focusId = player.id;
     this.ensureSnackBoard3DMounted().then(() => {
       if (this.screen !== "snack-game" || !this.snack || !this.snackBoard3dMounted) return;
-      window.LifeRoadSnackBoard3D.syncPlayers(snack.players, snack.activeSnackNodeId);
+      window.LifeRoadSnackBoard3D.syncPlayers(snack.players, snack.activeSnackNodeIds);
       window.LifeRoadSnackBoard3D.focusCamera(focusId);
     });
   },
@@ -1623,7 +1623,9 @@ const App = {
   // 呼び出し完了後のstartSnackOrderRoll()まで自分で面倒を見る(snackSkipReveal()から
   // 直接呼ばれた場合との二重呼び出しを避けるため、下のトークン確認を必ず通す)。
   async playSnackReveal() {
-    const node = findSnackNode(this.snack.state.activeSnackNodeId);
+    // 同時出現数が2以上でも、初回オリエンテーション演出は従来どおり1箇所だけ紹介する
+    // (複数箇所を続けて飛び回るとテンポが悪化するため、代表として先頭の1個に絞る)。
+    const node = findSnackNode(this.snack.state.activeSnackNodeIds[0]);
     if (!node) {
       this.startSnackOrderRoll();
       return;
@@ -1827,14 +1829,12 @@ const App = {
     if (!isTarget) return null;
     const ranking = getSnackRanking(state);
     const topCoins = ranking.length ? ranking[0].matchCoins : 0;
-    const snackNode = findSnackNode(state.activeSnackNodeId);
-    const snackZoneLabel = snackNode
-      ? snackNode.buildingZone
-        ? SNACK_ZONE_LABELS[snackNode.buildingZone] || ""
-        : snackNode.zone === "outer"
-          ? "外周"
-          : "内周"
-      : "";
+    const snackZoneLabels = state.activeSnackNodeIds
+      .map((id) => findSnackNode(id))
+      .filter(Boolean)
+      .map((n) => (n.buildingZone ? SNACK_ZONE_LABELS[n.buildingZone] || "" : n.zone === "outer" ? "外周" : "内周"))
+      .filter(Boolean);
+    const snackZoneLabel = [...new Set(snackZoneLabels)].join("・");
     return {
       ranking: ranking.map((p, i) => ({
         name: p.name,
@@ -2374,13 +2374,15 @@ const App = {
   finishSnackGame() {
     this.screen = "snack-result";
     this.clearSnackSave();
-    this.snack.resultReveal = { stage: 0 };
+    const awardTotal = buildSnackSpecialAwards(this.snack.state).length;
+    this.snack.resultReveal = { stage: 0, spotlight: false, awardStage: 0, awardTotal };
     this.render();
     this.advanceSnackResultReveal();
   },
 
   // 段階的な最終結果発表(仕様書14章FINAL_RESULT_REVEAL)。4位→1位の順に1段階ずつ、
   // 既存のROUND_INTRO等と同じ「setTimeout+トークン確認」パターンで自動的に公開していく。
+  // 1位公開後は優勝者スポットライト演出→特別賞の1件ずつ表示、の順に続く。
   advanceSnackResultReveal() {
     const total = getSnackRanking(this.snack.state).length;
     const token = (this._snackFlowToken = (this._snackFlowToken || 0) + 1);
@@ -2390,16 +2392,48 @@ const App = {
       const isFinal = this.snack.resultReveal.stage >= total;
       snackSfx(isFinal ? "winner" : "resultReveal");
       this.render();
-      if (!isFinal) snackDelay(650).then(step);
+      if (!isFinal) {
+        snackDelay(650).then(step);
+      } else {
+        this.playSnackWinnerSpotlight(token);
+      }
     };
     snackDelay(500).then(step);
   },
 
-  // 「結果をすぐ見る」タップ時、残りの段階を即座に全公開する。
+  // 1位確定直後、中央スポットライト(台座+王冠+紙吹雪)を一定時間だけ表示してから
+  // 特別賞の段階発表(advanceSnackAwardsReveal)へ進む。
+  playSnackWinnerSpotlight(token) {
+    if (!this.snack || !this.snack.resultReveal || this._snackFlowToken !== token) return;
+    this.snack.resultReveal.spotlight = true;
+    this.render();
+    snackDelay(1400).then(() => {
+      if (!this.snack || !this.snack.resultReveal || this._snackFlowToken !== token) return;
+      this.snack.resultReveal.spotlight = false;
+      this.render();
+      this.advanceSnackAwardsReveal(token);
+    });
+  },
+
+  advanceSnackAwardsReveal(token) {
+    if (!this.snack || !this.snack.resultReveal) return;
+    const total = this.snack.resultReveal.awardTotal;
+    const step = () => {
+      if (!this.snack || !this.snack.resultReveal || this._snackFlowToken !== token) return;
+      this.snack.resultReveal.awardStage += 1;
+      this.render();
+      if (this.snack.resultReveal.awardStage < total) snackDelay(450).then(step);
+    };
+    if (total > 0) snackDelay(300).then(step);
+  },
+
+  // 「結果をすぐ見る」タップ時、残りの段階(順位・スポットライト・特別賞)を即座に全公開する。
   snackSkipResultReveal() {
     if (!this.snack || !this.snack.resultReveal) return;
     this._snackFlowToken = (this._snackFlowToken || 0) + 1;
     this.snack.resultReveal.stage = getSnackRanking(this.snack.state).length;
+    this.snack.resultReveal.spotlight = false;
+    this.snack.resultReveal.awardStage = this.snack.resultReveal.awardTotal;
     this.render();
   },
 };

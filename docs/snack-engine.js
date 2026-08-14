@@ -34,10 +34,21 @@ function pickWeightedSnackOutcome(outcomes) {
   return outcomes[outcomes.length - 1];
 }
 
-function pickNewSnackLocation(excludeNodeId) {
-  const candidates = snackCandidateNodeIds().filter((id) => id !== excludeNodeId);
+// excludeIds: 他のおやつが既に置かれている(=重複配置を避けたい)ノードIdの配列。
+function pickNewSnackLocation(excludeIds) {
+  const exclude = new Set(excludeIds || []);
+  const candidates = snackCandidateNodeIds().filter((id) => !exclude.has(id));
   const pool = candidates.length ? candidates : snackCandidateNodeIds();
   return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// 同時出現数(SNACK_ACTIVE_SNACK_COUNT)ぶん、互いに重複しないおやつ出現地点を初期抽選する。
+function pickInitialSnackLocations() {
+  const ids = [];
+  for (let i = 0; i < SNACK_ACTIVE_SNACK_COUNT; i++) {
+    ids.push(pickNewSnackLocation(ids));
+  }
+  return ids;
 }
 
 function createSnackState(playerConfigs) {
@@ -58,7 +69,7 @@ function createSnackState(playerConfigs) {
     totalRounds: SNACK_TOTAL_ROUNDS,
     currentTurnIndex: 0,
     status: "playing", // playing | finished
-    activeSnackNodeId: pickNewSnackLocation(null),
+    activeSnackNodeIds: pickInitialSnackLocations(),
     pendingBranch: null, // { playerId, nodeId }
     pendingSnackChoice: null, // { playerId, nodeId }
     pendingStopChoice: null, // { playerId, title, prompt, options }
@@ -225,7 +236,7 @@ function resolveStopEvent(state, player, node, entries) {
 
 // ノードの「一つ前」を逆引きする(nextNodeIdsは一方通行の有向グラフなので、後退にはこの
 // 逆探索が必要)。ステージギミック(橋)がnextNodeIdsを実行時に書き換えるため、結果は
-// キャッシュせず毎回その場で求める(64ノード程度の走査なので負荷は無視できる)。
+// キャッシュせず毎回その場で求める(32ノード程度の走査なので負荷は無視できる)。
 function getSnackPredecessorNodeId(nodeId) {
   const found = SNACK_STAGE_NODES.find((n) => n.nextNodeIds.includes(nodeId));
   return found ? found.id : nodeId;
@@ -263,7 +274,7 @@ function pickGaburionOutcomeId(state, player) {
   const pool = buildGaburionOutcomePool(state, player);
   let resultId = pickWeightedSnackOutcome(pool).id;
   if (resultId === "SNACK_RELOCATE") {
-    const hasCandidate = snackCandidateNodeIds().some((id) => id !== state.activeSnackNodeId);
+    const hasCandidate = snackCandidateNodeIds().some((id) => !state.activeSnackNodeIds.includes(id));
     if (!hasCandidate) resultId = "BONUS_COINS"; // 仕様書「候補がない場合はBONUS_COINSへ置換」
   }
   return resultId;
@@ -317,7 +328,10 @@ function applyGaburionOutcome(state, player, resultId, entries) {
       return { targetPlayerId: other.id };
     }
     case "SNACK_RELOCATE": {
-      state.activeSnackNodeId = pickNewSnackLocation(state.activeSnackNodeId);
+      // 複数出現している場合は、その中から無作為に1個だけを引っ越しさせる(全部を動かすと
+      // 一度にプレイヤーが積み上げた土地勘が丸ごと無効になり、罰則として重すぎるため)。
+      const idx = Math.floor(Math.random() * state.activeSnackNodeIds.length);
+      state.activeSnackNodeIds[idx] = pickNewSnackLocation(state.activeSnackNodeIds);
       entries.push({ type: "info", text: "おやつがお引っ越しした！" });
       return { targetPlayerId: null };
     }
@@ -346,9 +360,9 @@ function applyGaburionOutcome(state, player, resultId, entries) {
 
 // ==================== FINAL_THREE_TRANSFORM(第8ラウンド開始時の盤面変化) ====================
 
-// 32マス前提の仕様書の分類比率表は64ノードのこの盤面には当てはまらないため、仕様書6章が
-// 用意している逃げ道(「新たにガブリオン2マス、マイナス2マスを増やす」)をそのまま採用し、
-// 変化対象は最大4マスに絞る(ユーザー確認済み、仕様の絶対数をそのまま使う方針)。
+// 32マス化(第3弾)により仕様書6章の分類比率表の前提(32マス)がそのまま成立するようになったが、
+// 引き続き仕様書が用意している簡略ルール(「新たにガブリオン2マス、マイナス2マスを増やす」)を
+// 採用し、変化対象は最大4マスに絞る(細かい分類比率表そのものの再現は今回もスコープ外)。
 function pickSnackFinalThreeCandidates(nodeTypes, excludeIds, count) {
   const pool = SNACK_STAGE_NODES.filter((n) => nodeTypes.includes(n.nodeType) && !n.gaburion && !excludeIds.has(n.id));
   const shuffled = pool.slice().sort(() => Math.random() - 0.5);
@@ -357,7 +371,7 @@ function pickSnackFinalThreeCandidates(nodeTypes, excludeIds, count) {
 
 function applySnackFinalThreeTransform(state) {
   if (state.finalThree.activated) return [];
-  const excludeIds = new Set([SNACK_START_NODE_ID, SNACK_GIMMICK_NODE_ID, state.activeSnackNodeId]);
+  const excludeIds = new Set([SNACK_START_NODE_ID, SNACK_GIMMICK_NODE_ID, ...state.activeSnackNodeIds]);
   state.players.forEach((p) => excludeIds.add(p.currentNodeId));
   SNACK_STAGE_NODES.forEach((n) => {
     if (n.nodeType === "branch" || n.nodeType === "shop") excludeIds.add(n.id);
@@ -393,7 +407,7 @@ function stepOntoNode(state, player, nodeId, entries, path) {
   processPassEvent(state, player, node, entries);
   // おやつ出現地点は「止まった時だけ」ではなく通過した時点で確認する(design通り)。
   // 残り歩数があっても一旦ここで停止し、購入確認が済んでから移動を再開する。
-  if (state.activeSnackNodeId === node.id) {
+  if (state.activeSnackNodeIds.includes(node.id)) {
     if (player.matchCoins >= SNACK_SNACK_PRICE) {
       state.pendingSnackChoice = { playerId: player.id, nodeId: node.id };
       return;
@@ -529,7 +543,8 @@ function resolveSnackChoice(state, buy) {
     player.matchCoins -= SNACK_SNACK_PRICE;
     player.snacks += 1;
     entries.push({ type: "snack", text: "おやつを手に入れた！", delta: -SNACK_SNACK_PRICE });
-    state.activeSnackNodeId = pickNewSnackLocation(node.id);
+    const idx = state.activeSnackNodeIds.indexOf(node.id);
+    if (idx !== -1) state.activeSnackNodeIds[idx] = pickNewSnackLocation(state.activeSnackNodeIds);
   } else if (buy) {
     entries.push({ type: "info", text: `コインが足りずおやつを買えなかった(あと${SNACK_SNACK_PRICE - player.matchCoins}コイン)` });
   } else {
@@ -622,8 +637,19 @@ function useSnackItem(state, playerId, itemId) {
       break;
     }
     case "hint": {
-      const snackNode = findSnackNode(state.activeSnackNodeId);
-      entries.push({ type: "info", text: `鼻きき草: 今のおやつは「${snackNode.zone === "inner" ? "内周(近道)" : "外周"}」側にあるにおいがする` });
+      // 複数出現時は、このプレイヤーから最も近い1個を教える(全部答えると探す楽しみが薄れるため)。
+      let nearestNode = null;
+      let nearestDist = Infinity;
+      state.activeSnackNodeIds.forEach((id) => {
+        const d = window.LifeRoadSnackCPU.snackGraphDistance(player.currentNodeId, id);
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearestNode = findSnackNode(id);
+        }
+      });
+      if (nearestNode) {
+        entries.push({ type: "info", text: `鼻きき草: 一番近いおやつは「${nearestNode.zone === "inner" ? "内周(近道)" : "外周"}」側にあるにおいがする` });
+      }
       break;
     }
     case "guard":
