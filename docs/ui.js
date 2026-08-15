@@ -971,6 +971,7 @@ function renderSnackPopupChoice({ phaseKey, seatNumber, title, subtitle, rowsHtm
         ${title ? `<h3 class="snack-popup-title">${escapeHtml(title)}</h3>` : ""}
         ${subtitle ? `<p class="snack-popup-subtitle">${escapeHtml(subtitle)}</p>` : ""}
         <div class="snack-popup-list">${rowsHtml}</div>
+        ${closable ? `<div class="snack-popup-footer"><button class="btn snack-popup-back-btn" onclick="${onClose}">← ゲームに戻る</button></div>` : ""}
         ${closable ? `<button class="snack-popup-close" onclick="${onClose}">✕</button>` : ""}
       </div>
     </div>
@@ -1015,7 +1016,6 @@ const SNACK_RANK_CHANGE_BADGES = {
 };
 
 function renderSnackHUD(state, humanId, rankChangeFx) {
-  const roundsLeft = Math.max(0, state.totalRounds - state.round + 1);
   const me = state.players.find((p) => p.id === humanId);
   const ranking = getSnackRanking(state);
   const currentId = currentSnackPlayer(state).id;
@@ -1048,10 +1048,13 @@ function renderSnackHUD(state, humanId, rankChangeFx) {
       `;
     })
     .join("");
-  // ラストスパート(仕様書14章FINAL_SPRINT)中は残りラウンド表示を終盤色で強調する。
-  const sprintClass = isSnackFinalSprint(state) ? " snack-round-badge-sprint" : "";
+  // 2026-08-16、常時画面に絵文字付きで表示していた残りラウンド数は見栄えを損ねるとの指摘を受け、
+  // ラウンド開始テロップ(renderSnackRoundIntroTelop、ラウンド切替時に必ず表示)と行動選択メニュー
+  // (renderSnackTurnMenuPopup/renderSnackNextActionPopup、常に確認できる)の2箇所に統合し、
+  // この常時表示バッジからは削除した。アイテム所持数だけは行動中も一目で見たい情報のため残すが、
+  // 絵文字(🎒)は使わず文字のみにする。
   return `
-    <div class="snack-round-badge${sprintClass}">⏳ 残り${roundsLeft}ラウンド ・ 🎒${me.items.length}/${SNACK_ITEM_SLOT_LIMIT}</div>
+    <div class="snack-round-badge">アイテム ${me.items.length}/${SNACK_ITEM_SLOT_LIMIT}</div>
     <div class="snack-hud-layer">${cards}</div>
   `;
 }
@@ -1216,6 +1219,13 @@ function renderSnackPlayerIntroTelop(snack, state) {
 
 // ==================== ターン中のポップアップ(サイコロ/アイテム/マップ/ログ) ====================
 
+// 2026-08-16、常時画面に絵文字付きで表示していたラウンド数(snack-round-badge)を撤去した代わりに、
+// 行動選択メニュー(このphaseなら常に開いて確認できる)の見出し下に一言だけ添える。
+function snackRoundSubtitle(state) {
+  const roundsLeft = Math.max(0, state.totalRounds - state.round + 1);
+  return `残り${roundsLeft}ラウンド`;
+}
+
 function renderSnackTurnMenuPopup(state, humanId) {
   const player = state.players.find((p) => p.id === humanId);
   const rows = [
@@ -1224,7 +1234,7 @@ function renderSnackTurnMenuPopup(state, humanId) {
     renderSnackChoiceRow({ iconSrc: SNACK_ACTION_ICONS.map, label: "マップ確認", onclick: "App.snackOpenMapOverview()" }),
     renderSnackChoiceRow({ iconSrc: SNACK_ACTION_ICONS.log, label: "ログを見る", onclick: "App.snackToggleLog()" }),
   ].join("");
-  return renderSnackPopupChoice({ phaseKey: "TURN_MENU", seatNumber: player.seatNumber, title: `${escapeHtml(player.name)}のターン`, rowsHtml: rows });
+  return renderSnackPopupChoice({ phaseKey: "TURN_MENU", seatNumber: player.seatNumber, title: `${escapeHtml(player.name)}のターン`, subtitle: snackRoundSubtitle(state), rowsHtml: rows });
 }
 
 function renderSnackNextActionPopup(state, humanId) {
@@ -1236,7 +1246,7 @@ function renderSnackNextActionPopup(state, humanId) {
     renderSnackChoiceRow({ iconSrc: SNACK_ACTION_ICONS.log, label: "ログを見る", onclick: "App.snackToggleLog()" }),
     renderSnackChoiceRow({ iconSrc: SNACK_ACTION_ICONS.next, label: "ターンを終了する", onclick: "App.snackEndTurn()", primary: true }),
   ].join("");
-  return renderSnackPopupChoice({ phaseKey: "NEXT_ACTION", seatNumber: player.seatNumber, title: "次の行動を選んでください", rowsHtml: rows });
+  return renderSnackPopupChoice({ phaseKey: "NEXT_ACTION", seatNumber: player.seatNumber, title: "次の行動を選んでください", subtitle: snackRoundSubtitle(state), rowsHtml: rows });
 }
 
 function renderSnackItemSelectPopup(state, humanId) {

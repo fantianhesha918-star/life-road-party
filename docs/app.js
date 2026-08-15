@@ -1681,6 +1681,7 @@ const App = {
   startSnackOrderRoll() {
     const ids = this.snack.state.players.map((p) => p.id);
     this.runSnackOrderRollGroup(ids, false).then((order) => {
+      if (this.snackBoard3dMounted && window.LifeRoadSnackBoard3D) window.LifeRoadSnackBoard3D.exitOrderLineup();
       this.snack.phase = "ORDER_RESULT";
       this.snack.orderRoll = { finalOrder: order };
       this.render();
@@ -1696,19 +1697,23 @@ const App = {
 
   // idsグループ内の全員が1個ずつサイコロを振り(人間はタップ待ち、CPUは自動)、
   // 同点者だけを再帰的に再抽選する(同点の中でさらに同点が出ても正しく解決する)。
+  // 対象プレイヤーは3D側で横一列に並べて正面を向かせ(enterOrderLineup)、頭上のサイコロ演出
+  // (recordSnackOrderRoll内のplayDiceRoll)を1人ずつ順番に見せる(2026-08-16、利用者指示
+  // 「キャラクターが横一列に並び正面を向いている状態で、頭上でサイコロが回ってジャンプして
+  // 止める演出」対応。同点再抽選では対象が絞られるため、再度呼ぶだけで自動的に並び直る)。
   async runSnackOrderRollGroup(ids, isTie) {
     this.snack.phase = isTie ? "ORDER_TIE_ROLL" : "ORDER_ROLL";
     this.snack.orderRoll = { ids, rolls: {}, isTie };
     this.render();
+    if (this.snackBoard3dMounted && window.LifeRoadSnackBoard3D) window.LifeRoadSnackBoard3D.enterOrderLineup(ids);
     for (const id of ids) {
       const player = this.snack.state.players.find((p) => p.id === id);
       if (player.id === this.snackHumanId) {
         await this.waitForSnackOrderRollTap(id);
       } else {
-        await snackDelay(600);
-        this.recordSnackOrderRoll(id, rollSnackDice());
-        this.render();
         await snackDelay(500);
+        await this.recordSnackOrderRoll(id, rollSnackDice());
+        this.render();
       }
     }
     const byValue = new Map();
@@ -1735,9 +1740,8 @@ const App = {
     return new Promise((resolve) => {
       this._snackOrderRollResolve = async () => {
         this._snackOrderRollResolve = null;
-        this.recordSnackOrderRoll(id, rollSnackDice());
+        await this.recordSnackOrderRoll(id, rollSnackDice());
         this.render();
-        await snackDelay(600);
         resolve();
       };
     });
@@ -1747,9 +1751,15 @@ const App = {
     if (this._snackOrderRollResolve) this._snackOrderRollResolve();
   },
 
+  // 3D演出がマウント済みならplayDiceRoll(頭上で回転→ジャンプして停止)を再生し終わるまで待つ。
+  // 未マウント時は従来通り固定ウェイトのみで進める(フォールバック)。
   recordSnackOrderRoll(id, value) {
     this.snack.orderRoll.rolls[id] = value;
     LifeRoadAudio.playSe("diceRoll");
+    if (this.snackBoard3dMounted && window.LifeRoadSnackBoard3D) {
+      return window.LifeRoadSnackBoard3D.playDiceRoll(id, value, snackSpeedScale);
+    }
+    return snackDelay(600);
   },
 
   // ==================== ラウンド・ターン切替テロップ ====================

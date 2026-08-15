@@ -72,6 +72,8 @@ const DICE_HEAD_HEIGHT = 1.15;
 const DICE_SPIN_DURATION_MS = 700;
 const DICE_SETTLE_DURATION_MS = 380;
 const DICE_HOLD_DURATION_MS = 260;
+// 行動順決め(orderLineup)で横一列に並べる際の間隔。
+const ORDER_LINEUP_SPACING = 1.15;
 
 // board3d.jsのSPECIES_MODEL_MAPと同一定義(2026-08-11時点)。動物種ごとの実3Dモデル。
 const SPECIES_MODEL_MAP = {
@@ -413,8 +415,15 @@ const diceFaceTextureCache = {};
 // "follow"(通常の駒追従、既定) | "intro"(開始時のマップ紹介、専用rAFループが直接カメラを操作) |
 // "overview"(マップ全体固定俯瞰) | "zoom"(overview基準の拡大+ドラッグパン) |
 // "diceFocus"(サイコロを振る手番プレイヤーへ寄る演出) | "branchOverview"(分岐マスの俯瞰) |
-// "snackReveal"(おやつ地点を周回して見せる演出)
+// "snackReveal"(おやつ地点を周回して見せる演出) | "orderLineup"(行動順決めサイコロで
+// 対象プレイヤーを横一列に並べて正面から見せる演出)
 let cameraMode = "follow";
+// 行動順決め演出(enterOrderLineup)。orderLineupIdsは現在整列中の対象(カメラのフレーミング用、
+// 同点再抽選時は再抽選対象のみに絞られる)。orderLineupAllIdsは一連の流れ(同点再抽選の再帰呼び出し
+// を含む)で一度でも整列させた全員の累積で、exitOrderLineup時にまとめて元のノード位置へ戻すために使う
+// (orderLineupIdsだけを見て戻すと、再抽選で対象から外れたプレイヤーが整列位置に置き去りになるため)。
+let orderLineupIds = [];
+let orderLineupAllIds = [];
 let mapBounds = null; // { centerX, centerZ, halfX, halfZ }
 // 浮島本体(地面+外周スカート)の実半径。ノード座標だけのmapBounds.halfX/halfZより一回り
 // 大きい(建物・木・岩が浮島の縁付近まで並ぶため)。全体表示カメラの距離計算はノード座標では
@@ -1343,6 +1352,10 @@ function updateCamera() {
     updateSnackRevealCamera();
     return;
   }
+  if (cameraMode === "orderLineup") {
+    updateOrderLineupCamera();
+    return;
+  }
   const entry = focusPlayerId ? characters.get(focusPlayerId) : null;
   if (!entry) return;
   const focusGroup = entry.group;
@@ -1482,6 +1495,80 @@ function exitSnackReveal() {
   if (cameraMode === "snackReveal") cameraMode = "follow";
   snackRevealNodeId = null;
   snackRevealContextPositions = [];
+}
+
+// 行動順決めサイコロ(ORDER_ROLL/ORDER_TIE_ROLL)の演出。対象プレイヤーを横一列に並べ、
+// 全員をカメラの正面(+Z方向)へ向けて整列させる。同点再抽選(isTie)では対象が絞られるため、
+// 同じ関数を再度呼べば残ったプレイヤーだけで自動的に並び直す(スポットライトが絞られる形になる)。
+// 各プレイヤーの頭上のサイコロ演出自体は既存のplayDiceRoll()をそのまま流用する。
+function enterOrderLineup(playerIds) {
+  if (!camera || !scene || !playerIds || !playerIds.length) return;
+  orderLineupIds = playerIds.slice();
+  playerIds.forEach((pid) => {
+    if (!orderLineupAllIds.includes(pid)) orderLineupAllIds.push(pid);
+  });
+  cameraMode = "orderLineup";
+  const points = playerIds.map((pid) => {
+    const entry = characters.get(pid);
+    return entry ? entry.group.position.clone() : new THREE.Vector3();
+  });
+  const centerX = points.reduce((s, p) => s + p.x, 0) / points.length;
+  const centerZ = points.reduce((s, p) => s + p.z, 0) / points.length;
+  const n = playerIds.length;
+  playerIds.forEach((pid, i) => {
+    const entry = characters.get(pid);
+    if (!entry) return;
+    entry.hop = null; // 直前まで移動演出が残っていた場合に備えて止める
+    const offsetX = (i - (n - 1) / 2) * ORDER_LINEUP_SPACING;
+    entry.group.position.set(centerX + offsetX, points[i].y, centerZ);
+    entry.group.rotation.y = 0; // +Z(カメラ側)を向く。faceDirectionと同じ回転規約(dx,dz)=(0,1)→0
+  });
+}
+
+function exitOrderLineup() {
+  if (cameraMode === "orderLineup") cameraMode = "follow";
+  // currentNodeId自体は変わっていないためsyncPlayersでは戻せない。実際のノード位置へ戻す
+  // (同じマスに複数人いる場合の円形オフセットは、以後は毎フレームのapplySameNodeLayoutが処理する)。
+  // 同点再抽選で対象から外れたプレイヤーも整列位置に置き去りにならないよう、累積リストで戻す。
+  orderLineupAllIds.forEach((pid) => {
+    const entry = characters.get(pid);
+    if (!entry) return;
+    const pos = nodePositions.get(entry.currentNodeId);
+    if (pos) entry.group.position.set(pos.x, pos.y, pos.z);
+  });
+  orderLineupIds = [];
+  orderLineupAllIds = [];
+}
+
+// 2026-08-16、以前は距離(dist)を定数で計算していたため、スマホ縦画面(横FOVが縦FOVより
+// かなり狭い)で4人プレイ時に列の両端が画面外へはみ出す不具合があった。camera.fov/aspectから
+// 実際の横方向の見える角度を逆算し、「横一列が余白込みで確実に収まる距離」を優先して使う
+// (通常時の見下ろし距離との大きい方を採用)。また、行動選択メニュー(画面下側の固定ポップアップ)に
+// 頭上のサイコロ演出が隠れないよう、注視点を頭の高さより上へ持ち上げてキャラクター全体を画面下寄りに
+// 表示する(持ち上げ量はdistに比例させ、人数が増えて距離が伸びても比率が変わらないようにする)。
+const ORDER_LINEUP_LOOKAT_RATIO = 2.2 / 4.67; // 2人時の実測(dist=4.67, lookAtY=2.2)から算出
+const ORDER_LINEUP_HEIGHT_RATIO = 0.4;
+
+function updateOrderLineupCamera() {
+  const entries = orderLineupIds.map((pid) => characters.get(pid)).filter(Boolean);
+  if (!entries.length) {
+    updateOverviewCamera();
+    return;
+  }
+  const points = entries.map((e) => e.group.position);
+  const centerX = points.reduce((s, p) => s + p.x, 0) / points.length;
+  const centerZ = points.reduce((s, p) => s + p.z, 0) / points.length;
+  const spread = Math.max((entries.length - 1) * ORDER_LINEUP_SPACING, 1.4);
+  const vFovRad = THREE.MathUtils.degToRad(camera.fov || 55);
+  const aspect = camera.aspect || 0.5;
+  const hFovRad = 2 * Math.atan(Math.tan(vFovRad / 2) * aspect);
+  const halfWidthNeeded = spread / 2 + 0.7; // 列の両端に余白を残す
+  const distForWidth = halfWidthNeeded / Math.tan(hFovRad / 2);
+  const dist = Math.max(distForWidth, spread * 1.05 + 3.2);
+  const desired = new THREE.Vector3(centerX, dist * ORDER_LINEUP_HEIGHT_RATIO, centerZ + dist);
+  cameraCurrentPos.lerp(desired, CAMERA_LERP * 1.3);
+  camera.position.copy(cameraCurrentPos);
+  camera.lookAt(centerX, dist * ORDER_LINEUP_LOOKAT_RATIO, centerZ);
 }
 
 // ==================== マップ全体表示・ズーム・ドラッグパン ====================
@@ -1961,6 +2048,8 @@ function dispose() {
   diceFocusPlayerId = null;
   branchOverviewNodeId = null;
   snackRevealNodeId = null;
+  orderLineupIds = [];
+  orderLineupAllIds = [];
 }
 
 window.LifeRoadSnackBoard3D = {
@@ -1980,4 +2069,6 @@ window.LifeRoadSnackBoard3D = {
   exitBranchOverview,
   enterSnackReveal,
   exitSnackReveal,
+  enterOrderLineup,
+  exitOrderLineup,
 };

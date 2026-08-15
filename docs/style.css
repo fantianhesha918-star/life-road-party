@@ -1296,11 +1296,6 @@ body {
   white-space: nowrap;
 }
 
-.snack-round-badge-sprint {
-  background: rgba(224, 122, 43, 0.94);
-  color: #fff;
-}
-
 .snack-remaining-steps {
   position: fixed;
   bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
@@ -1490,6 +1485,13 @@ body {
   align-items: center;
   gap: 6px;
   margin-top: 4px;
+}
+
+.snack-popup-back-btn {
+  width: auto;
+  min-width: 160px;
+  padding: 8px 20px;
+  font-size: 0.82rem;
 }
 
 .snack-popup-close {
