@@ -82,6 +82,14 @@ const SNACK_ITEMS = [
   { id: "snack-item-mischief-fruit", name: "いたずらの実", price: 7, emoji: "🍒", image: "images/snack/items/item-mischief-fruit.png", effect: "trap" },
   { id: "snack-item-sniff-grass", name: "鼻きき草", price: 5, emoji: "🌿", image: "images/snack/items/item-sniff-grass.png", effect: "hint" },
   { id: "snack-item-charm", name: "おまもり", price: 7, emoji: "🛡️", image: "images/snack/items/item-charm.png", effect: "guard" },
+  { id: "snack-item-dice-plus2", name: "追加サイコロ+2個", price: 10, emoji: "🎲", image: "images/snack/items/item-dice-plus2.png", effect: "extraDice", value: 2 },
+  { id: "snack-item-dice-plus3", name: "追加サイコロ+3個", price: 14, emoji: "🎲", image: "images/snack/items/item-dice-plus3.png", effect: "extraDice", value: 3 },
+  { id: "snack-item-steal", name: "横取り袋", price: 9, emoji: "👝", image: "images/snack/items/item-steal.png", effect: "steal" },
+  { id: "snack-item-warp", name: "ワープ玉", price: 12, emoji: "🔮", image: "images/snack/items/item-warp.png", effect: "warp" },
+  { id: "snack-item-pushback", name: "押し戻しの実", price: 8, emoji: "🌰", image: "images/snack/items/item-pushback.png", effect: "pushback" },
+  { id: "snack-item-aim-powder", name: "狙い目の粉", price: 8, emoji: "✨", image: "images/snack/items/item-aim-powder.png", effect: "forceRoll", value: 6 },
+  { id: "snack-item-double-seed", name: "ダブルチャンスの種", price: 8, emoji: "🌱", image: "images/snack/items/item-double-seed.png", effect: "doubleGain" },
+  { id: "snack-item-trade-ticket", name: "場所交換チケット", price: 10, emoji: "🎫", image: "images/snack/items/item-trade-ticket.png", effect: "tradePosition" },
 ];
 const SNACK_ITEM_SLOT_LIMIT = 3;
 

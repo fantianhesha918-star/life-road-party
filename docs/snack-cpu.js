@@ -96,6 +96,38 @@ function cpuDecideItemToUse(state, player) {
   if (hintItem && distToSnack >= 4) {
     return { choice: hintItem, reason: "おやつの方角を確かめるため鼻きき草を使う" };
   }
+  const findByEffect = (effect) =>
+    player.items.find((id) => {
+      const item = SNACK_ITEMS.find((it) => it.id === id);
+      return item && item.effect === effect;
+    });
+  // steal/pushbackは1位を狙う妨害アイテムなので、自分が既に1位なら使わない
+  // (getSnackLeaderExcludingが対象なしを返しゲーム側では無害だが、CPUの判断としても不自然なため)。
+  const isLeading = getSnackRanking(state)[0]?.id === player.id;
+  const stealItem = findByEffect("steal");
+  if (stealItem && !isLeading) {
+    return { choice: stealItem, reason: "先頭からコインを横取りする" };
+  }
+  const pushbackItem = findByEffect("pushback");
+  if (pushbackItem && !isLeading) {
+    return { choice: pushbackItem, reason: "先頭を押し戻す" };
+  }
+  const tradeItem = findByEffect("tradePosition");
+  if (tradeItem && !isLeading) {
+    return { choice: tradeItem, reason: "先頭と場所を交換する" };
+  }
+  const warpItem = findByEffect("warp");
+  if (warpItem && distToSnack < Infinity) {
+    return { choice: warpItem, reason: "おやつへ直接ワープする" };
+  }
+  const forceRollItem = findByEffect("forceRoll");
+  if (forceRollItem && distToSnack >= 3) {
+    return { choice: forceRollItem, reason: "狙い目の粉で大きい目を確定させる" };
+  }
+  const doubleGainItem = findByEffect("doubleGain");
+  if (doubleGainItem) {
+    return { choice: doubleGainItem, reason: "ダブルチャンスの種を使っておく" };
+  }
   return { choice: null, reason: null };
 }
 

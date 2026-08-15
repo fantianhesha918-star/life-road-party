@@ -1233,6 +1233,12 @@ const SNACK_ITEM_EFFECT_DESCRIPTIONS = {
   trap: () => "少し先に足止めの罠を仕掛ける",
   hint: () => "次のおやつが外周側か内周側かを教えてくれる",
   guard: () => "妨害を1回防いでくれる",
+  steal: () => "現在1位のプレイヤーからコインを横取りする",
+  warp: () => "出現中のおやつのうち一番近い場所へワープする",
+  pushback: () => "現在1位のプレイヤーを3マス後ろへ押し戻す",
+  forceRoll: (item) => `次のサイコロの出目を${item.value}に固定する`,
+  doubleGain: () => "今回の手番、最初に得るコイン・おやつを2倍にする",
+  tradePosition: () => "現在1位のプレイヤーと場所を交換する",
 };
 
 function renderSnackItemConfirmPopup(state, humanId, itemId) {

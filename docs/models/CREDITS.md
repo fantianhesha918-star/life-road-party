@@ -213,7 +213,7 @@
 - 最終ファイルサイズ: item-dice-plus1 108KB / item-dice-plus2 152KB / item-dice-plus3 162KB / item-steal 172KB / item-warp 118KB / item-pushback 129KB / item-trap 129KB / item-scent-herb 122KB / item-aim-powder 100KB / item-double-seed 101KB / item-charm-paw 157KB / item-trade-ticket 167KB
 - Blender簡易レンダーで全12点の形状を確認(いずれも正面レンダーで意匠がはっきり分かる、問題なし)
 - **2026-08-15、実際に`SNACK_ITEMS`(`docs/snack-data.js`)に定義済みの4種(item-dice-plus1・item-trap・item-scent-herb・item-charm-paw)のみ組み込み済み**。Three.jsでレンダリングした透過PNGを`docs/images/snack/items/`に切り出し、`SNACK_ITEMS`各エントリに`image`フィールドを追加(既存の`renderItemIcon`が`item.image`を絵文字より優先する仕組みをそのまま利用)。ショップ画面・アイテム使用メニュー・使用確認ポップアップの3箇所で絵文字から3Dレンダー画像に切り替わったことをPlaywrightで確認、コンソールエラー0件
-- **残り8種(item-dice-plus2/3・item-steal・item-warp・item-pushback・item-aim-powder・item-double-seed・item-trade-ticket)は未組み込み**。これらが表す「サイコロ+2/+3」「横取り」「ワープ」「押し戻し」「狙い目」「ダブルチャンス」「場所交換」機能はまだ`SNACK_ITEMS`にアイテムとして定義されておらず、ゲームロジック(`snack-engine.js`)側の新規実装が必要
+- **2026-08-15、残り8種も`SNACK_ITEMS`へ実装・組み込み完了**。`docs/snack-engine.js`の`useSnackItem`に6新規effect(steal/warp/pushback/forceRoll/doubleGain/tradePosition。dice-plus2/3は既存のextraDice effectをvalue違いで流用)を追加、`docs/snack-cpu.js`の`cpuDecideItemToUse`にCPU判断分岐を追加、`docs/ui.js`の`SNACK_ITEM_EFFECT_DESCRIPTIONS`に説明文を追加。steal/pushback/tradePositionは対象選択UIを新設せず、常に「自分以外の現在1位」を自動ターゲットにする設計に簡略化(`getSnackLeaderExcluding`)。warpは`stepOntoNode`をremainingSteps=1にしてから直接呼ぶことで、通常移動と同じ到着処理(おやつ確認等)を再利用。全12種の効果をPlaywright(直接呼び出し検証+CPU自動対戦の通し回帰)で確認、コンソールエラー0件
 
 ## item-shop-kiosk.glb / placed-trap-marker.glb / snack-spawn-marker.glb / snack-spawn-pedestal.glb / warp-destination-tile.glb / winner-trophy.glb(おやつ集めモード・マップ追加素材6種)
 

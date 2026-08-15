@@ -15,6 +15,10 @@ function currentSnackPlayer(state) {
 // 制限し、使用後は解除する(仕様書「1回振ると解除」)。state/playerIdを渡さない呼び出し
 // (Node vm回帰テスト等の素の乱数確認用)にも対応できるよう両方省略可能にしてある。
 function rollSnackDice(state, playerId) {
+  // 「狙い目の粉」で固定された出目があれば最優先(消費・entry表示はrollSnackAndMove側で行う。
+  // ここでは覗き見するだけに留め、3D側の演出(見た目だけの回転)にも同じ値を渡せるようにする)。
+  const forcedPlayer = state && playerId ? state.players.find((p) => p.id === playerId) : null;
+  if (forcedPlayer && forcedPlayer.pendingForcedRoll) return forcedPlayer.pendingForcedRoll;
   const cursedList = state && state.gaburion ? state.gaburion.cursedDiePlayerIds : null;
   const isCursed = !!(cursedList && playerId && cursedList.includes(playerId));
   const max = isCursed ? 3 : 6;
@@ -107,6 +111,8 @@ function createSnackState(playerConfigs) {
       shortcutsUsed: 0,
       guardCharges: 0,
       pendingExtraDice: 0,
+      pendingForcedRoll: 0,
+      pendingDoubleGain: false,
       // 「まだロールしていない(サイコロ待ち)」と「移動・確認まで完了した(つぎへ待ち)」を
       // 区別するためのフラグ。remainingSteps===0だけではこの2状態を判別できないため必要
       // (再開(セーブ復元)時にも正しい画面を出すため、UI側の一時状態ではなくstateへ持たせる)。
@@ -131,6 +137,12 @@ function getSnackRanking(state) {
     if (b.matchCoins !== a.matchCoins) return b.matchCoins - a.matchCoins;
     return b.totalStepsWalked - a.totalStepsWalked;
   });
+}
+
+// steal/pushback/tradePositionアイテムの自動ターゲット。対象選択UIを新設せず、常に「自分以外の
+// 現在1位」を狙う(マリオカートの青コウラ的な、先頭ほど狙われるキャッチアップ演出)。
+function getSnackLeaderExcluding(state, excludeId) {
+  return getSnackRanking(state).find((p) => p.id !== excludeId) || null;
 }
 
 // ==================== 移動 ====================
@@ -470,6 +482,24 @@ function accumulateSnackStats(player, entries) {
   });
 }
 
+// 「ダブルチャンスの種」。その手番で最初に発生したプラスのコイン/おやつ獲得(entries内を
+// 先頭から探して最初の1件だけ)を2倍にする。手番をまたいで持ち越さないよう、未消費でも
+// endSnackTurnでクリアする(snack-engine.js内、endSnackTurn参照)。
+function applySnackDoubleGainIfPending(player, entries) {
+  if (!player.pendingDoubleGain) return;
+  const target = entries.find((e) => e.type === "snack" || (e.type === "money" && e.delta > 0));
+  if (!target) return;
+  player.pendingDoubleGain = false;
+  if (target.type === "snack") {
+    player.snacks += 1;
+    target.text += "(ダブルチャンスの種でもう1個！)";
+  } else {
+    player.matchCoins += target.delta;
+    target.text += `(ダブルチャンスの種で+${target.delta}追加！)`;
+    target.delta *= 2;
+  }
+}
+
 function wrapUpSnackAction(state, player, entries, path) {
   const pending = state.pendingBranch
     ? "branch"
@@ -482,6 +512,7 @@ function wrapUpSnackAction(state, player, entries, path) {
           : null;
   const movementDone = !pending && player.remainingSteps === 0;
   if (movementDone) applySnackEncounterIfAny(state, player, entries);
+  applySnackDoubleGainIfPending(player, entries);
   accumulateSnackStats(player, entries);
   return { entries, pending, movementDone, path: path || [] };
 }
@@ -589,7 +620,10 @@ function applySnackGimmickForRound(state) {
 // 手番の移動・各種確認がすべて終わった後、明示的に呼ばれてはじめて次のプレイヤーへ進む
 // (ショップ立ち寄り・アイテム使用はターンハブから任意に行えるため、自動では進めない)。
 function endSnackTurn(state) {
-  currentSnackPlayer(state).turnRolled = false;
+  const player = currentSnackPlayer(state);
+  player.turnRolled = false;
+  // ダブルチャンスの種が未消費のまま手番が終わった場合、次の手番へ持ち越さない。
+  player.pendingDoubleGain = false;
   const total = state.players.length;
   const next = (state.currentTurnIndex + 1) % total;
   state.currentTurnIndex = next;
@@ -624,7 +658,7 @@ function useSnackItem(state, playerId, itemId) {
   switch (item.effect) {
     case "extraDice":
       player.pendingExtraDice = (player.pendingExtraDice || 0) + item.value;
-      entries.push({ type: "info", text: "次のサイコロの出目に+1される" });
+      entries.push({ type: "info", text: `次のサイコロの出目に+${item.value}される` });
       break;
     case "trap": {
       const node = findSnackNode(player.currentNodeId);
@@ -656,9 +690,79 @@ function useSnackItem(state, playerId, itemId) {
       player.guardCharges = (player.guardCharges || 0) + 1;
       entries.push({ type: "info", text: "おまもりを身につけた(次の妨害を1回無効化)" });
       break;
+    case "steal": {
+      const target = getSnackLeaderExcluding(state, player.id);
+      if (target && target.matchCoins > 0) {
+        const amount = Math.min(8, target.matchCoins);
+        target.matchCoins -= amount;
+        player.matchCoins += amount;
+        entries.push({ type: "money", text: `${target.name}からコインを${amount}横取りした！`, delta: amount });
+      } else {
+        entries.push({ type: "info", text: "横取りできる相手がいなかった" });
+      }
+      break;
+    }
+    case "warp": {
+      // 前方への経路を辿らず、出現中のおやつ候補のうち最も近い1つへ直接ノードを差し替える
+      // (movePlayerBackForGaburionの後退ワープと同じ「到着処理を通す/通さないは目的次第」という
+      // 考え方に基づき、こちらはおやつ取得が目的のため意図的にstepOntoNodeの到着処理を通す)。
+      let nearestId = null;
+      let nearestDist = Infinity;
+      state.activeSnackNodeIds.forEach((id) => {
+        const d = window.LifeRoadSnackCPU.snackGraphDistance(player.currentNodeId, id);
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearestId = id;
+        }
+      });
+      if (nearestId) {
+        // 通常のサイコロ移動と同じ到着処理(おやつ確認・停止イベント)をstepOntoNode経由で
+        // そのまま起こすため、remainingStepsを1にしてから呼ぶ(内部で1減算されてちょうど0になる)。
+        player.remainingSteps = 1;
+        player.turnRolled = true;
+        const warpEntries = [];
+        stepOntoNode(state, player, nearestId, warpEntries, []);
+        entries.push({ type: "info", text: "ワープ玉で一番近いおやつマスへ跳んだ！" });
+        entries.push(...warpEntries);
+      } else {
+        entries.push({ type: "info", text: "ワープ先(出現中のおやつ)が見つからなかった" });
+      }
+      break;
+    }
+    case "pushback": {
+      const target = getSnackLeaderExcluding(state, player.id);
+      if (target) {
+        movePlayerBackForGaburion(target, 3);
+        entries.push({ type: "info", text: `${target.name}を3マス後ろへ押し戻した！` });
+      } else {
+        entries.push({ type: "info", text: "押し戻せる相手がいなかった" });
+      }
+      break;
+    }
+    case "forceRoll":
+      player.pendingForcedRoll = item.value;
+      entries.push({ type: "info", text: `次のサイコロの目が${item.value}に固定される` });
+      break;
+    case "doubleGain":
+      player.pendingDoubleGain = true;
+      entries.push({ type: "info", text: "今回の手番、最初に得るコイン・おやつが2倍になる" });
+      break;
+    case "tradePosition": {
+      const target = getSnackLeaderExcluding(state, player.id);
+      if (target) {
+        const tmpNodeId = player.currentNodeId;
+        player.currentNodeId = target.currentNodeId;
+        target.currentNodeId = tmpNodeId;
+        entries.push({ type: "info", text: `${target.name}と場所を交換した！` });
+      } else {
+        entries.push({ type: "info", text: "交換できる相手がいなかった" });
+      }
+      break;
+    }
     default:
       break;
   }
+  accumulateSnackStats(player, entries);
   player.items.splice(idx, 1);
   player.itemsUsed += 1;
   return { ok: true, entries };
