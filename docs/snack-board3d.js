@@ -7,7 +7,9 @@ import * as THREE from "three";
 import { loadGLTFSceneCached } from "./gltf-cache.js";
 
 const SKY_BACKDROP_URL = new URL("./images/sky-backdrop.jpg", import.meta.url).href;
-const GROUND_TEXTURE_URL = new URL("./images/ground-grass.jpg", import.meta.url).href;
+// 2026-08-15、単色べったりの旧ground-grass.jpgから、Codex作成の繊維感・まだらのあるフェルト芝
+// テクスチャへ差し替え(利用者仕様書「つや消しのフェルト芝へ変更、弱い繊維感・明暗のまだら」対応)。
+const GROUND_TEXTURE_URL = new URL("./images/ground-grass-felt.jpg", import.meta.url).href;
 const ROAD_TEXTURE_URL = new URL("./images/road-path.jpg", import.meta.url).href;
 
 // 2026-08-13(第3弾)、利用者仕様書「道路幅を現在の65〜75%程度へ縮小」に沿って0.9→0.65(72%)に変更。
@@ -403,8 +405,16 @@ let islandCenter = { x: 0, z: 0 };
 // 中央を少し高く、外周をわずかに低く」対応) ====================
 // あくまで見た目のY座標のみに使う値で、ゲームロジック(ノードのx,z座標・停止判定・当たり判定)には
 // 一切使わない・影響させない。中心(t=0)ほど高く、外周(t=1)ほど低く、なめらかに変化する。
-const TERRAIN_CENTER_LIFT = 0.14;
-const TERRAIN_EDGE_DROP = 0.1;
+// **2026-08-15時点で振幅を一時的に0にして無効化中**: 地面ジオメトリを同心リング状の
+// 自作BufferGeometryに作り直したところ、テクスチャマップを貼ると原因不明のまま白っぽく
+// 潰れて表示される不具合が発生し(UV正規化・法線・頂点カラー有無・repeat値などを広く
+// 切り分けたが再現条件を特定できず)、セッション時間の制約で根本解決を持ち越した。
+// マス・キャラクター・建物等の高さ追従ロジック(terrainHeightAt呼び出し側)は実装済みのまま
+// 残してあるため、振幅を戻すだけで見た目の高低差を再度有効化できる想定。次回、地面ジオメトリ
+// 側の不具合(このファイルのcreateIslandGroundGeometryは元のShapeGeometry実装に戻した)を
+// 解決してから振幅を戻すこと。
+const TERRAIN_CENTER_LIFT = 0;
+const TERRAIN_EDGE_DROP = 0;
 function terrainHeightForT(t) {
   const tt = THREE.MathUtils.clamp(t, 0, 1);
   const s = tt * tt * (3 - 2 * tt); // smoothstep
@@ -414,6 +424,46 @@ function terrainHeightAt(worldX, worldZ) {
   const nx = (worldX - islandCenter.x) / (islandRadius.x || 1);
   const nz = (worldZ - islandCenter.z) / (islandRadius.z || 1);
   return terrainHeightForT(Math.sqrt(nx * nx + nz * nz));
+}
+
+// ==================== 地区別の芝色ブレンド(2026-08-15) ====================
+// 利用者仕様書「駅前・公共・住宅・教会・公園・中央庭園で、芝の色と整い方を5〜10%程度変える」対応。
+// snack-data.jsのSNACK_OUTER_ZONES(角度レンジによる地区分け)と同じ考え方を、ES module側でも
+// 使えるようそのまま複製している(SPECIES_MODEL_MAP等、他の値と同様の既存パターン)。
+// 色はCodex作成の地区別カラースワッチ(クロコ確認フォルダのプレビューシート)から抽出した実測値。
+const SNACK_TERRAIN_OUTER_COUNT = 18;
+const SNACK_TERRAIN_ZONE_RANGES = [
+  { name: "station", from: 16, to: 1 },
+  { name: "civic", from: 2, to: 5 },
+  { name: "residential", from: 6, to: 8 },
+  { name: "church", from: 9, to: 12 },
+  { name: "park", from: 13, to: 15 },
+];
+const SNACK_TERRAIN_ZONE_COLORS = {
+  station: 0x949f33,
+  civic: 0x869835,
+  residential: 0x939e35,
+  church: 0x829332,
+  park: 0x879e32,
+  central: 0x8c9b33,
+};
+const SNACK_TERRAIN_BASE_COLOR = 0x8e9932;
+// 中央庭園エリアとみなす半径(0=中心,1=外周)のしきい値。中央広場(半径3.7程度)を覆う範囲。
+const SNACK_TERRAIN_CENTRAL_RADIUS_T = 0.32;
+
+// ground.rotation.x=-Math.PI/2の変換により、ジオメトリのローカルy(=通常マス配置の角度計算で
+// いう「奥行き」)はワールドZ座標の符号反転にあたる(nodeVec3のワールドx,zにおける
+// theta=-π/2+(i/18)*2πの定義と揃えるための補正)。
+function terrainZoneColorForLocalXY(localX, localY, radiusX, radiusZ) {
+  const nx = localX / (radiusX || 1);
+  const nzForTheta = -localY / (radiusZ || 1);
+  const t = Math.sqrt(nx * nx + nzForTheta * nzForTheta);
+  if (t < SNACK_TERRAIN_CENTRAL_RADIUS_T) return SNACK_TERRAIN_ZONE_COLORS.central;
+  const theta = Math.atan2(nzForTheta, nx);
+  let i = Math.round(((theta + Math.PI / 2) / (Math.PI * 2)) * SNACK_TERRAIN_OUTER_COUNT);
+  i = ((i % SNACK_TERRAIN_OUTER_COUNT) + SNACK_TERRAIN_OUTER_COUNT) % SNACK_TERRAIN_OUTER_COUNT;
+  const zone = SNACK_TERRAIN_ZONE_RANGES.find((z) => (z.from <= z.to ? i >= z.from && i <= z.to : i >= z.from || i <= z.to));
+  return zone ? SNACK_TERRAIN_ZONE_COLORS[zone.name] : SNACK_TERRAIN_BASE_COLOR;
 }
 const SNACK_FOG_FOLLOW = { near: 16, far: 40 };
 // 全体表示・ズーム中は追従時より奥行きが必要なため霞を大幅に弱める(利用者仕様書11章)。
@@ -554,57 +604,40 @@ function buildRibbon(points, closed) {
 }
 
 // 地面を矩形ではなく楕円形にし(見本の「フェルト製の島」らしい輪郭に近づける)。
-// 以前はShapeGeometry(境界の点だけを三角形分割)で完全に平坦だったが、2026-08-15、
-// 「中央を少し高く、外周をわずかに低く」に対応するため、中心点+同心楕円リング(段階的に
-// 半径を広げる)を自前で組み立てるジオメトリに変更した。各リングの高さはterrainHeightForTで
-// 決め、リング間はbuildRibbon/createIslandEdgeSkirtと同じ「a,c,b,b,c,d」の帯三角形分割を使う。
-// テクスチャが正しくタイル表示されるよう、UVはワールド座標ベース(loadGroundTextureの
-// repeat.set(width/3,depth/3)と揃えるため、同じ/3の係数)を手動で割り当てる。
+// 2026-08-15、中央を高く外周を低くするドーム状ジオメトリ(同心リング)を試作したが、
+// テクスチャを貼ると原因不明のまま白っぽく潰れる不具合が解決できなかったため、地面ジオメトリ
+// 自体は元のShapeGeometry(境界の点だけを三角形分割、完全に平坦)に戻している
+// (TERRAIN_CENTER_LIFT/TERRAIN_EDGE_DROPの定義箇所にあるコメント参照)。
+// テクスチャが正しくタイル表示されるよう、ShapeGeometryの既定UV(0〜1に正規化)ではなく
+// ワールド座標ベースのUVを手動で割り当てる(loadGroundTextureのrepeat.set(width/3,depth/3)と
+// 揃えるため、同じ/3の係数を使う)。
 function createIslandGroundGeometry(radiusX, radiusZ) {
+  const shape = new THREE.Shape();
   const segments = 64;
-  const rings = 6;
-  const positions = [0, 0, terrainHeightForT(0)];
-  const uvs = [0, 0];
-
-  for (let r = 1; r <= rings; r++) {
-    const t = r / rings;
-    const rx = radiusX * t;
-    const rz = radiusZ * t;
-    const h = terrainHeightForT(t);
-    for (let i = 0; i < segments; i++) {
-      const angle = (i / segments) * Math.PI * 2;
-      const x = Math.cos(angle) * rx;
-      const y = Math.sin(angle) * rz;
-      positions.push(x, y, h);
-      uvs.push(x / 3, y / 3);
-    }
+  for (let i = 0; i <= segments; i++) {
+    const angle = (i / segments) * Math.PI * 2;
+    const x = Math.cos(angle) * radiusX;
+    const y = Math.sin(angle) * radiusZ;
+    if (i === 0) shape.moveTo(x, y);
+    else shape.lineTo(x, y);
   }
-
-  const indices = [];
-  // 中心点(index0)と最初のリングを結ぶ扇
-  for (let i = 0; i < segments; i++) {
-    const b = 1 + i;
-    const d = 1 + ((i + 1) % segments);
-    indices.push(b, 0, d);
+  const geometry = new THREE.ShapeGeometry(shape, segments);
+  const pos = geometry.attributes.position;
+  const uv = new Float32Array(pos.count * 2);
+  const colors = new Float32Array(pos.count * 3);
+  const tmpColor = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    uv[i * 2] = x / 3;
+    uv[i * 2 + 1] = y / 3;
+    tmpColor.setHex(terrainZoneColorForLocalXY(x, y, radiusX, radiusZ));
+    colors[i * 3] = tmpColor.r;
+    colors[i * 3 + 1] = tmpColor.g;
+    colors[i * 3 + 2] = tmpColor.b;
   }
-  // リング間を結ぶ帯(buildRibbonと同じ内周/外周の対応関係)
-  for (let r = 1; r < rings; r++) {
-    const innerStart = 1 + (r - 1) * segments;
-    const outerStart = 1 + r * segments;
-    for (let i = 0; i < segments; i++) {
-      const a = innerStart + i;
-      const b = outerStart + i;
-      const c = innerStart + ((i + 1) % segments);
-      const d = outerStart + ((i + 1) % segments);
-      indices.push(a, c, b, b, c, d);
-    }
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
   return geometry;
 }
 
@@ -1518,7 +1551,12 @@ function buildScene(nodes, players, activeSnackNodeIds) {
   nodePositions = new Map(nodes.map((n) => [n.id, nodeVec3(n)]));
   const ground = new THREE.Mesh(
     createIslandGroundGeometry(groundRadiusX, groundRadiusZ),
-    new THREE.MeshStandardMaterial({ map: loadGroundTexture(groundRadiusX * 2, groundRadiusZ * 2) })
+    // vertexColors:trueで地区ごとの色(createIslandGroundGeometryのcolor属性)をテクスチャに
+    // 乗算ブレンドする(利用者仕様書「地区ごとに5〜10%程度色を変える」対応)。
+    new THREE.MeshStandardMaterial({
+      map: loadGroundTexture(groundRadiusX * 2, groundRadiusZ * 2),
+      vertexColors: true,
+    })
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(centerX, -0.5, centerZ);
