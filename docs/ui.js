@@ -1697,8 +1697,9 @@ function renderSnackResultScreen(state, humanId, resultReveal) {
           <div class="snack-winner-spotlight">
             <div class="snack-confetti">${confetti}</div>
             <div class="snack-winner-podium">
-              <span class="snack-winner-crown">👑</span>
+              <img class="snack-winner-trophy-img" src="./images/snack/winner-trophy.png" alt="" />
               ${renderAvatarBadge(visual, 64)}
+              <img class="snack-winner-podium-img" src="./images/snack/winners-podium.png" alt="" />
               <p class="snack-winner-name">${escapeHtml(winner.name)}${winner.isCPU ? "(CPU)" : ""}</p>
               <p class="snack-winner-caption">1位！ 🍪${winner.snacks}個ゲット</p>
             </div>

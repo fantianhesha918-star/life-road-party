@@ -651,9 +651,19 @@ body {
   100% { transform: scale(1); opacity: 1; }
 }
 
-.snack-winner-crown {
-  font-size: 2rem;
+.snack-winner-trophy-img {
+  width: 56px;
+  height: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.2));
   animation: snack-winner-crown-bob 1.1s ease-in-out infinite;
+}
+
+.snack-winner-podium-img {
+  width: 96px;
+  height: auto;
+  object-fit: contain;
+  margin-top: -4px;
 }
 
 @keyframes snack-winner-crown-bob {

@@ -221,7 +221,7 @@
 - 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)
 - 最終ファイルサイズ: item-shop-kiosk 214KB / placed-trap-marker 125KB / snack-spawn-marker 172KB / snack-spawn-pedestal 124KB / warp-destination-tile 132KB / winner-trophy 124KB
 - **扁平な形状のsnack-spawn-marker・warp-destination-tileは、prop-paw-fountainと同様に通常の正面/側面レンダーでは分かりにくいため、`render_top.py`(上方35度からの角度付きレンダー、このセッションで新設)で追加確認**。いずれも意匠(肉球+周回リング/渦巻き模様)がはっきり分かり問題なし
-- **このゲームモード自体はまだアイデア段階で実装未着手**、`docs/board3d.js`への組み込みも未実施。素材のみ準備完了の状態。まだcommit/pushしていない
+- **winner-trophy.glbのみ2026-08-15に組み込み済み**(詳細は下記「winner-trophy.glb / winners-podium.glbの結果画面演出への組み込み」参照)。item-shop-kiosk・placed-trap-marker・snack-spawn-pedestalは既存の別作業で組み込み済み(`SNACK_DECORATION_MODEL_ASSETS`)。snack-spawn-marker・warp-destination-tileは、これらが使う予定の「ワープ」「通行止めマス」機能自体がまだゲームロジックに無いため未組み込み
 
 ## current-turn-ring.glb / move-destination-marker.glb / item-pickup-box.glb(おやつ集めモード・操作演出素材のうち3点)
 
@@ -241,7 +241,13 @@
 - 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)
 - 最終ファイルサイズ: paw-coin-single 120KB / paw-coin-stack 156KB / paw-coin-bag 188KB / road-block-barricade 140KB / route-choice-signpost 142KB / winners-podium 133KB
 - Blender簡易レンダーで6点とも形状確認済み、問題なし
-- **このゲームモード自体はまだアイデア段階で実装未着手**、`docs/board3d.js`への組み込みも未実施。素材のみ準備完了の状態。まだcommit/pushしていない
+- **winners-podium.glbのみ2026-08-15に組み込み済み**(詳細は下記参照)。route-choice-signpostは既存の別作業で組み込み済み(`SNACK_DECORATION_MODEL_ASSETS`)。paw-coin-single/stack/bag・road-block-barricadeは未組み込み
+
+## winner-trophy.glb / winners-podium.glbの結果画面演出への組み込み(2026-08-15)
+
+- 最終結果画面(`renderSnackResultScreen`、`docs/ui.js`)の優勝者スポットライト演出(`.snack-winner-spotlight`)は3D盤面(`docs/snack-board3d.js`)とは別のHTML/CSSポップアップのため、GLBをそのままではなく、**Three.js(本番と同じGLTFLoader+DRACOLoader構成)でPlaywright経由でレンダリングし、透過PNGとして切り出して`docs/images/snack/winner-trophy.png`・`docs/images/snack/winners-podium.png`に保存**する方式で組み込んだ(アバターバッジ等、既存の2D画像パターンと同じ考え方)。
+- スポットライトカード内で、trophy画像(👑クラウン絵文字を置き換え、既存のbobアニメーションを継続)→アバターバッジ→podium画像→名前→獲得数、の順で配置。Playwrightで`App.finishSnackGame()`のstage/spotlight状態を直接操作し表示確認、コンソールエラー0件。
+- ランキング一覧(`.result-row`)の1位マーク(🏆絵文字)は、26〜34px程度の小サイズ表示のため視認性を優先しそのまま維持(画像化していない)。
 
 ## おやつ集めモード: 3D化しなかった素材(2D平面のまま使用、2026-08-11確定)
 
