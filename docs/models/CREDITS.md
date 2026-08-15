@@ -313,3 +313,19 @@
 - 地区別フェルト芝カラースワッチ(Base/Station/Civic/Residential/Church/Park/Centralの7色)は画像から平均色をサンプリングしてhex値を抽出済み(いずれもオリーブ系の近似色、5〜10%程度の差)。Roughness/Normalのセルは単色のプレースホルダーだったため実際のテクスチャマップとしては使わず、既存踏襲の固定roughness値で対応する方針
 - **地面ジオメトリの高低差(中央を少し高く・外周をわずかに低く)は2026-08-15に解決・有効化済み**。当初、自作BufferGeometry(手動でposition/uv/index配列を組み立てる同心リング方式)でドーム状ジオメトリを作ったところ、テクスチャを貼ると原因不明のまま白っぽく潰れる不具合が発生し(UV正規化・法線・頂点カラー有無・repeat値などを広く切り分けたが再現条件を特定できず)一度は振幅0で無効化していたが、同日中に`createIslandGroundGeometry`を**THREE.CircleGeometry(単位円、texture付きで正常動作することを別途確認済み)を土台にして頂点位置(高さ・楕円スケール)だけを書き換える方式**へ作り直したところ問題なく描画できた。自作のindex/属性配列構築の何かに根本原因があったと推測されるが、Three.js内部の実装をそのまま踏襲することで迂回した形。`TERRAIN_CENTER_LIFT=0.3`・`TERRAIN_EDGE_DROP=0.2`で有効化し、Playwrightで俯瞰スクリーンショットを確認(白潰れなし、外周がなだらかに下がるドーム形状を確認)、コンソールエラー0件。**フェルト芝テクスチャ適用・地区別色ブレンド(vertexColors)は引き続き正常動作**(`docs/images/ground-grass-felt.jpg`、地区別hex値はterrainZoneColorForLocalXY経由)。**ground-clusters6種(花壇オーバル/三日月/リング・池・敷石・低木)は2026-08-15にplaceStageDecorations末尾で組み込み済み**(`SNACK_GROUND_CLUSTER_MODELS`)。外周(半径比1.0)と内周(半径比0.4)の中間の帯(0.6〜0.78)に候補点を20個ばら撒き、既存の全ノード・全装飾(zonePropPositions)と最小距離(`SNACK_ZONE_PROP_MIN_GAP+0.6`)を保てる候補のみ最大9箇所へ配置する設計(マス・移動経路を塞がないことを優先)。scale/yOffsetはThree.js Box3実測(いずれも水平寸法が約2.0に正規化されていたMeshy標準パターン)から、目標最大寸法1.6(scale=0.8)・接地位置=scale×|min.y|で算出。Playwrightで俯瞰確認、CPU通しプレイ(10ラウンド)もコンソールエラー0件。
 - **road-piece連結配置(6種: 直線・カーブ・T字・Y字・十字・ゲート)は未着手のまま**。既存の道リボン(`buildRibbon`、曲線に沿った1枚のメッシュ、地形高低差にも追従済み)を個別パーツの連結表示に置き換えるには、各区間で使うパーツ種別の判定・進行方向に合わせた回転計算が必要で、今回のセッションでは動いている道の描画を壊すリスクを避けるため見送った。次回、道路の見た目強化に着手する際の対象
+
+## grass-felt-basecolor.png 〜 grass-felt-ao.png(地面PBRマテリアル本格導入、2026-08-15)
+
+- 上記(line 313)で「Roughness/Normalは単色プレースホルダーのため未使用」としていたスワッチ画像とは別物。Codexが2026-08-14に正式なPBRテクスチャセット(`アニマルライフ_地面フェルト芝素材_2026-08-14`、BaseColor/Normal/Roughness/AO/Height、各1024x1024、加えて地区別BaseColor6種)を納品、2026-08-15にmd5ハッシュ・SHA-256・TRANSFER_MANIFEST.jsonを照合の上で正式に組み込んだ
+- **地区別6種は今回は常時読み込まない方針**(Codex推奨の第一候補、スマホのGPUメモリ・サンプリング負荷を優先)。共通`grass-felt-basecolor.png`1枚+既存の`vertexColors`(`createIslandGroundGeometry`の`color`属性、地区ごとに`terrainZoneColorForLocalXY`で算出)による地区色付けのままとし、Normal/Roughness/AOのみ追加。対応関係(駅=`grass-felt-station.png`、公共施設=`civic`、住宅=`residential`、教会=`church`、公園=`park`、中央庭園=`central-garden`)はCodexとの回答で確定済みのため、地区別テクスチャへの切り替えが必要になった際はこの対応表をそのまま使う
+- Heightは今回未使用(頂点変位・地形形状・当たり判定に影響させない方針、Codex合格条件)。Normalは`normalScale=(0.2,0.2)`で弱めに適用(道路・マス・キャラクターの視認性優先)。AOは`aoMap`適用にThree.js側で`uv2`属性が必須のため、`createIslandGroundGeometry`に`uv`と同じ配列を`uv2`としても登録
+- 旧`ground-grass-felt.jpg`(単色寄りの簡易テクスチャ)は置き換え後未使用のままリポジトリに残置(削除は利用者確認後)
+- 検証: Playwrightでのスタンドアロン(`_ground_test.html`、実ゲームのCPU自動進行と競合しない検証用に作成・確認後削除)全体俯瞰スクリーンショットで、継ぎ目・過度な反復・地区境界の不自然な線が無いことを確認。コンソールエラー0件
+
+## rank-up.png / rank-down.png / victory-crown.png(順位変動バッジ、2026-08-15)
+
+- Codex納品「アニマルライフ_パーティー演出追加素材_2026-08-12」(`individual/`配下24点)のうち3点を先行導入。残り21点(award-*/turn-banner等)は次段階
+- 配置先: `docs/images/snack/party/`
+- 組み込み: `docs/ui.js`の`SNACK_RANK_CHANGE_BADGES`経由、`renderSnackHUD`が順位変動時(`rankChangeFx`)に`.snack-hud-rank-badge`として一時的にポップイン表示する。従来の👑絵文字プレフィックスは廃止
+- **常設バッジにはせず、ポップインする一時演出としてのみ使用**。素材自体が光の筋・葉飾りなど詳細なイラストのため、HUDカードの既存の小さな順位数字枠(`.snack-hud-rank`、幅14px程度)にそのまま常設すると絵柄が潰れて読めなくなる。数字自体は従来通り色変化+小さな動きのアニメーションを維持しつつ、カード左上に一回り大きい(カード幅の30%)バッジ画像が`snack-rank-badge-pop`(1.1秒、拡大→フェードアウト)で重なって表示される設計にした
+- 検証: Playwrightで`App.snack.rankChangeFx`を直接セットしcrown/up/downそれぞれのポップイン表示を確認。名前・所持金・プレイヤー色バッジは隠れないことを確認(顔アイコン・数字の一部は演出中一時的に隠れるが1.1秒で消える)

@@ -991,6 +991,13 @@ function snackNextButton(label, onclick) {
 
 // ==================== 4隅HUD(player-status-hud.png、P1〜P4固定色) ====================
 
+// 順位変動バッジ(Codex納品「パーティー演出追加素材」、2026-08-15組み込み)。絵文字プレースホルダーを置き換え。
+const SNACK_RANK_CHANGE_BADGES = {
+  crown: "images/snack/party/victory-crown.png",
+  up: "images/snack/party/rank-up.png",
+  down: "images/snack/party/rank-down.png",
+};
+
 function renderSnackHUD(state, humanId, rankChangeFx) {
   const roundsLeft = Math.max(0, state.totalRounds - state.round + 1);
   const me = state.players.find((p) => p.id === humanId);
@@ -1009,11 +1016,13 @@ function renderSnackHUD(state, humanId, rankChangeFx) {
       const corner = SNACK_CORNER_POSITIONS[p.seatNumber - 1] || "topleft";
       const change = changeById.get(p.id);
       const rankFxClass = change ? ` snack-hud-rank-${change.direction}` : "";
+      const badgeSrc = change ? SNACK_RANK_CHANGE_BADGES[change.direction] : null;
       return `
         <div class="snack-hud-corner snack-hud-corner-${corner}">
           <div class="snack-hud-card${isActive ? " snack-hud-active" : ""}" style="${snackColorVars(p.seatNumber)}">
             <div class="snack-hud-face">${renderAvatarBadge(visual, 40)}</div>
-            <div class="snack-hud-rank${rankFxClass}">${change && change.direction === "crown" ? "👑" : ""}${rank}</div>
+            <div class="snack-hud-rank${rankFxClass}">${rank}</div>
+            ${badgeSrc ? `<img class="snack-hud-rank-badge snack-hud-rank-badge-${change.direction}" src="${badgeSrc}" alt="" />` : ""}
             <div class="snack-hud-name">${escapeHtml(p.name)}${p.isCPU ? '<span class="snack-hud-name-cpu-tag">(CPU)</span>' : ""}</div>
             <div class="snack-hud-snacks">${p.snacks}</div>
             <div class="snack-hud-coins">${p.matchCoins}</div>

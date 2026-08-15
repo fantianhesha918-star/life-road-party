@@ -1158,6 +1158,27 @@ body {
   color: #b23b3b;
 }
 
+/* 順位変動バッジ(Codex納品素材、2026-08-15組み込み)。crown/up/downの数字自体は
+   上記の色変化+小さな動きのままにし、詳細なイラストは数字の脇に一時的にポップインする
+   バッジとして重ねる(バッジ自体を数字の位置に常設すると、HUDカードが小さすぎて
+   絵柄がつぶれて読めなくなるため)。 */
+.snack-hud-rank-badge {
+  position: absolute;
+  left: 6%;
+  top: -8%;
+  width: 30%;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.28));
+  animation: snack-rank-badge-pop 1.1s ease-out forwards;
+}
+
+@keyframes snack-rank-badge-pop {
+  0% { opacity: 0; transform: scale(0.4) rotate(-8deg); }
+  45% { opacity: 1; transform: scale(1.15) rotate(4deg); }
+  70% { opacity: 1; transform: scale(1) rotate(0deg); }
+  100% { opacity: 0; transform: scale(0.92) rotate(0deg); }
+}
+
 @keyframes snack-rank-crown-pop {
   0% { transform: translate(-50%, -50%) scale(1); }
   40% { transform: translate(-50%, -50%) scale(1.7); }

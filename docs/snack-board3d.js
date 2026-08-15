@@ -9,7 +9,14 @@ import { loadGLTFSceneCached } from "./gltf-cache.js";
 const SKY_BACKDROP_URL = new URL("./images/sky-backdrop.jpg", import.meta.url).href;
 // 2026-08-15、単色べったりの旧ground-grass.jpgから、Codex作成の繊維感・まだらのあるフェルト芝
 // テクスチャへ差し替え(利用者仕様書「つや消しのフェルト芝へ変更、弱い繊維感・明暗のまだら」対応)。
-const GROUND_TEXTURE_URL = new URL("./images/ground-grass-felt.jpg", import.meta.url).href;
+// 2026-08-15(第2弾): Codex納品のPBRセット(BaseColor/Normal/Roughness/AO)へ差し替え。
+// Codexの推奨する第一候補構成(地区別6枚は常時読み込まず、共通BaseColor+既存vertex colorの
+// 地区色付けのまま)を採用し、Normal/Roughness/AOだけを追加する。Heightは頂点変位・当たり判定に
+// 影響させない方針のため今回は未使用。地区別6枚(grass-felt-station.png等)は次段階で検討する。
+const GROUND_BASECOLOR_URL = new URL("./images/grass-felt-basecolor.png", import.meta.url).href;
+const GROUND_NORMAL_URL = new URL("./images/grass-felt-normal.png", import.meta.url).href;
+const GROUND_ROUGHNESS_URL = new URL("./images/grass-felt-roughness.png", import.meta.url).href;
+const GROUND_AO_URL = new URL("./images/grass-felt-ao.png", import.meta.url).href;
 const ROAD_TEXTURE_URL = new URL("./images/road-path.jpg", import.meta.url).href;
 
 // 2026-08-13(第3弾)、利用者仕様書「道路幅を現在の65〜75%程度へ縮小」に沿って0.9→0.65(72%)に変更。
@@ -500,13 +507,26 @@ function nodeVec3(node) {
   return new THREE.Vector3(node.position.x, terrainHeightAt(node.position.x, node.position.z), node.position.z);
 }
 
-function loadGroundTexture(width, depth) {
-  const texture = textureLoader.load(GROUND_TEXTURE_URL);
+function loadRepeatingTexture(url, width, depth, isColorData) {
+  const texture = textureLoader.load(url);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(width / 3, depth / 3);
-  texture.colorSpace = THREE.SRGBColorSpace;
+  // sRGBで読むのはBaseColorのみ(Normal/Roughness/AOはリニアのまま、Codex仕様書の合格条件通り)。
+  if (isColorData) texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
+}
+
+// BaseColor(sRGB)+Normal/Roughness/AO(リニア)をまとめて読み込む。地区別6枚は常時読み込まず、
+// 共通BaseColor1枚+既存vertex color(createIslandGroundGeometryのcolor属性)による地区色付けを
+// 第一候補として採用(Codex回答2026-08-15、スマホのGPUメモリ・サンプリング負荷を優先)。
+function loadGroundMaps(width, depth) {
+  return {
+    map: loadRepeatingTexture(GROUND_BASECOLOR_URL, width, depth, true),
+    normalMap: loadRepeatingTexture(GROUND_NORMAL_URL, width, depth, false),
+    roughnessMap: loadRepeatingTexture(GROUND_ROUGHNESS_URL, width, depth, false),
+    aoMap: loadRepeatingTexture(GROUND_AO_URL, width, depth, false),
+  };
 }
 
 // zoneNameのループを、startIdからnextNodeIds(同じzone側)を辿って順序復元する
@@ -632,7 +652,7 @@ function createIslandGroundGeometry(radiusX, radiusZ) {
     // CircleGeometryの単位円ローカル座標(-1〜1)を落下前の楕円形ワールド寸法へ展開しつつ、
     // 中心からの距離tでterrainHeightForTを評価してZ(このメッシュはXY平面、後段でX軸-90°回転
     // されてYが上になる)へ高低差を焼き込む。UV・地区色もこのワールド寸法基準で計算し、
-    // loadGroundTextureのrepeat.set(width/3,depth/3)と同じ/3係数で揃える。
+    // loadRepeatingTextureのrepeat.set(width/3,depth/3)と同じ/3係数で揃える。
     const nx = pos.getX(i);
     const ny = pos.getY(i);
     const t = Math.min(1, Math.sqrt(nx * nx + ny * ny));
@@ -648,6 +668,9 @@ function createIslandGroundGeometry(radiusX, radiusZ) {
   }
   pos.needsUpdate = true;
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  // aoMap(Three.jsの仕様でuv2が無いと適用されない)は専用のUV展開を持たないため、
+  // 同じuvをuv2としても登録する(AOはリピートタイル柄の陰影付けなので流用で問題ない)。
+  geometry.setAttribute("uv2", new THREE.Float32BufferAttribute(uv, 2));
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
   geometry.computeVertexNormals();
   return geometry;
@@ -1646,7 +1669,9 @@ function buildScene(nodes, players, activeSnackNodeIds) {
     // vertexColors:trueで地区ごとの色(createIslandGroundGeometryのcolor属性)をテクスチャに
     // 乗算ブレンドする(利用者仕様書「地区ごとに5〜10%程度色を変える」対応)。
     new THREE.MeshStandardMaterial({
-      map: loadGroundTexture(groundRadiusX * 2, groundRadiusZ * 2),
+      ...loadGroundMaps(groundRadiusX * 2, groundRadiusZ * 2),
+      // Normalは弱く(Codex合格条件「0.15〜0.25程度に抑える」道路・マス・キャラクターの視認性優先)。
+      normalScale: new THREE.Vector2(0.2, 0.2),
       vertexColors: true,
     })
   );
