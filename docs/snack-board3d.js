@@ -405,16 +405,11 @@ let islandCenter = { x: 0, z: 0 };
 // 中央を少し高く、外周をわずかに低く」対応) ====================
 // あくまで見た目のY座標のみに使う値で、ゲームロジック(ノードのx,z座標・停止判定・当たり判定)には
 // 一切使わない・影響させない。中心(t=0)ほど高く、外周(t=1)ほど低く、なめらかに変化する。
-// **2026-08-15時点で振幅を一時的に0にして無効化中**: 地面ジオメトリを同心リング状の
-// 自作BufferGeometryに作り直したところ、テクスチャマップを貼ると原因不明のまま白っぽく
-// 潰れて表示される不具合が発生し(UV正規化・法線・頂点カラー有無・repeat値などを広く
-// 切り分けたが再現条件を特定できず)、セッション時間の制約で根本解決を持ち越した。
-// マス・キャラクター・建物等の高さ追従ロジック(terrainHeightAt呼び出し側)は実装済みのまま
-// 残してあるため、振幅を戻すだけで見た目の高低差を再度有効化できる想定。次回、地面ジオメトリ
-// 側の不具合(このファイルのcreateIslandGroundGeometryは元のShapeGeometry実装に戻した)を
-// 解決してから振幅を戻すこと。
-const TERRAIN_CENTER_LIFT = 0;
-const TERRAIN_EDGE_DROP = 0;
+// 2026-08-15、一度は自作BufferGeometryのテクスチャ潰れ不具合により振幅0で無効化していたが、
+// 同日中にcreateIslandGroundGeometryをTHREE.CircleGeometryベースの実装へ作り直して解決した
+// (詳細はcreateIslandGroundGeometryのコメント参照)ため、振幅を戻して有効化した。
+const TERRAIN_CENTER_LIFT = 0.3;
+const TERRAIN_EDGE_DROP = 0.2;
 function terrainHeightForT(t) {
   const tt = THREE.MathUtils.clamp(t, 0, 1);
   const s = tt * tt * (3 - 2 * tt); // smoothstep
@@ -604,40 +599,44 @@ function buildRibbon(points, closed) {
 }
 
 // 地面を矩形ではなく楕円形にし(見本の「フェルト製の島」らしい輪郭に近づける)。
-// 2026-08-15、中央を高く外周を低くするドーム状ジオメトリ(同心リング)を試作したが、
-// テクスチャを貼ると原因不明のまま白っぽく潰れる不具合が解決できなかったため、地面ジオメトリ
-// 自体は元のShapeGeometry(境界の点だけを三角形分割、完全に平坦)に戻している
-// (TERRAIN_CENTER_LIFT/TERRAIN_EDGE_DROPの定義箇所にあるコメント参照)。
-// テクスチャが正しくタイル表示されるよう、ShapeGeometryの既定UV(0〜1に正規化)ではなく
-// ワールド座標ベースのUVを手動で割り当てる(loadGroundTextureのrepeat.set(width/3,depth/3)と
-// 揃えるため、同じ/3の係数を使う)。
+// 2026-08-15、中央を高く外周を低くするドーム状ジオメトリを自作BufferGeometry(手動で
+// position/uv/index配列を組み立てる同心リング方式)で試作したところ、テクスチャを貼ると
+// 原因不明のまま白っぽく潰れる不具合が発生し解決できなかった(UV正規化・法線・頂点カラー
+// 有無・repeat値などを広く切り分けたが再現条件を特定できず、一旦振幅0で無効化して見送った)。
+// 同一セッションの再挑戦で、**THREE.CircleGeometry(単位円、texture付きで正常動作することを
+// 既に確認済み)を土台にして頂点位置だけを書き換える方式**に変更したところ問題なく描画できた。
+// 自作のindex/属性配列構築の何かに原因があったと推測されるが、根本原因はThree.js内部の
+// CircleGeometryの構築方法をそのまま踏襲することで迂回した(index・法線もCircleGeometryの
+// ものをベースにcomputeVertexNormals()で再計算するのみで、独自には組み立てない)。
 function createIslandGroundGeometry(radiusX, radiusZ) {
-  const shape = new THREE.Shape();
   const segments = 64;
-  for (let i = 0; i <= segments; i++) {
-    const angle = (i / segments) * Math.PI * 2;
-    const x = Math.cos(angle) * radiusX;
-    const y = Math.sin(angle) * radiusZ;
-    if (i === 0) shape.moveTo(x, y);
-    else shape.lineTo(x, y);
-  }
-  const geometry = new THREE.ShapeGeometry(shape, segments);
+  const geometry = new THREE.CircleGeometry(1, segments);
   const pos = geometry.attributes.position;
   const uv = new Float32Array(pos.count * 2);
   const colors = new Float32Array(pos.count * 3);
   const tmpColor = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const y = pos.getY(i);
-    uv[i * 2] = x / 3;
-    uv[i * 2 + 1] = y / 3;
-    tmpColor.setHex(terrainZoneColorForLocalXY(x, y, radiusX, radiusZ));
+    // CircleGeometryの単位円ローカル座標(-1〜1)を落下前の楕円形ワールド寸法へ展開しつつ、
+    // 中心からの距離tでterrainHeightForTを評価してZ(このメッシュはXY平面、後段でX軸-90°回転
+    // されてYが上になる)へ高低差を焼き込む。UV・地区色もこのワールド寸法基準で計算し、
+    // loadGroundTextureのrepeat.set(width/3,depth/3)と同じ/3係数で揃える。
+    const nx = pos.getX(i);
+    const ny = pos.getY(i);
+    const t = Math.min(1, Math.sqrt(nx * nx + ny * ny));
+    const worldX = nx * radiusX;
+    const worldY = ny * radiusZ;
+    pos.setXYZ(i, worldX, worldY, terrainHeightForT(t));
+    uv[i * 2] = worldX / 3;
+    uv[i * 2 + 1] = worldY / 3;
+    tmpColor.setHex(terrainZoneColorForLocalXY(worldX, worldY, radiusX, radiusZ));
     colors[i * 3] = tmpColor.r;
     colors[i * 3 + 1] = tmpColor.g;
     colors[i * 3 + 2] = tmpColor.b;
   }
+  pos.needsUpdate = true;
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geometry.computeVertexNormals();
   return geometry;
 }
 
