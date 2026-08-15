@@ -1014,9 +1014,9 @@ function renderSnackHUD(state, humanId, rankChangeFx) {
           <div class="snack-hud-card${isActive ? " snack-hud-active" : ""}" style="${snackColorVars(p.seatNumber)}">
             <div class="snack-hud-face">${renderAvatarBadge(visual, 40)}</div>
             <div class="snack-hud-rank${rankFxClass}">${change && change.direction === "crown" ? "👑" : ""}${rank}</div>
-            <div class="snack-hud-name">${escapeHtml(p.name)}${p.isCPU ? "(CPU)" : ""}</div>
-            <div class="snack-hud-snacks">🍪${p.snacks}</div>
-            <div class="snack-hud-coins">🪙${p.matchCoins}</div>
+            <div class="snack-hud-name">${escapeHtml(p.name)}${p.isCPU ? '<span class="snack-hud-name-cpu-tag">(CPU)</span>' : ""}</div>
+            <div class="snack-hud-snacks">${p.snacks}</div>
+            <div class="snack-hud-coins">${p.matchCoins}</div>
             <div class="snack-hud-seat-badge">${color.label}${color.mark}</div>
           </div>
         </div>

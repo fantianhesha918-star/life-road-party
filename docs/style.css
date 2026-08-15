@@ -1172,10 +1172,13 @@ body {
 
 .snack-hud-name {
   position: absolute;
-  left: 32%;
-  top: 34%;
-  width: 36%;
-  height: 26%;
+  /* 2026-08-15、背景画像(player-status-hud.png)の名前欄(角丸の枠)実測に合わせて再調整。
+     従来値(left:32%,top:34%,width:36%)は枠の右端(実測約62%)より約6%広く、長い名前(CPU2(CPU)等)
+     が右の🍪/🪙アイコン領域まで食い込んでいた。 */
+  left: 33%;
+  top: 35%;
+  width: 31%;
+  height: 24%;
   display: flex;
   align-items: center;
   /* 2026-08-13、Codexレビュー(390×844で名前欄が53px必要なのに45〜49pxしか無く文字切れ)対応。
@@ -1183,31 +1186,49 @@ body {
   font-size: 12px;
   font-weight: 700;
   line-height: 1.1;
+  /* 2026-08-15、木目調の背景に対する視認性向上(読みやすい書式の模索)。輪郭線ではなく
+     控えめな明るいシャドウで文字を浮き上がらせる(縁取りだと角ばって見えるため避けた)。 */
+  text-shadow: 0 1px 1px rgba(255, 250, 230, 0.7);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.snack-hud-name-cpu-tag {
+  /* 2026-08-15、枠が狭い4隅HUDカード内で「CPU2(CPU)」のように名前+サフィックスが枠を
+     はみ出し省略記号で切れてしまうため、サフィックス部分だけ縮小して収まりやすくする。 */
+  font-size: 0.72em;
+  font-weight: 600;
+  opacity: 0.85;
+  margin-left: 1px;
+}
+
 .snack-hud-snacks,
 .snack-hud-coins {
   position: absolute;
-  left: 72%;
-  width: 22%;
-  height: 16%;
+  /* 2026-08-15、背景画像の数値欄(角丸ピル)実測に合わせて再調整。従来値(left:72%,width:22%)は
+     右端が実測(約93%)より約1%広く、桁数の多い数字がピルの右端ぎりぎり/はみ出し気味だった。 */
+  left: 74%;
+  width: 17%;
+  height: 14%;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  /* 2026-08-13、Codexレビュー対応。所持数は名前より重要度が高いためさらに1px大きくする。 */
+  /* 2026-08-13、Codexレビュー対応。所持数は名前より重要度が高いためさらに1px大きくする。
+     2026-08-15、絵文字(🍪/🪙)を廃止し数字のみにしたことで、想定通りピルの右端に収まるように
+     なった(絵文字はグリフの実描画幅が読みにくく、背景に既に焼き込み済みのアイコンと二重表示
+     になっていた)。 */
   font-size: 13px;
   font-weight: 800;
+  text-shadow: 0 1px 1px rgba(255, 250, 230, 0.7);
 }
 
 .snack-hud-snacks {
-  top: 32%;
+  top: 38%;
 }
 
 .snack-hud-coins {
-  top: 53%;
+  top: 56%;
 }
 
 .snack-hud-seat-badge {
@@ -1412,19 +1433,22 @@ body {
 /* ---- 選択肢1行(popup-choice-button.png) ---- */
 
 .snack-choice-row {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
   width: 100%;
-  border: none;
-  /* 2026-08-13(第3弾)、Codexレビュー「ボタン背後に大きな白い長方形」の実際の原因。
-     <button>のUA既定background-color(buttonface、白系)がbackground-imageの透過部分から
-     透けていた(画像アセット自体は正しく透過済みだったため、素材の切り抜き直しは不要だった)。 */
-  background-color: transparent;
-  background-image: url("images/snack/popup-choice-button.png");
-  background-size: 100% 100%;
-  background-repeat: no-repeat;
-  padding: 8px 16px 8px 8px;
+  border-style: solid;
+  /* 2026-08-15、background-image+background-size:100% 100%(単純な引き伸ばし)だと、
+     画像に焼き込まれた左のアイコン用丸枠・右の矢印が、ボタンの実際の縦横比(画像は900×288だが
+     実表示は幅300px台×高さ60px台とかなり扁平)に合わせて非一様に引き伸ばされ、丸枠が楕円に潰れる
+     不具合があった。既に.snack-popup-choice(枠画像)で使っているborder-image(9スライス)方式に
+     揃え、左端(丸枠)・右端(矢印)の意匠だけは引き伸ばさず、中央の平らな帯だけが伸縮するようにした。 */
+  border-image-source: url("images/snack/popup-choice-button.png");
+  border-image-slice: 144 210 144 230 fill;
+  border-image-width: 16px 40px 16px 48px;
+  border-image-repeat: stretch;
+  background: none;
+  padding: 8px 16px 8px 52px;
   min-height: 60px;
   cursor: pointer;
   text-align: left;
@@ -1439,14 +1463,26 @@ body {
   cursor: not-allowed;
 }
 
+/* アイコン自体も、border-imageで焼き込みの丸枠が実際に描画される左端(48px幅)の中央へ
+   絶対配置で重ねる(行の高さは可変(sublabelが2行になる場合がある)なため、固定pxのflexギャップ
+   ではなく、行のmin-height中央に常に来るtransform:translateYで縦中央固定する)。 */
 .snack-choice-icon {
-  width: 34px;
-  height: 34px;
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
   object-fit: contain;
-  flex-shrink: 0;
 }
 
 .snack-choice-icon-emoji {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
