@@ -189,6 +189,19 @@ const SNACK_STAGE_MODELS = {
   },
 };
 
+// 空き地装飾6種(2026-08-15、Meshy生成済みだった未組み込み素材)。いずれもThree.js Box3実測で
+// 水平寸法が約2.0に正規化されていたため(Meshy標準パイプラインの既知の傾向)、目標最大寸法1.6を
+// 狙ってscale=0.8で統一し、yOffset = scale × |min.y| で接地位置を算出した。
+const SNACK_GROUND_CLUSTER_MODELS = {
+  flowerbedOval: { url: new URL("./models/terrain/cluster-flowerbed-oval.glb", import.meta.url).href, scale: 0.8, yOffset: 0.132 },
+  flowerbedCrescent: { url: new URL("./models/terrain/cluster-flowerbed-crescent.glb", import.meta.url).href, scale: 0.8, yOffset: 0.211 },
+  flowerbedRing: { url: new URL("./models/terrain/cluster-flowerbed-ring.glb", import.meta.url).href, scale: 0.8, yOffset: 0.117 },
+  pond: { url: new URL("./models/terrain/cluster-pond.glb", import.meta.url).href, scale: 0.8, yOffset: 0.263 },
+  paving: { url: new URL("./models/terrain/cluster-paving.glb", import.meta.url).href, scale: 0.8, yOffset: 0.167 },
+  shrub: { url: new URL("./models/terrain/cluster-shrub.glb", import.meta.url).href, scale: 0.8, yOffset: 0.213 },
+};
+const SNACK_GROUND_CLUSTER_KEYS = Object.keys(SNACK_GROUND_CLUSTER_MODELS);
+
 // 地区ゾーン(見本の上=駅・商店・カフェ、右上〜右=役所・病院・学校、右下=住宅・庭・郵便局、
 // 下=教会・結婚式広場、左=公園)の建物・小物。本編(board3d.js)で使用中の素材・scale/yOffsetを
 // そのまま再利用する(2026-08-12、Box3実測をやり直さず本編の実測値を流用。値は board3d.js の
@@ -884,6 +897,34 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
     const streetKey = SNACK_STREET_PROP_MODEL_KEYS[idx % SNACK_STREET_PROP_MODEL_KEYS.length];
     tryPlaceZoneProp(pos, 0.7, streetKey);
   });
+
+  // 空き地装飾(2026-08-15、Meshy生成済みだった未組み込み素材6種)。外周(半径比1.0)と
+  // 内周(半径比0.4)の中間の帯(0.6〜0.78)に候補点をばら撒き、既存の全ノード・全装飾
+  // (zonePropPositions、この時点でここまでの建物・木・小物すべてを含む)と最小距離を
+  // 保てる候補だけを採用する(マス・キャラクター移動の妨げにならないことを優先する設計)。
+  const clusterCandidateCount = 20;
+  const clusterMinGap = SNACK_ZONE_PROP_MIN_GAP + 0.6;
+  const clusterTargetCount = 9;
+  const allNodeWorldPositions = nodes.map((n) => nodePositions.get(n.id));
+  let clusterPlaced = 0;
+  for (let i = 0; i < clusterCandidateCount && clusterPlaced < clusterTargetCount; i++) {
+    const angle = (i / clusterCandidateCount) * Math.PI * 2 + 0.31;
+    const radiusT = 0.6 + ((i * 37) % 19) / 19 * 0.18; // 0.6〜0.78の範囲で疑似ランダムに散らす
+    const cx = centerX + Math.cos(angle) * halfX * radiusT;
+    const cz = centerZ + Math.sin(angle) * halfZ * radiusT;
+    const candidate = new THREE.Vector3(cx, 0, cz);
+    const conflictsDecoration = zonePropPositions.some((p) => p.distanceTo(candidate) < clusterMinGap);
+    const conflictsNode = allNodeWorldPositions.some((p) => p.distanceTo(candidate) < clusterMinGap);
+    if (conflictsDecoration || conflictsNode) continue;
+    const modelKey = SNACK_GROUND_CLUSTER_KEYS[clusterPlaced % SNACK_GROUND_CLUSTER_KEYS.length];
+    const group = new THREE.Group();
+    group.position.set(cx, terrainHeightAt(cx, cz), cz);
+    group.rotation.y = angle * 1.7; // 放射状に揃いすぎないよう、配置角とは別の値で向きだけずらす
+    scene.add(group);
+    loadDecorationModel(group, SNACK_GROUND_CLUSTER_MODELS[modelKey]);
+    zonePropPositions.push(candidate);
+    clusterPlaced += 1;
+  }
 }
 
 // 発動中の罠(node.activeTrap)を持つノードにだけplaced-trap-marker.glbを表示する。
