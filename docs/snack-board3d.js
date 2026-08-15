@@ -21,11 +21,14 @@ const ROAD_TEXTURE_URL = new URL("./images/road-path.jpg", import.meta.url).href
 
 // 2026-08-13(第3弾)、利用者仕様書「道路幅を現在の65〜75%程度へ縮小」に沿って0.9→0.65(72%)に変更。
 const ROAD_HALF_WIDTH = 0.65;
-const HOP_HEIGHT = 0.5;
-const HOP_DURATION_MS = 450; // syncPlayersが差分から直接1回ホップさせるフォールバック用
+// 2026-08-15、利用者から「移動が速すぎる、もう少しゆっくりぴょんぴょんしてる感じがいい」との
+// 指摘を受け、弧の高さを上げ(0.5→0.62)、所要時間も伸ばした(HOP_STEP_DURATION_MS 260→360、
+// app.jsのSNACK_HOP_STEP_MSも同じ値に合わせて変更、HOP_DURATION_MSも同じ比率で450→620)。
+const HOP_HEIGHT = 0.62;
+const HOP_DURATION_MS = 620; // syncPlayersが差分から直接1回ホップさせるフォールバック用
 // 1マスずつの逐次ホップ(hopPath)専用の短めの時間。旧来の「移動元→移動先を1回で結ぶ」演出用
 // のHOP_DURATION_MSのまま複数マスに使うと合計時間が長くなりすぎるため別定数にした(2026-08-12)。
-const HOP_STEP_DURATION_MS = 260;
+const HOP_STEP_DURATION_MS = 360;
 // カメラはすごろく本編(board3d.js)と同じ「静止時=ジオラマ風の見下ろし/移動中=進行方向の
 // 真後ろから追う三人称視点」の2段構成にする(2026-08-11、ユーザー指示で本編と統一)。
 // ループ型マップでも、追従先はあくまで現在の手番プレイヤー1人なので同じ値をそのまま使える。
@@ -1770,10 +1773,18 @@ function ensureDiceMesh() {
   return diceMesh;
 }
 
+// 2026-08-15、以前は6面すべてに結果(value)と同じテクスチャを貼っていたため、
+// 回転演出中もずっと結果の数字しか見えない不具合があった(利用者指摘)。着地時の
+// mesh.rotation.set(0,0,0)で正面を向くのは主にBoxGeometryの material[2](+Y、上面)と
+// material[4](+Z、正面)のため、この2面にだけvalueを割り当てて「静止時は必ず正しい
+// 出目が見える」ことを保証しつつ、残り4面(左右・下・背面)には他の目を割り振ることで、
+// 回転中はいろいろな目が切り替わって見えるようにした。
 function setDiceFaceValue(mesh, value) {
-  const texture = getDiceFaceTexture(value);
-  mesh.material.forEach((mat) => {
-    mat.map = texture;
+  const others = [1, 2, 3, 4, 5, 6].filter((v) => v !== value);
+  // material配列順序: [+X, -X, +Y, -Y, +Z, -Z](右/左/上/下/正面/背面)
+  const faceValues = [others[0], others[1], value, others[2], value, others[3]];
+  mesh.material.forEach((mat, i) => {
+    mat.map = getDiceFaceTexture(faceValues[i]);
     mat.needsUpdate = true;
   });
 }

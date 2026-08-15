@@ -7,8 +7,9 @@ const HEARTBEAT_INTERVAL_MS = 15000;
 const HOP_STEP_MS = 420; // マス移動アニメーション、1マスあたりの所要時間
 // snack-board3d.jsのHOP_STEP_DURATION_MSと同じ値(標準速度時の1マスあたりの所要時間)。
 // ESモジュール側のprivate定数を直接参照できないため値を複製している(既存の
-// SPECIES_MODEL_MAP等と同じ、このコードベース既存のパターン)。
-const SNACK_HOP_STEP_MS = 260;
+// SPECIES_MODEL_MAP等と同じ、このコードベース既存のパターン)。2026-08-15、移動を
+// ゆっくりめに調整(260→360、理由はsnack-board3d.js側のHOP_STEP_DURATION_MS参照)。
+const SNACK_HOP_STEP_MS = 360;
 const CPU_PRE_ROLL_MS = 1100; // CPUがルーレットを回す前の「間」
 const CPU_PRE_CHOICE_MS = 1500; // CPUが選択肢を考える「間」
 const CPU_REVEAL_MS = 2200; // CPUの結果カード(テロップ)を見せておく時間

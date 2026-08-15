@@ -1335,6 +1335,11 @@ body {
 .snack-popup-backdrop {
   align-items: center;
   padding: 16px;
+  /* 2026-08-15、.modal-backdrop(z-index:10)を継承したままだと.snack-hud-layer(z-index:12)より
+     奥になり、4隅HUDカードが行動選択メニュー等のポップアップに重なって文字が読めなくなる不具合が
+     あった。他のsnack系オーバーレイ(map-view/rolling/cpu-turn等、いずれも14)と同様にHUDより
+     手前へ引き上げる。 */
+  z-index: 17;
 }
 
 @keyframes snack-popup-in {
@@ -1380,11 +1385,14 @@ body {
 /* 2026-08-13(第3弾)、Codexレビュー対応。border-image-sliceのfill領域(装飾フレーム画像の
    中央、丸バッジ・パネル絵柄が焼き込まれている)がそのまま本文の背景になり、実効的な
    可読領域が狭かった(390px幅で本文実効幅136px相当)。装飾を触らず、本文専用の不透明パネルを
-   フレーム中央に重ねることで解決する(3分割構成: 見出し/本文パネル/フッター)。 */
+   フレーム中央に重ねることで解決する(3分割構成: 見出し/本文パネル/フッター)。
+   2026-08-15、min-width:240pxが実際の利用可能幅(border-image-width52px×2+padding22px×2を
+   引いた後の内側、380px幅の時でも232px・92vw基準の狭い画面ではさらに狭い)より大きく、
+   常にはみ出していた。角丸(border-radius)がフレームの左の丸(アバター用装飾)にまで
+   突き出して重なって見える不具合だったため、はみ出さない値に修正した(利用者指摘)。 */
 .snack-popup-result-body {
   width: 100%;
-  min-width: 240px;
-  max-width: 280px;
+  max-width: 100%;
   margin: 4px auto 0;
   padding: 14px 16px;
   border-radius: 18px;
@@ -1398,6 +1406,13 @@ body {
   margin: 0;
   text-align: center;
   font-size: 1.02rem;
+}
+
+/* 2026-08-15、result枠(popup-result-frame.png)の上部装飾(肉球バッジ+葉)は小さい丸1つ分の
+   面積しかなく、見出し文字がそのまま重なって窮屈に見えていた(利用者指摘)ため、
+   見出しをその下へ逃がす。 */
+.snack-popup-result .snack-popup-title {
+  margin-top: 12px;
 }
 
 .snack-popup-subtitle {
@@ -1471,8 +1486,12 @@ body {
      不具合があった。既に.snack-popup-choice(枠画像)で使っているborder-image(9スライス)方式に
      揃え、左端(丸枠)・右端(矢印)の意匠だけは引き伸ばさず、中央の平らな帯だけが伸縮するようにした。 */
   border-image-source: url("images/snack/popup-choice-button.png");
-  border-image-slice: 144 210 144 230 fill;
-  border-image-width: 16px 40px 16px 48px;
+  /* 2026-08-15、以前の値(top/bottom=144、画像高さ288pxのちょうど半分ずつ)は
+     上下スライスの合計が画像の全高を使い切ってしまい、中央の伸縮用ピクセルが0になっていた。
+     行の高さが288px(元画像)と異なるたびに、伸縮すべき中間帯に参照できる画素が無く
+     枠が割れて見える不具合があったため、上下は縁の薄い帯だけを切り出す値に修正した。 */
+  border-image-slice: 20 210 20 230 fill;
+  border-image-width: 4px 40px 4px 48px;
   border-image-repeat: stretch;
   background: none;
   padding: 8px 16px 8px 52px;
