@@ -434,16 +434,72 @@ const SPECIES_MODEL_MAP = {
 };
 
 // コスチューム装備時の専用モデル(キー: "{costumeId}_{speciesId}")。
-// コスチュームのイラストは動物6種ぶん全て用意済みだが、3Dモデル化は試作(着物×チンチラグレー)の
-// 1件のみ完了しており、他の組み合わせは今後少しずつ追加していく方針(2026-08-10)。
+// 着物6種・忍者6種(計12組み合わせ)は3Dモデル化済み。スーツ6種・くまの着ぐるみ6種(計12組み合わせ)は
+// 引き続き3Dモデル化未着手(2026-08-15時点)。
 // ここに無い組み合わせはloadCharacterModel側で素の動物モデル(SPECIES_MODEL_MAP)にフォールバックする
 // (コスチュームの見た目は2DアバターバッジやショップUI側では表示されるが、3D盤面には未反映のまま)。
-// scale/yOffsetはThree.js Box3の実測(素のchinchilla-gray.glbとの比率)から算出。
+// scale/yOffsetはThree.js Box3の実測から、素の動物モデルとの表示高さの比率(scale = 素のscale × 素のY幅 ÷
+// コスチュームのY幅、yOffset = 素のyOffset × コスチュームのmin.y絶対値 ÷ 素のmin.y絶対値)で算出。
 const COSTUME_MODEL_MAP = {
   "costume-kimono_species-chinchilla-gray": {
     url: new URL("./models/costume-kimono_chinchilla-gray.glb", import.meta.url).href,
     scale: 0.4875,
     yOffset: 0.4295,
+  },
+  "costume-kimono_species-chinchilla-white": {
+    url: new URL("./models/costume-kimono_chinchilla-white-pied.glb", import.meta.url).href,
+    scale: 0.6316,
+    yOffset: 0.4214,
+  },
+  "costume-kimono_species-dog-frenchie-white": {
+    url: new URL("./models/costume-kimono_dog-frenchie-white.glb", import.meta.url).href,
+    scale: 0.4688,
+    yOffset: 0.6021,
+  },
+  "costume-kimono_species-dog-frenchie-black": {
+    url: new URL("./models/costume-kimono_dog-frenchie-black.glb", import.meta.url).href,
+    scale: 0.4686,
+    yOffset: 0.5917,
+  },
+  "costume-kimono_species-cat-calico": {
+    url: new URL("./models/costume-kimono_cat-calico.glb", import.meta.url).href,
+    scale: 0.4684,
+    yOffset: 0.4459,
+  },
+  "costume-kimono_species-rabbit-white": {
+    url: new URL("./models/costume-kimono_rabbit-white.glb", import.meta.url).href,
+    scale: 0.4690,
+    yOffset: 0.4450,
+  },
+  "costume-ninja_species-chinchilla-gray": {
+    url: new URL("./models/costume-ninja_chinchilla-gray.glb", import.meta.url).href,
+    scale: 0.5434,
+    yOffset: 0.4965,
+  },
+  "costume-ninja_species-chinchilla-white": {
+    url: new URL("./models/costume-ninja_chinchilla-white-pied.glb", import.meta.url).href,
+    scale: 0.4692,
+    yOffset: 0.5674,
+  },
+  "costume-ninja_species-dog-frenchie-white": {
+    url: new URL("./models/costume-ninja_dog-frenchie-white.glb", import.meta.url).href,
+    scale: 0.4687,
+    yOffset: 0.6027,
+  },
+  "costume-ninja_species-dog-frenchie-black": {
+    url: new URL("./models/costume-ninja_dog-frenchie-black.glb", import.meta.url).href,
+    scale: 0.4689,
+    yOffset: 0.5916,
+  },
+  "costume-ninja_species-cat-calico": {
+    url: new URL("./models/costume-ninja_cat-calico.glb", import.meta.url).href,
+    scale: 0.4686,
+    yOffset: 0.4456,
+  },
+  "costume-ninja_species-rabbit-white": {
+    url: new URL("./models/costume-ninja_rabbit-white.glb", import.meta.url).href,
+    scale: 0.4693,
+    yOffset: 0.4450,
   },
 };
 // モデルの正面が既定でワールド+Z(カメラ側)を向いている前提の補正値。

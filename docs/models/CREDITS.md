@@ -147,7 +147,7 @@
 - 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)
 - 最終ファイルサイズ: costume-kimono_chinchilla-white-pied 410KB / costume-kimono_dog-frenchie-white 521KB / costume-kimono_dog-frenchie-black 506KB / costume-kimono_cat-calico 522KB / costume-kimono_rabbit-white 501KB / costume-ninja_chinchilla-gray 424KB / costume-ninja_chinchilla-white-pied 431KB / costume-ninja_dog-frenchie-white 458KB / costume-ninja_dog-frenchie-black 387KB / costume-ninja_cat-calico 477KB / costume-ninja_rabbit-white 484KB
 - Blender簡易レンダーで全11点の形状確認済み、いずれも参考イラストの意匠(着物の和柄・帯、忍者装束のフード・帯)が正しく再現されており問題なし
-- **scale/yOffsetの実測・`docs/board3d.js`の`COSTUME_MODEL_MAP`への組み込みは未実施**、進行用チャット側での対応待ち(costume-kimono_chinchilla-grayと同様、Three.js実機実測での算出が必要)。まだcommit/pushしていない
+- **2026-08-15、進行用チャット側で`docs/board3d.js`に反映・commit済み**。costume-kimono_chinchilla-grayと同じ手法(Three.js Box3実機実測、`GLTFLoader`+`DRACOLoader`)で11点全てのY軸サイズ・min.yを実測し、素の動物モデルとの比率からscale/yOffsetを算出(scale = 素のscale × 素のY幅 ÷ コスチュームのY幅、yOffset = 素のyOffset × コスチュームのmin.y絶対値 ÷ 素のmin.y絶対値)。犬(フレンチブルドッグ)2種の着物・忍者は、参考イラストが四足立ちでなく座りポーズのため素の犬モデルよりY幅が大きく(≈1.90、猫・うさぎと同程度)、結果yOffsetが他種(≈0.44〜0.50)より大きい値(0.59〜0.60)になったが、実機表示(Playwright、CPU対戦1人プレイ)で全11組み合わせとも接地・大きさとも他種と違和感なく表示されることを確認済み(コンソールエラー0件)。これで着物6種・忍者6種(計12組み合わせ)全てが3D盤面に反映済み
 
 ## costume-wedding_chinchilla-gray.glb / costume-wedding_chinchilla-white-pied.glb
 
