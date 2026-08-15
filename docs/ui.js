@@ -1221,7 +1221,7 @@ function renderSnackItemSelectPopup(state, humanId) {
         .map((itemId) => {
           const item = SNACK_ITEMS.find((it) => it.id === itemId);
           if (!item) return "";
-          return renderSnackChoiceRow({ iconEmoji: item.emoji, label: item.name, onclick: `App.snackOpenItemConfirm('${item.id}')` });
+          return renderSnackChoiceRow({ iconSrc: item.image, iconEmoji: item.emoji, label: item.name, onclick: `App.snackOpenItemConfirm('${item.id}')` });
         })
         .join("")
     : `<p class="lead">アイテムは持っていません</p>`;

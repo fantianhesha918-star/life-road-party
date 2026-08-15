@@ -78,10 +78,10 @@ const SNACK_CHOICE_EVENTS = [
 
 // アイテムショップ(フェーズ1は4種のみ、matchCoins専用の別経済)
 const SNACK_ITEMS = [
-  { id: "snack-item-dice-plus1", name: "追加サイコロ+1個", price: 6, emoji: "🎲", effect: "extraDice", value: 1 },
-  { id: "snack-item-mischief-fruit", name: "いたずらの実", price: 7, emoji: "🍒", effect: "trap" },
-  { id: "snack-item-sniff-grass", name: "鼻きき草", price: 5, emoji: "🌿", effect: "hint" },
-  { id: "snack-item-charm", name: "おまもり", price: 7, emoji: "🛡️", effect: "guard" },
+  { id: "snack-item-dice-plus1", name: "追加サイコロ+1個", price: 6, emoji: "🎲", image: "images/snack/items/item-dice-plus1.png", effect: "extraDice", value: 1 },
+  { id: "snack-item-mischief-fruit", name: "いたずらの実", price: 7, emoji: "🍒", image: "images/snack/items/item-mischief-fruit.png", effect: "trap" },
+  { id: "snack-item-sniff-grass", name: "鼻きき草", price: 5, emoji: "🌿", image: "images/snack/items/item-sniff-grass.png", effect: "hint" },
+  { id: "snack-item-charm", name: "おまもり", price: 7, emoji: "🛡️", image: "images/snack/items/item-charm.png", effect: "guard" },
 ];
 const SNACK_ITEM_SLOT_LIMIT = 3;
 

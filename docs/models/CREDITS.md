@@ -212,7 +212,8 @@
 - 最終仕上げ: テクスチャ解像度1024縮小・Draco圧縮・JPEG変換(同一パイプライン)
 - 最終ファイルサイズ: item-dice-plus1 108KB / item-dice-plus2 152KB / item-dice-plus3 162KB / item-steal 172KB / item-warp 118KB / item-pushback 129KB / item-trap 129KB / item-scent-herb 122KB / item-aim-powder 100KB / item-double-seed 101KB / item-charm-paw 157KB / item-trade-ticket 167KB
 - Blender簡易レンダーで全12点の形状を確認(いずれも正面レンダーで意匠がはっきり分かる、問題なし)
-- **このゲームモード自体はまだアイデア段階で実装未着手**、`docs/board3d.js`への組み込みも未実施。素材のみ準備完了の状態。まだcommit/pushしていない
+- **2026-08-15、実際に`SNACK_ITEMS`(`docs/snack-data.js`)に定義済みの4種(item-dice-plus1・item-trap・item-scent-herb・item-charm-paw)のみ組み込み済み**。Three.jsでレンダリングした透過PNGを`docs/images/snack/items/`に切り出し、`SNACK_ITEMS`各エントリに`image`フィールドを追加(既存の`renderItemIcon`が`item.image`を絵文字より優先する仕組みをそのまま利用)。ショップ画面・アイテム使用メニュー・使用確認ポップアップの3箇所で絵文字から3Dレンダー画像に切り替わったことをPlaywrightで確認、コンソールエラー0件
+- **残り8種(item-dice-plus2/3・item-steal・item-warp・item-pushback・item-aim-powder・item-double-seed・item-trade-ticket)は未組み込み**。これらが表す「サイコロ+2/+3」「横取り」「ワープ」「押し戻し」「狙い目」「ダブルチャンス」「場所交換」機能はまだ`SNACK_ITEMS`にアイテムとして定義されておらず、ゲームロジック(`snack-engine.js`)側の新規実装が必要
 
 ## item-shop-kiosk.glb / placed-trap-marker.glb / snack-spawn-marker.glb / snack-spawn-pedestal.glb / warp-destination-tile.glb / winner-trophy.glb(おやつ集めモード・マップ追加素材6種)
 
