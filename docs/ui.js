@@ -18,17 +18,23 @@ function findAvatarImage(speciesId) {
   return (item && item.avatarImage) || null;
 }
 
+// size="auto"の場合、幅/高さのpx指定を省略しCSS(.avatar-badge-auto、親要素に100%で追従)に
+// サイズを委ねる。2026-08-16、4隅HUDの顔アイコン(.snack-hud-face)がカードの実寸(vw基準で
+// 可変)と無関係に常に固定40pxで描画され、カード側が小さい時に円形の縁からはみ出す/
+// カード側が大きい時に隙間が空く不具合があったため追加(利用者指摘)。
 function renderAvatarBadge(visual, size) {
-  const px = size || 28;
-  const speciesSize = Math.round(px * 0.7);
+  const auto = size === "auto";
+  const px = auto ? null : size || 28;
+  const speciesSize = auto ? null : Math.round(px * 0.7);
   const avatarImage = visual.costumeImage || findAvatarImage(visual.speciesId);
   const speciesVisual = avatarImage
     ? `<img class="avatar-species-img" src="${avatarImage}" alt="" />`
     : visual.speciesEmoji
-    ? `<span class="avatar-species" style="font-size:${speciesSize}px">${visual.speciesEmoji}</span>`
+    ? `<span class="avatar-species"${auto ? "" : ` style="font-size:${speciesSize}px"`}>${visual.speciesEmoji}</span>`
     : "";
+  const sizeStyle = auto ? "" : `width:${px}px;height:${px}px;`;
   return `
-    <span class="avatar-badge" style="width:${px}px;height:${px}px;background:${visual.color}">
+    <span class="avatar-badge${auto ? " avatar-badge-auto" : ""}" style="${sizeStyle}background:${visual.color}">
       ${speciesVisual}
     </span>
   `;
@@ -973,12 +979,22 @@ function renderSnackPopupChoice({ phaseKey, seatNumber, title, subtitle, rowsHtm
 
 // 結果表示ポップアップ(popup-result-frame.png)。行動結果・アイテム使用確認など
 // 「1つの内容+次への案内」を見せるphaseで使う。
+// 2026-08-16、この画像は伸縮前提の9スライス枠ではなく、上部小バッジ(タイトル用)・
+// 左の丸(アバター用)・右の四角(本文用)・下のピル(ボタン用)が固定位置に焼き込まれた
+// 1枚絵の構図だったため、background-image(縦横比1:1固定)+実測位置の絶対配置に作り直した
+// (以前のborder-image方式は画像の実際の意匠と無関係な位置で切り出していたため、
+// 見出しが上部バッジに重なる・本文パネルが左の丸にはみ出す、といった不具合が解消しなかった)。
 function renderSnackPopupResult({ phaseKey, seatNumber, title, bodyHtml, footerHtml }) {
+  // 上部の小バッジは肉球の飾りのみ(他の枠と同じ意匠の踏襲)でテキストの置き場ではないため、
+  // 見出しは右の四角(本文パネル)の中に太字1行目として入れる(2026-08-16)。
   return `
     <div class="modal-backdrop snack-popup-backdrop">
       <div class="snack-popup-result snack-popup-anim" style="${seatNumber ? snackColorVars(seatNumber) : ""}" data-key="${phaseKey}">
-        ${title ? `<h3 class="snack-popup-title">${escapeHtml(title)}</h3>` : ""}
-        <div class="snack-popup-result-body">${bodyHtml}</div>
+        ${seatNumber ? renderSnackMedallion(seatNumber) : ""}
+        <div class="snack-popup-result-body">
+          ${title ? `<h3 class="snack-popup-result-title">${escapeHtml(title)}</h3>` : ""}
+          ${bodyHtml}
+        </div>
         ${footerHtml ? `<div class="snack-popup-footer">${footerHtml}</div>` : ""}
       </div>
     </div>
@@ -1020,7 +1036,7 @@ function renderSnackHUD(state, humanId, rankChangeFx) {
       return `
         <div class="snack-hud-corner snack-hud-corner-${corner}">
           <div class="snack-hud-card${isActive ? " snack-hud-active" : ""}" style="${snackColorVars(p.seatNumber)}">
-            <div class="snack-hud-face">${renderAvatarBadge(visual, 40)}</div>
+            <div class="snack-hud-face">${renderAvatarBadge(visual, "auto")}</div>
             <div class="snack-hud-rank${rankFxClass}">${rank}</div>
             ${badgeSrc ? `<img class="snack-hud-rank-badge snack-hud-rank-badge-${change.direction}" src="${badgeSrc}" alt="" />` : ""}
             <div class="snack-hud-name">${escapeHtml(p.name)}${p.isCPU ? '<span class="snack-hud-name-cpu-tag">(CPU)</span>' : ""}</div>

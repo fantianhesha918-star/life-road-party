@@ -1640,7 +1640,11 @@ const App = {
     this.snack.phase = "SNACK_REVEAL";
     this.render();
     if (this.snackBoard3dMounted && window.LifeRoadSnackBoard3D) {
-      window.LifeRoadSnackBoard3D.enterSnackReveal(node.id);
+      // 2026-08-16、以前はおやつ地点だけの近距離周回で、地図上のどこか・現在地からの距離感が
+      // 伝わらないという指摘を受け、全プレイヤーの現在地(ゲーム開始直後なのでスタート地点)も
+      // 一緒に画面へ収めるカメラへ変更(snack-board3d.js側のupdateSnackRevealCamera参照)。
+      const contextIds = this.snack.state.players.map((p) => p.id);
+      window.LifeRoadSnackBoard3D.enterSnackReveal(node.id, contextIds);
     }
     const token = (this._snackFlowToken = (this._snackFlowToken || 0) + 1);
     await snackDelay(3000);
@@ -1648,6 +1652,20 @@ const App = {
     if (window.LifeRoadSnackBoard3D) window.LifeRoadSnackBoard3D.exitSnackReveal();
     this.snack.reveal = null;
     this.startSnackOrderRoll();
+  },
+
+  // 購入で新しく出現したおやつの場所を、全プレイヤーの現在地と一緒に一瞬だけ見せる
+  // (2026-08-16、「獲得後におやつが移動した時も位置関係がわかるように」との指摘で追加)。
+  // 初回オリエンテーション(playSnackReveal)と同じenterSnackReveal/exitSnackRevealを使うが、
+  // こちらは毎回の購入で起きるため専用のポップアップ・スキップ操作は設けず短い時間だけ流す。
+  async revealNewSnackSpotIfAny(newSnackNodeId) {
+    if (!newSnackNodeId || !this.snackBoard3dMounted || !window.LifeRoadSnackBoard3D) return;
+    const contextIds = this.snack.state.players.map((p) => p.id);
+    window.LifeRoadSnackBoard3D.enterSnackReveal(newSnackNodeId, contextIds);
+    const token = (this._snackFlowToken = (this._snackFlowToken || 0) + 1);
+    await snackDelay(1400);
+    if (this._snackFlowToken !== token) return;
+    if (window.LifeRoadSnackBoard3D) window.LifeRoadSnackBoard3D.exitSnackReveal();
   },
 
   snackSkipReveal() {
@@ -1969,6 +1987,7 @@ const App = {
     this.pushSnackLog(result.entries);
     this.saveSnackGame();
     await this.playSnackMovementHop(player.id, result.path);
+    await this.revealNewSnackSpotIfAny(result.newSnackNodeId);
     this.showSnackActionResult(player, result.entries);
   },
 
@@ -2151,6 +2170,7 @@ const App = {
         this.setSnackActionResult(player, result.entries);
         this.saveSnackGame();
         await this.playSnackMovementHop(player.id, result.path);
+        await this.revealNewSnackSpotIfAny(result.newSnackNodeId);
         this.render();
         this.afterSnackAction();
       }, 700);

@@ -568,6 +568,9 @@ function resolveSnackChoice(state, buy) {
   const entries = [];
   const path = [];
   state.pendingSnackChoice = null;
+  // 購入により新しく出現したおやつの場所(2026-08-16、UI側の「移動後カメラ紹介」演出が
+  // どこを紹介すればよいか分かるよう、戻り値に含める)。購入しなかった/できなかった場合はnull。
+  let newSnackNodeId = null;
   // resolveSnackBranchの通行料と同種の見落とし(所持金不足でもマイナスまで購入できてしまう)を
   // 防ぐ防御的ガード。UI側(購入確認ポップアップ)でも同じ判定でボタンを無効化する。
   if (buy && player.matchCoins >= SNACK_SNACK_PRICE) {
@@ -575,7 +578,10 @@ function resolveSnackChoice(state, buy) {
     player.snacks += 1;
     entries.push({ type: "snack", text: "おやつを手に入れた！", delta: -SNACK_SNACK_PRICE });
     const idx = state.activeSnackNodeIds.indexOf(node.id);
-    if (idx !== -1) state.activeSnackNodeIds[idx] = pickNewSnackLocation(state.activeSnackNodeIds);
+    if (idx !== -1) {
+      newSnackNodeId = pickNewSnackLocation(state.activeSnackNodeIds);
+      state.activeSnackNodeIds[idx] = newSnackNodeId;
+    }
   } else if (buy) {
     entries.push({ type: "info", text: `コインが足りずおやつを買えなかった(あと${SNACK_SNACK_PRICE - player.matchCoins}コイン)` });
   } else {
@@ -586,7 +592,7 @@ function resolveSnackChoice(state, buy) {
   } else {
     continueSnackMovement(state, player, entries, path);
   }
-  return wrapUpSnackAction(state, player, entries, path);
+  return { ...wrapUpSnackAction(state, player, entries, path), newSnackNodeId };
 }
 
 function resolveSnackStopChoice(state, optionIndex) {

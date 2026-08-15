@@ -724,6 +724,17 @@ body {
   line-height: 1;
 }
 
+/* 2026-08-16、renderAvatarBadge(visual,"auto")用。固定pxではなく親要素(.snack-hud-face等)の
+   実寸に追従させ、カードサイズが可変でも円形の縁からはみ出したり隙間が空いたりしないようにする。 */
+.avatar-badge-auto {
+  width: 100%;
+  height: 100%;
+}
+
+.avatar-badge-auto .avatar-species {
+  font-size: 70%;
+}
+
 .avatar-species-img {
   position: absolute;
   top: 50%;
@@ -1352,8 +1363,7 @@ body {
   animation: snack-popup-in 0.22s cubic-bezier(0.2, 0.9, 0.35, 1.1);
 }
 
-.snack-popup-choice,
-.snack-popup-result {
+.snack-popup-choice {
   position: relative;
   width: min(92vw, 380px);
   max-height: 82vh;
@@ -1366,53 +1376,99 @@ body {
   border-style: solid;
   border-image-repeat: stretch;
   color: var(--text);
-}
-
-.snack-popup-choice {
   border-image-source: url("images/snack/popup-choice-frame.png");
   border-image-slice: 180 145 180 145 fill;
   border-image-width: 46px 36px;
 }
 
+/* 2026-08-16、popup-result-frame.png(800×800)は伸縮前提の9スライス枠ではなく、上部の
+   小バッジ(タイトル用)・左の丸(アバター用)・右の四角(本文用)・下のピル(ボタン用)が
+   固定位置に焼き込まれた1枚絵の構図だとPythonでの実測(グリッドオーバーレイ)で判明した。
+   border-image(9スライス)で伸縮させると画像の実際の意匠と無関係な位置で切り出され、
+   見出しが上部バッジに重なる・本文パネルが左の丸にはみ出す不具合が解消しなかったため、
+   background-image(縦横比1:1固定)+各要素を実測値(%)で絶対配置する方式に作り直した。
+   本文が実測枠(右の四角、高さ約29%)より長くなる場合は内部スクロールで吸収する。 */
 .snack-popup-result {
-  border-image-source: url("images/snack/popup-result-frame.png");
-  border-image-slice: 220 fill;
-  border-image-width: 52px;
-  align-items: center;
+  position: relative;
+  width: min(92vw, 380px);
+  aspect-ratio: 1 / 1;
+  background-image: url("images/snack/popup-result-frame.png");
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  color: var(--text);
   text-align: center;
 }
 
-/* 2026-08-13(第3弾)、Codexレビュー対応。border-image-sliceのfill領域(装飾フレーム画像の
-   中央、丸バッジ・パネル絵柄が焼き込まれている)がそのまま本文の背景になり、実効的な
-   可読領域が狭かった(390px幅で本文実効幅136px相当)。装飾を触らず、本文専用の不透明パネルを
-   フレーム中央に重ねることで解決する(3分割構成: 見出し/本文パネル/フッター)。
-   2026-08-15、min-width:240pxが実際の利用可能幅(border-image-width52px×2+padding22px×2を
-   引いた後の内側、380px幅の時でも232px・92vw基準の狭い画面ではさらに狭い)より大きく、
-   常にはみ出していた。角丸(border-radius)がフレームの左の丸(アバター用装飾)にまで
-   突き出して重なって見える不具合だったため、はみ出さない値に修正した(利用者指摘)。 */
+.snack-popup-result .snack-medallion {
+  top: 43.5%;
+  left: 20%;
+  width: 22%;
+  height: 22%;
+  transform: translate(-50%, -50%);
+}
+
+.snack-popup-result-title {
+  margin: 0 0 3px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.2;
+  color: #6b3f0f;
+}
+
 .snack-popup-result-body {
-  width: 100%;
-  max-width: 100%;
-  margin: 4px auto 0;
-  padding: 14px 16px;
-  border-radius: 18px;
-  background: rgba(255, 252, 242, 0.94);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12) inset;
-  font-size: 14px;
-  line-height: 1.45;
+  position: absolute;
+  left: 35%;
+  top: 29%;
+  width: 55%;
+  height: 29%;
+  margin: 0;
+  padding: 4px 8px;
+  border-radius: 12px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  font-size: 12.5px;
+  line-height: 1.3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* 2026-08-16、justify-content:centerのままoverflow-y:autoさせると、内容が枠より高い場合
+     (ITEM_CONFIRM等)先頭行(見出し)が上側にはみ出た扱いになり初期スクロール位置から
+     見えなくなっていた。先頭から読める方が自然なのでflex-startに変更。 */
+  justify-content: flex-start;
+}
+
+/* 2026-08-16、基底.snack-popup-footerがflex-direction:columnのため、ITEM_CONFIRM等の
+   2ボタン(使う/やめる)がここでも縦積みになり、固定枠(高さ11%)を突き抜けて画面下へ
+   はみ出していた。横並びに変え、.btn(display:block;width:100%)も枠内に収まる幅へ縮小する。 */
+.snack-popup-result .snack-popup-footer {
+  position: absolute;
+  left: 6%;
+  top: 60%;
+  width: 88%;
+  height: 13%;
+  margin: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.snack-popup-result .snack-popup-footer .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  flex: 0 1 auto;
+  padding: 8px 14px;
+  font-size: 0.78rem;
+  white-space: nowrap;
 }
 
 .snack-popup-title {
   margin: 0;
   text-align: center;
   font-size: 1.02rem;
-}
-
-/* 2026-08-15、result枠(popup-result-frame.png)の上部装飾(肉球バッジ+葉)は小さい丸1つ分の
-   面積しかなく、見出し文字がそのまま重なって窮屈に見えていた(利用者指摘)ため、
-   見出しをその下へ逃がす。 */
-.snack-popup-result .snack-popup-title {
-  margin-top: 12px;
 }
 
 .snack-popup-subtitle {

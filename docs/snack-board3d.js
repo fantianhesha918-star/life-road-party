@@ -494,6 +494,10 @@ let diceFocusPlayerId = null;
 let branchOverviewNodeId = null;
 let snackRevealNodeId = null;
 let snackRevealStartTime = 0;
+// おやつ地点と一緒に画面へ収める「現在地」の世界座標(通常はプレイヤーの現在地)。
+// 2026-08-16、以前はおやつ地点だけを近距離で周回するだけで場所の把握がしづらいという
+// 指摘を受け追加。空配列の場合は従来通りおやつ地点だけの近距離周回にフォールバックする。
+let snackRevealContextPositions = [];
 
 function computeMapBounds() {
   if (!nodePositions.size) return { centerX: 0, centerZ: 0, halfX: 10, halfZ: 10 };
@@ -1420,8 +1424,12 @@ function exitBranchOverview() {
   branchOverviewNodeId = null;
 }
 
-// おやつ地点をゆっくり周回しながら見せる紹介演出用カメラ(仕様書14章SNACK_REVEALの
-// 「おやつを回転させる」を、素材側にモデルを回すギミックが無いためカメラ側の周回で代替する簡略版)。
+// おやつ地点を見せる紹介演出用カメラ(仕様書14章SNACK_REVEALの「おやつを回転させる」を、
+// 素材側にモデルを回すギミックが無いためカメラ側の周回で代替する簡略版)。
+// 2026-08-16、以前はおやつ地点だけを近距離(radius2.6)で周回するのみで、地図上のどこなのか・
+// 現在地からどれくらい離れているかが伝わらないという指摘を受け、snackRevealContextPositions
+// (通常はプレイヤーの現在地)が渡されている場合はそれも画面に収める俯瞰フレーミングに変更した。
+// contextが無い場合(ガブリオンイベント演出での流用等)は従来通りの近距離周回のまま。
 function updateSnackRevealCamera() {
   const pos = snackRevealNodeId ? nodePositions.get(snackRevealNodeId) : null;
   if (!pos) {
@@ -1429,24 +1437,51 @@ function updateSnackRevealCamera() {
     return;
   }
   const elapsed = (performance.now() - snackRevealStartTime) / 1000;
-  const angle = elapsed * 0.5;
-  const radius = 2.6;
-  const desired = new THREE.Vector3(pos.x + Math.cos(angle) * radius, 1.9, pos.z + Math.sin(angle) * radius);
-  cameraCurrentPos.lerp(desired, CAMERA_LERP * 1.4);
+  if (!snackRevealContextPositions.length) {
+    const angle = elapsed * 0.5;
+    const radius = 2.6;
+    const desired = new THREE.Vector3(pos.x + Math.cos(angle) * radius, 1.9, pos.z + Math.sin(angle) * radius);
+    cameraCurrentPos.lerp(desired, CAMERA_LERP * 1.4);
+    camera.position.copy(cameraCurrentPos);
+    camera.lookAt(pos.x, 0.5, pos.z);
+    return;
+  }
+  const points = [pos, ...snackRevealContextPositions];
+  const minX = Math.min(...points.map((p) => p.x));
+  const maxX = Math.max(...points.map((p) => p.x));
+  const minZ = Math.min(...points.map((p) => p.z));
+  const maxZ = Math.max(...points.map((p) => p.z));
+  const centerX = (minX + maxX) / 2;
+  const centerZ = (minZ + maxZ) / 2;
+  // 距離が近すぎる場合(隣のマスに再出現した等)でも最低限の見下ろし距離を確保する。
+  const spread = Math.max(maxX - minX, maxZ - minZ, 3);
+  const dist = spread * 1.15 + 3.5;
+  // ゆっくり回り込んで奥行きが分かるようにする(静止画的にならないように)。
+  const angle = 0.5 + elapsed * 0.12;
+  const desired = new THREE.Vector3(centerX + Math.cos(angle) * dist * 0.6, dist * 0.62, centerZ + Math.sin(angle) * dist * 0.6);
+  cameraCurrentPos.lerp(desired, CAMERA_LERP * 1.3);
   camera.position.copy(cameraCurrentPos);
-  camera.lookAt(pos.x, 0.5, pos.z);
+  camera.lookAt(centerX, 0.6, centerZ);
 }
 
-function enterSnackReveal(nodeId) {
+// contextPlayerIds: 一緒に画面へ収めたいプレイヤーId配列(省略時は従来通りの近距離周回)。
+function enterSnackReveal(nodeId, contextPlayerIds) {
   if (!nodeId || !camera) return;
   snackRevealNodeId = nodeId;
   snackRevealStartTime = performance.now();
   cameraMode = "snackReveal";
+  snackRevealContextPositions = (contextPlayerIds || [])
+    .map((pid) => {
+      const entry = characters.get(pid);
+      return entry ? entry.group.position.clone() : null;
+    })
+    .filter(Boolean);
 }
 
 function exitSnackReveal() {
   if (cameraMode === "snackReveal") cameraMode = "follow";
   snackRevealNodeId = null;
+  snackRevealContextPositions = [];
 }
 
 // ==================== マップ全体表示・ズーム・ドラッグパン ====================
