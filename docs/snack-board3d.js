@@ -1007,6 +1007,57 @@ function updatePlayerRings() {
   });
 }
 
+// 同じマスに複数プレイヤーが止まっている場合、行動中(focusPlayerId)以外を少し脇へ
+// ずらして「マスから降りている」ように見せる(重なって表示が潰れるのを防ぐ、2026-08-15追加)。
+const SAME_NODE_OFFSET_RADIUS = 0.68;
+
+// characters(playerId -> entry)を同じcurrentNodeIdごとにグループ化し、行動中プレイヤー
+// (いなければ座席番号が一番若い1人)を中心に残したまま、残りへ円状のオフセットを割り当てる。
+// ホップ移動中(entry.hop有り)のプレイヤーはここでは対象にしない(演出中の座標を横取りしないため)。
+function computeSameNodeOffsets() {
+  const byNode = new Map();
+  characters.forEach((entry) => {
+    if (entry.hop) return;
+    if (!byNode.has(entry.currentNodeId)) byNode.set(entry.currentNodeId, []);
+    byNode.get(entry.currentNodeId).push(entry);
+  });
+  const offsets = new Map();
+  byNode.forEach((entries) => {
+    if (entries.length < 2) return;
+    const sorted = entries.slice().sort((a, b) => (a.seatNumber || 0) - (b.seatNumber || 0));
+    const primary = sorted.find((entry) => entry.playerId === focusPlayerId) || sorted[0];
+    const others = sorted.filter((entry) => entry !== primary);
+    others.forEach((entry, i) => {
+      const angle = (i / others.length) * Math.PI * 2 + Math.PI / 5;
+      offsets.set(entry.playerId, {
+        x: Math.cos(angle) * SAME_NODE_OFFSET_RADIUS,
+        z: Math.sin(angle) * SAME_NODE_OFFSET_RADIUS,
+      });
+    });
+  });
+  return offsets;
+}
+
+// 上記オフセットへ毎フレーム緩やかに寄せる(瞬間移動させず、マスへ歩いてきてから
+// すっと脇へ避けるように見せる)。ホップ中のentryはupdateHopForEntry側が座標を握っているため
+// ここでは触らない。
+function applySameNodeLayout() {
+  if (!nodePositions.size) return;
+  const offsets = computeSameNodeOffsets();
+  characters.forEach((entry) => {
+    if (entry.hop) return;
+    const basePos = nodePositions.get(entry.currentNodeId);
+    if (!basePos) return;
+    const off = offsets.get(entry.playerId);
+    const targetX = basePos.x + (off ? off.x : 0);
+    const targetZ = basePos.z + (off ? off.z : 0);
+    const targetY = terrainHeightAt(targetX, targetZ);
+    entry.group.position.x += (targetX - entry.group.position.x) * 0.15;
+    entry.group.position.z += (targetZ - entry.group.position.z) * 0.15;
+    entry.group.position.y += (targetY - entry.group.position.y) * 0.15;
+  });
+}
+
 function createMascotEntry(nodeId) {
   if (!nodeId || mascotEntries.has(nodeId)) return;
   const pos = nodePositions.get(nodeId);
@@ -1159,7 +1210,8 @@ async function hopPath(playerId, pathNodeIds, options) {
   const stepDurationMs = opts.stepDurationMs || HOP_STEP_DURATION_MS;
   const isFocus = playerId === focusPlayerId;
   if (isFocus) isMoving = true;
-  let fromPos = nodePositions.get(entry.currentNodeId) || entry.group.position.clone();
+  // 同じマスで脇へ避けていた場合、その位置から歩き出させる(nodePositionsの中心へ瞬間移動させない)。
+  let fromPos = entry.group.position.clone();
   for (let i = 0; i < pathNodeIds.length; i++) {
     const nodeId = pathNodeIds[i];
     const toPos = nodePositions.get(nodeId);
@@ -1190,7 +1242,7 @@ function syncPlayers(players, activeSnackNodeIds) {
       return;
     }
     if (!entry.hop && entry.currentNodeId !== p.currentNodeId) {
-      const fromPos = nodePositions.get(entry.currentNodeId) || entry.group.position.clone();
+      const fromPos = entry.group.position.clone();
       const toPos = nodePositions.get(p.currentNodeId);
       if (toPos) {
         faceDirection(entry, fromPos, toPos);
@@ -1767,6 +1819,7 @@ function animate() {
   animationFrameId = requestAnimationFrame(animate);
   const now = performance.now();
   characters.forEach((entry) => updateHopForEntry(entry, now));
+  applySameNodeLayout();
   mascotEntries.forEach((entry) => {
     if (entry.model) entry.model.position.y = entry.baseY + Math.sin(now / 500) * 0.08;
   });

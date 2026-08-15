@@ -1100,9 +1100,15 @@ body {
 .snack-hud-card.snack-hud-active::after {
   content: "";
   position: absolute;
-  inset: -4%;
+  /* 2026-08-15、以前はinset:-4%(カード全体基準)で、画像内の実際の帯部分(上下25%前後の
+     余白を除いた楕円バー)より大きく外側に膨らんだ枠になっていたため、画像を実測して
+     帯そのものの位置(top 25.5%〜bottom 76.6%, left 5.1%〜right 95%)に合わせて縮小した。 */
+  top: 23%;
+  bottom: 21%;
+  left: 3%;
+  right: 3%;
   border-radius: 999px;
-  box-shadow: 0 0 0 3px var(--p-color, var(--brand)), 0 0 10px 2px var(--p-color, var(--brand));
+  box-shadow: 0 0 0 2px var(--p-color, var(--brand)), 0 0 6px 1px var(--p-color, var(--brand));
   pointer-events: none;
 }
 
