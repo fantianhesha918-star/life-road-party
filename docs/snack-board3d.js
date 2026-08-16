@@ -304,10 +304,16 @@ const SNACK_SPACE_MODEL_ASSETS = {
   income: { url: new URL("./models/space-income.glb", import.meta.url).href, scale: 0.5, yOffset: -0.269 },
   expense: { url: new URL("./models/space-expense.glb", import.meta.url).href, scale: 0.5, yOffset: -0.198 },
   choice: { url: new URL("./models/space-choice.glb", import.meta.url).href, scale: 0.5, yOffset: -0.297 },
-  item: { url: new URL("./models/space-item.glb", import.meta.url).href, scale: 0.3105, yOffset: -0.16 },
-  job: { url: new URL("./models/space-job.glb", import.meta.url).href, scale: 0.4131, yOffset: -0.16 },
-  payday: { url: new URL("./models/space-payday.glb", import.meta.url).href, scale: 0.3301, yOffset: -0.16 },
-  shop: { url: new URL("./models/space-shop.glb", import.meta.url).href, scale: 0.3815, yOffset: -0.16 },
+  // 2026-08-16、item/job/payday/shopの4種だけ、他7種と違いアイコン面がY(上)ではなくZ(横)を
+  // 向いた状態でエクスポートされており、マスが横倒しの筒のように見え「マークが見えない」
+  // 不具合があった(利用者指摘、実機screenshotで確認)。rotationX(-90°)でアイコン面を上へ
+  // 向け直す。scaleは回転後の新しい高さ軸(旧Z幅、実測1.925〜1.995)を基準に、他と同じ
+  // 「表示高さ上限0.62」を満たすよう再計算した(半分の高さは常に0.31になるよう揃えているため
+  // yOffsetは-0.16のまま変更不要)。
+  item: { url: new URL("./models/space-item.glb", import.meta.url).href, scale: 0.3149, yOffset: -0.16, rotationX: -Math.PI / 2 },
+  job: { url: new URL("./models/space-job.glb", import.meta.url).href, scale: 0.3221, yOffset: -0.16, rotationX: -Math.PI / 2 },
+  payday: { url: new URL("./models/space-payday.glb", import.meta.url).href, scale: 0.3108, yOffset: -0.16, rotationX: -Math.PI / 2 },
+  shop: { url: new URL("./models/space-shop.glb", import.meta.url).href, scale: 0.3113, yOffset: -0.16, rotationX: -Math.PI / 2 },
   rest: { url: new URL("./models/space-rest.glb", import.meta.url).href, scale: 0.5, yOffset: -0.265 },
   junction: { url: new URL("./models/space-junction.glb", import.meta.url).href, scale: 0.5, yOffset: -0.255 },
 };
@@ -896,6 +902,7 @@ function loadDecorationModel(owner, config) {
       const model = template.clone(true);
       model.scale.setScalar(config.scale);
       model.position.y = config.yOffset;
+      if (config.rotationX) model.rotation.x = config.rotationX;
       model.traverse((node) => {
         if (node.isMesh) {
           node.castShadow = true;
@@ -930,11 +937,17 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
     return ROAD_HALF_WIDTH + footprintHalfWidth + 0.5;
   }
 
+  // 2026-08-16、押し出し先の座標でterrainHeightAtを再計算せず、元ノードの高さをそのまま
+  // 使っていたため、この関数の押し出し方向(中心→外側、島の傾斜方向そのもの)と組み合わさって
+  // 建物・木・ベンチが実際の地面より高い/低い位置に浮いて見える不具合があった(利用者指摘)。
+  // 採用が決まった候補のx/zで地面の高さを取り直してから返す。
   function resolveClearOutwardPosition(pos, offset, config, opts) {
     const dir = new THREE.Vector3(pos.x - centerX, 0, pos.z - centerZ).normalize();
     // gate-start(道をまたぐアーチ)のように、意図的に道の真上へ配置する装飾は対象外にする。
     if (opts && opts.straddleRoad) {
-      return { worldPos: pos.clone().addScaledVector(dir, offset), dir };
+      const worldPos = pos.clone().addScaledVector(dir, offset);
+      worldPos.y = terrainHeightAt(worldPos.x, worldPos.z);
+      return { worldPos, dir };
     }
     const clearance = roadClearanceFor(config);
     for (const angleDeg of [0, -18, 18, -34, 34]) {
@@ -944,7 +957,10 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
         const candidate = pos.clone().addScaledVector(candidateDir, offset + extra * 0.7);
         const conflict = zonePropPositions.some((p) => p.distanceTo(candidate) < SNACK_ZONE_PROP_MIN_GAP);
         const onRoad = distanceToAnySegment(candidate, roadSegments) < clearance;
-        if (!conflict && !onRoad) return { worldPos: candidate, dir };
+        if (!conflict && !onRoad) {
+          candidate.y = terrainHeightAt(candidate.x, candidate.z);
+          return { worldPos: candidate, dir };
+        }
       }
     }
     return null;

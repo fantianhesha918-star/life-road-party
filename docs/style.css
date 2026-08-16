@@ -1896,6 +1896,31 @@ body {
   font-size: 1.05rem;
 }
 
+/* 2026-08-16、行動順決めサイコロ(ORDER_ROLL/ORDER_TIE_ROLL)は3D側で整列したキャラクター+
+   頭上のサイコロ演出が主役のため、2D側は.snack-rolling-overlayと同じ「最小限の案内のみ」
+   パターンに揃える(以前の中央カードが演出を覆い隠していた不具合の対応)。 */
+.snack-order-roll-bar {
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 17;
+}
+
+.snack-order-roll-status {
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  padding: 8px 18px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.snack-order-roll-status p {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
 /* ---- サイコロ演出中(3D側が主役、最小限の案内のみ) ---- */
 
 .snack-rolling-overlay {

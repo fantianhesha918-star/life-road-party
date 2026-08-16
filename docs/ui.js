@@ -1086,38 +1086,20 @@ function renderSnackMapIntroOverlay() {
 
 // ==================== 行動順決めサイコロ ====================
 
+// 2026-08-16、以前は中央に大きなカード(タイトル+全員の出目リスト)を表示していたが、
+// enterOrderLineup()で整列させたキャラクター+頭上のサイコロ演出をちょうど覆い隠してしまう
+// 不具合があった(利用者指摘)。3D側で誰が何を出したか視認できるため、2D側はボタン(または
+// 「振っています」の一言)だけに絞り、カード・タイトル・暗幕を廃止する。
 function renderSnackOrderRollPopup(snack, state, humanId) {
   const or = snack.orderRoll;
-  const rows = or.ids
-    .map((id) => {
-      const p = state.players.find((pp) => pp.id === id);
-      const rolled = Object.prototype.hasOwnProperty.call(or.rolls, id);
-      const value = rolled ? or.rolls[id] : "?";
-      return `
-        <li class="snack-order-row" style="${snackColorVars(p.seatNumber)}">
-          <span class="snack-order-seat">${snackPlayerColor(p.seatNumber).label}</span>
-          <span class="p-name">${escapeHtml(p.name)}${p.isCPU ? "(CPU)" : ""}</span>
-          <span class="snack-order-value">${value}</span>
-        </li>
-      `;
-    })
-    .join("");
   const nextUnrolledId = or.ids.find((id) => !Object.prototype.hasOwnProperty.call(or.rolls, id));
+  if (!nextUnrolledId) return "";
   const isHumanTurn = nextUnrolledId === humanId;
-  const footer = isHumanTurn
-    ? snackNextButton("サイコロを振る", "App.snackRollForOrder()")
-    : nextUnrolledId
-      ? `<p class="lead">${escapeHtml(state.players.find((p) => p.id === nextUnrolledId).name)}が振っています…</p>`
-      : "";
-  return `
-    <div class="modal-backdrop snack-popup-backdrop">
-      <div class="snack-popup-choice snack-popup-anim" data-key="${snack.phase}">
-        <h3 class="snack-popup-title">${or.isTie ? "同点の振り直し！" : "順番を決めよう！"}</h3>
-        <ul class="snack-order-list">${rows}</ul>
-        <div class="snack-popup-footer">${footer}</div>
-      </div>
-    </div>
-  `;
+  if (isHumanTurn) {
+    return `<div class="snack-order-roll-bar">${snackNextButton("サイコロを振る", "App.snackRollForOrder()")}</div>`;
+  }
+  const name = escapeHtml(state.players.find((p) => p.id === nextUnrolledId).name);
+  return `<div class="snack-order-roll-bar snack-order-roll-status"><p>${name}が振っています…</p></div>`;
 }
 
 function renderSnackOrderResultPopup(snack, state) {
