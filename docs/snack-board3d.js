@@ -214,8 +214,21 @@ const SNACK_GROUND_CLUSTER_MODELS = {
   shrub: { url: new URL("./models/terrain/cluster-shrub.glb", import.meta.url).href, scale: 0.8, yOffset: 0.213 },
   lowHedge: { url: new URL("./models/prop-low-hedge.glb", import.meta.url).href, scale: 0.8, yOffset: 0.19 },
   bench: { url: new URL("./models/prop-bench.glb", import.meta.url).href, scale: 0.55, yOffset: 0.42 },
+  // 2026-08-16、見本(公園の見本画像)は道沿いに大きく茂った木・低木の群れと街灯が
+  // 点在しており、それに比べて緑・街灯の密度が薄いという利用者指摘への対応で追加。
+  // scale/yOffsetはSNACK_ZONE_MODELSの同モデルより一回り小さくし、背景寄りの控えめな
+  // 存在感にした(手前の建物脇の同モデルと張り合わないように)。
+  treeRound: { url: new URL("./models/tree-round.glb", import.meta.url).href, scale: 0.72, yOffset: 0.72 },
+  treeConifer: { url: new URL("./models/tree-conifer.glb", import.meta.url).href, scale: 0.82, yOffset: 0.82 },
+  streetlamp: { url: new URL("./models/prop-streetlamp.glb", import.meta.url).href, scale: 0.85, yOffset: 0.85 },
 };
-const SNACK_GROUND_CLUSTER_KEYS = Object.keys(SNACK_GROUND_CLUSTER_MODELS);
+// 見本の「木・低木が多い」印象に近づけるため、緑系(shrub/木)と街灯を重み付けして
+// 出現回数を増やす(単純なObject.keys()の均等巡回ではなく、明示的な重み付き配列にする)。
+const SNACK_GROUND_CLUSTER_KEYS = [
+  "shrub", "treeRound", "flowerbedOval", "shrub", "streetlamp", "treeConifer",
+  "flowerbedCrescent", "bench", "shrub", "lowHedge", "treeRound", "flowerbedRing",
+  "streetlamp", "pond", "treeConifer", "paving", "shrub", "bench",
+];
 
 // 地区ゾーン(見本の上=駅・商店・カフェ、右上〜右=役所・病院・学校、右下=住宅・庭・郵便局、
 // 下=教会・結婚式広場、左=公園)の建物・小物。本編(board3d.js)で使用中の素材・scale/yOffsetを
@@ -1098,9 +1111,14 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
     const pos = nodePositions.get(n.id);
     const zoneName = n.buildingZone;
     if (zoneName === "park") {
-      // 公園ゾーンは施設1つ+木を多めに配置し、緑豊かな見た目にする
+      // 公園ゾーンは施設1つ+木を多めに配置し、緑豊かな見た目にする。2026-08-16、
+      // 見本(公園の見本画像)は木・低木が茂みとして複数まとまっているのに対し、
+      // 1ノード1本では寂しいという指摘を受け2本に増やした。同じoffsetで2回試行すると
+      // resolveClearOutwardPositionの衝突回避が自動的に別角度へ振ってくれるため、
+      // 不自然に重ならず「同じ場所に生えた木立ち」のような自然なばらけ方になる。
       if (idx % 3 === 0) tryPlaceZoneProp(pos, 2.1, "facility-park", { driveway: true });
       tryPlaceZoneProp(pos, 1.6, SNACK_TREE_MODEL_KEYS[idx % SNACK_TREE_MODEL_KEYS.length]);
+      tryPlaceZoneProp(pos, 1.6, SNACK_TREE_MODEL_KEYS[(idx + 1) % SNACK_TREE_MODEL_KEYS.length]);
     } else if (zoneName === "station") {
       // 駅・ゲートは上で個別配置済みのため、街灯等の小物のみ巡回配置する
     } else {
@@ -1118,15 +1136,17 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
     tryPlaceZoneProp(pos, 0.7, streetKey);
   });
 
-  // 空き地装飾(2026-08-15、Meshy生成済みだった未組み込み素材6種+2026-08-16、低木・ベンチを
-  // 追加し密度も倍増。利用者から「全体的に質素」「花壇・四角い植木・ベンチで公園らしさを」との
-  // 指摘を受けた対応)。外周(半径比1.0)と内周(半径比0.4)の中間の帯(0.52〜0.86、従来の
-  // 0.6〜0.78より内外に広げて空き地全体をカバー)に候補点をばら撒き、既存の全ノード・全装飾
-  // (zonePropPositions、この時点でここまでの建物・木・小物すべてを含む)と最小距離を
-  // 保てる候補だけを採用する(マス・キャラクター移動の妨げにならないことを優先する設計)。
-  const clusterCandidateCount = 44;
+  // 空き地装飾(2026-08-15、Meshy生成済みだった未組み込み素材6種+2026-08-16、低木・ベンチ・
+  // 木・街灯を追加し密度も倍増。利用者から「全体的に質素」「花壇・四角い植木・ベンチで
+  // 公園らしさを」「見本ほど木・街灯が多くない」との指摘を受けた対応)。外周(半径比1.0)と
+  // 内周(半径比0.4)の中間の帯(0.52〜0.86、従来の0.6〜0.78より内外に広げて空き地全体を
+  // カバー)に候補点をばら撒き、既存の全ノード・全装飾(zonePropPositions、この時点までの
+  // 建物・木・小物すべてを含む)と最小距離を保てる候補だけを採用する(マス・キャラクター
+  // 移動の妨げにならないことを優先する設計)。候補数・目標数は種類が8→11に増えた分、
+  // 1種あたりの出現数が薄まりすぎないよう18→26に引き上げた。
+  const clusterCandidateCount = 60;
   const clusterMinGap = SNACK_ZONE_PROP_MIN_GAP + 0.6;
-  const clusterTargetCount = 18;
+  const clusterTargetCount = 26;
   const allNodeWorldPositions = nodes.map((n) => nodePositions.get(n.id));
   let clusterPlaced = 0;
   for (let i = 0; i < clusterCandidateCount && clusterPlaced < clusterTargetCount; i++) {
