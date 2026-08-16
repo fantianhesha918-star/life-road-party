@@ -1364,7 +1364,12 @@ body {
   max-height: 82vh;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 30px 22px 18px;
+  /* 左右paddingはborder-image-widthの水平値(36px)より広く取る必要がある。border-imageは
+     border-widthではなくborder-image-width基準で枠の絵を描画するため、paddingがそれより
+     狭いと中身(特にshop-gridのカード)が枠の唐草模様を追い越してはみ出して見えてしまう
+     (2026-08-16、ショップ画面で発覚)。.snack-choice-row(border-image-width:48px→
+     padding-left:52px)と同じ「image-width + 数px余白」のパターンに揃えた。 */
+  padding: 30px 40px 18px;
   display: flex;
   flex-direction: column;
   gap: 8px;

@@ -201,9 +201,10 @@ const SNACK_STAGE_MODELS = {
   },
 };
 
-// 空き地装飾6種(2026-08-15、Meshy生成済みだった未組み込み素材)。いずれもThree.js Box3実測で
-// 水平寸法が約2.0に正規化されていたため(Meshy標準パイプラインの既知の傾向)、目標最大寸法1.6を
-// 狙ってscale=0.8で統一し、yOffset = scale × |min.y| で接地位置を算出した。
+// 空き地装飾8種(2026-08-15、Meshy生成済みだった未組み込み素材6種+2026-08-16追加の低木・ベンチ)。
+// いずれもThree.js Box3実測で水平寸法が約2.0に正規化されていたため(Meshy標準パイプラインの
+// 既知の傾向)、目標最大寸法1.6を狙ってscale=0.8で統一し、yOffset = scale × |min.y| で接地位置を
+// 算出した。prop-benchのみ本編と同じscale/yOffset(SNACK_ZONE_MODELS参照)をそのまま流用。
 const SNACK_GROUND_CLUSTER_MODELS = {
   flowerbedOval: { url: new URL("./models/terrain/cluster-flowerbed-oval.glb", import.meta.url).href, scale: 0.8, yOffset: 0.132 },
   flowerbedCrescent: { url: new URL("./models/terrain/cluster-flowerbed-crescent.glb", import.meta.url).href, scale: 0.8, yOffset: 0.211 },
@@ -211,6 +212,8 @@ const SNACK_GROUND_CLUSTER_MODELS = {
   pond: { url: new URL("./models/terrain/cluster-pond.glb", import.meta.url).href, scale: 0.8, yOffset: 0.263 },
   paving: { url: new URL("./models/terrain/cluster-paving.glb", import.meta.url).href, scale: 0.8, yOffset: 0.167 },
   shrub: { url: new URL("./models/terrain/cluster-shrub.glb", import.meta.url).href, scale: 0.8, yOffset: 0.213 },
+  lowHedge: { url: new URL("./models/prop-low-hedge.glb", import.meta.url).href, scale: 0.8, yOffset: 0.19 },
+  bench: { url: new URL("./models/prop-bench.glb", import.meta.url).href, scale: 0.55, yOffset: 0.42 },
 };
 const SNACK_GROUND_CLUSTER_KEYS = Object.keys(SNACK_GROUND_CLUSTER_MODELS);
 
@@ -937,18 +940,20 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
     tryPlaceZoneProp(pos, 0.7, streetKey);
   });
 
-  // 空き地装飾(2026-08-15、Meshy生成済みだった未組み込み素材6種)。外周(半径比1.0)と
-  // 内周(半径比0.4)の中間の帯(0.6〜0.78)に候補点をばら撒き、既存の全ノード・全装飾
+  // 空き地装飾(2026-08-15、Meshy生成済みだった未組み込み素材6種+2026-08-16、低木・ベンチを
+  // 追加し密度も倍増。利用者から「全体的に質素」「花壇・四角い植木・ベンチで公園らしさを」との
+  // 指摘を受けた対応)。外周(半径比1.0)と内周(半径比0.4)の中間の帯(0.52〜0.86、従来の
+  // 0.6〜0.78より内外に広げて空き地全体をカバー)に候補点をばら撒き、既存の全ノード・全装飾
   // (zonePropPositions、この時点でここまでの建物・木・小物すべてを含む)と最小距離を
   // 保てる候補だけを採用する(マス・キャラクター移動の妨げにならないことを優先する設計)。
-  const clusterCandidateCount = 20;
+  const clusterCandidateCount = 44;
   const clusterMinGap = SNACK_ZONE_PROP_MIN_GAP + 0.6;
-  const clusterTargetCount = 9;
+  const clusterTargetCount = 18;
   const allNodeWorldPositions = nodes.map((n) => nodePositions.get(n.id));
   let clusterPlaced = 0;
   for (let i = 0; i < clusterCandidateCount && clusterPlaced < clusterTargetCount; i++) {
     const angle = (i / clusterCandidateCount) * Math.PI * 2 + 0.31;
-    const radiusT = 0.6 + ((i * 37) % 19) / 19 * 0.18; // 0.6〜0.78の範囲で疑似ランダムに散らす
+    const radiusT = 0.52 + ((i * 37) % 23) / 23 * 0.34; // 0.52〜0.86の範囲で疑似ランダムに散らす
     const cx = centerX + Math.cos(angle) * halfX * radiusT;
     const cz = centerZ + Math.sin(angle) * halfZ * radiusT;
     const candidate = new THREE.Vector3(cx, 0, cz);
