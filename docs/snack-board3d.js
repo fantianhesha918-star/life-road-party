@@ -698,55 +698,108 @@ function createIslandGroundGeometry(radiusX, radiusZ) {
 // 島の側面(台座)用の縦グラデーションテクスチャ(芝生の緑→クリーム→キャメル→こげ茶)。
 // Codex連携チャットが用意していたterrain-island-edge.pngは実ファイルが見つからなかったため、
 // createDiceFaceTextureと同じCanvas手続き生成で代替する(2026-08-12)。
+// 2026-08-16、「島の縁が薄い板のように見える」という指摘を受け、単色グラデーションの帯に
+// 岩の地層っぽいノイズ状の濃淡を重ねた(縦方向に不規則な明暗の横縞を焼き込むことで、
+// 遠目にも「均質な板」ではなく「積み重なった岩肌」に見えるようにする狙い)。
 function createIslandSkirtTexture() {
   const canvas = document.createElement("canvas");
-  canvas.width = 8;
-  canvas.height = 128;
+  canvas.width = 16;
+  canvas.height = 256;
   const ctx = canvas.getContext("2d");
-  const gradient = ctx.createLinearGradient(0, 0, 0, 128);
+  const gradient = ctx.createLinearGradient(0, 0, 0, 256);
   gradient.addColorStop(0, "#6fa84f");
-  gradient.addColorStop(0.28, "#e7d9ad");
-  gradient.addColorStop(0.62, "#c99a5b");
-  gradient.addColorStop(1, "#6b4a2c");
+  gradient.addColorStop(0.22, "#e7d9ad");
+  gradient.addColorStop(0.55, "#c99a5b");
+  gradient.addColorStop(1, "#5c3f24");
   ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, 8, 128);
+  ctx.fillRect(0, 0, 16, 256);
+  // 岩の地層ノイズ: 疑似乱数(seed固定)で横縞状の濃淡帯を重ね塗りする
+  let seed = 42;
+  const rand = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return (seed % 1000) / 1000;
+  };
+  for (let y = 40; y < 256; y += 1) {
+    const band = Math.sin(y * 0.25) * 0.5 + rand() * 0.5;
+    if (band > 0.72) {
+      ctx.fillStyle = `rgba(60, 38, 20, ${0.1 + rand() * 0.12})`;
+      ctx.fillRect(0, y, 16, 1 + Math.floor(rand() * 2));
+    } else if (band < -0.55) {
+      ctx.fillStyle = `rgba(255, 244, 214, ${0.08 + rand() * 0.1})`;
+      ctx.fillRect(0, y, 16, 1);
+    }
+  }
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapT = THREE.RepeatWrapping;
   return texture;
 }
 
 // 地面の楕円の縁から下方向・外方向へ傾斜する帯状メッシュ(buildRibbonと同じ考え方の
 // リング状ジオメトリ)。マップ全体を「厚みのあるフェルト土台」に見せる。
+// 2026-08-16、「縁が平たい板のように見える(浮島の説得力が弱い)」という指摘への対応。
+// 従来は上端(地面と同じ完全な楕円)→下端(6%だけ外側に広がるだけ)の単純な1段帯だった
+// ため、ほぼ垂直な板にしか見えなかった。①上端はそのまま(地面メッシュと縫い目なく
+// 繋がる必要があるため半径は変更しない)、②中段リングを追加し外側へ大きく張り出させて
+// 「岩がせり出した」ような厚みを出す、③下段リングは中心側へ絞り込んで浮島特有の
+// 「下に向かって細くなる」シルエットにする、という3段構成に変更。角度ごとに複数の
+// 正弦波を重ねた疑似ノイズで半径をわずかに揺らし、真円/真楕円に見えない不規則な
+// 岩肌のシルエットにした(上端だけは地面との継ぎ目のため揺らさない)。
 function createIslandEdgeSkirt(centerX, centerZ, radiusX, radiusZ, depth) {
   const segments = 64;
-  const outerScale = 1.06;
   // 地面リングの外周(t=1)の高さに合わせる(2026-08-15、外周を低くした地形と縁がずれないように)。
   const edgeY = -0.5 + terrainHeightForT(1);
+
+  function edgeNoise(angle) {
+    return (
+      Math.sin(angle * 5) * 0.5 +
+      Math.sin(angle * 11 + 1.7) * 0.3 +
+      Math.sin(angle * 23 + 4.1) * 0.2
+    );
+  }
+
   const positions = [];
   const uvs = [];
   const indices = [];
+  const ringCount = 3; // 上端(地面境界)・中段(張り出し)・下段(先細り)
   for (let i = 0; i <= segments; i++) {
     const angle = (i / segments) * Math.PI * 2;
-    const topX = centerX + Math.cos(angle) * radiusX;
-    const topZ = centerZ + Math.sin(angle) * radiusZ;
-    const botX = centerX + Math.cos(angle) * radiusX * outerScale;
-    const botZ = centerZ + Math.sin(angle) * radiusZ * outerScale;
-    positions.push(topX, edgeY, topZ, botX, edgeY - depth, botZ);
-    uvs.push(0, 0, 0, 1);
+    const noise = edgeNoise(angle);
+    // 上端: 地面メッシュのちょうど縁(半径そのまま、揺らさない)
+    positions.push(centerX + Math.cos(angle) * radiusX, edgeY, centerZ + Math.sin(angle) * radiusZ);
+    uvs.push(0, 0);
+    // 中段: 外側へ張り出す岩の縁(12〜20%外側、角度ごとに不規則)
+    const midScale = 1.16 + noise * 0.04;
+    positions.push(
+      centerX + Math.cos(angle) * radiusX * midScale,
+      edgeY - depth * 0.4,
+      centerZ + Math.sin(angle) * radiusZ * midScale
+    );
+    uvs.push(0, 0.45);
+    // 下段: 中心側へ絞り込む先細りの底(中段の68〜78%程度)
+    const botScale = midScale * (0.73 + noise * 0.05);
+    positions.push(
+      centerX + Math.cos(angle) * radiusX * botScale,
+      edgeY - depth,
+      centerZ + Math.sin(angle) * radiusZ * botScale
+    );
+    uvs.push(0, 1);
   }
   for (let i = 0; i < segments; i++) {
-    const a = i * 2;
-    const b = i * 2 + 1;
-    const c = (i + 1) * 2;
-    const d = (i + 1) * 2 + 1;
-    indices.push(a, c, b, b, c, d);
+    for (let ring = 0; ring < ringCount - 1; ring++) {
+      const a = i * ringCount + ring;
+      const b = i * ringCount + ring + 1;
+      const c = (i + 1) * ringCount + ring;
+      const d = (i + 1) * ringCount + ring + 1;
+      indices.push(a, c, b, b, c, d);
+    }
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
-  const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ map: createIslandSkirtTexture() }));
+  const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ map: createIslandSkirtTexture(), roughness: 1 }));
   mesh.receiveShadow = true;
   return mesh;
 }
@@ -826,8 +879,14 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
   // おやつ候補・ガブリオン等の重要マスは避け、それ以外の外周マス(通常/収入/支出/選択)を
   // 幅広く花壇候補にする(2026-08-13、32マス化で純粋な"normal"ノードが2箇所しかなく
   // 従来の絞り込みでは花壇がほぼ置けなくなっていたため対象種別を広げた)。
+  // 2026-08-16、civic/residential/church/parkゾーンのノードは後段の地区別建物ループで
+  // 同じノードのすぐ近く(offset1.3の花壇 vs offset1.6〜2.1の建物/木、差0.3〜0.8)に
+  // 建物や木を配置するため、SNACK_ZONE_PROP_MIN_GAP(2.4)未満で衝突し、後から配置される
+  // 建物側がサイレントに欠落するバグがあった(デバッグログで実測して確認、教会地区で
+  // facility-church/building-houseが2棟ロストしていた)。地区の建物密度を優先し、
+  // 花壇候補はゾーン建物と競合しないstation(建物なし)ノードのみに絞る。
   const flowerNodes = nodes
-    .filter((n) => n.zone === "outer" && !n.snackSpawnCandidate && !n.gaburion && ["normal", "income", "expense", "choice"].includes(n.nodeType))
+    .filter((n) => n.zone === "outer" && n.buildingZone === "station" && !n.snackSpawnCandidate && !n.gaburion && ["normal", "income", "expense", "choice"].includes(n.nodeType))
     .slice(0, 6);
   flowerNodes.forEach((n) => {
     const pos = nodePositions.get(n.id);
