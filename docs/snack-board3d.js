@@ -581,6 +581,77 @@ function computeConnectorSegments() {
   return segments;
 }
 
+// nextNodeIdsの辺すべて(ゾーンをまたぐかどうかを問わない)を道の実際の線分として集める。
+// 2026-08-16、分岐ノード付近では複数方向へ道が伸びるため、建物を「ノードの中心から外側へ」
+// 単純に押し出すだけだと、その方向に別の道(接続マスへのスプール等)が通っていて建物が
+// 道に食い込む不具合があった(利用者からの指摘で発覚、教会ゾーン等で実際に確認)。
+// 建物候補位置がどの道の線分にも近すぎないかをこの一覧でチェックする。
+function collectAllRoadSegments() {
+  const segments = [];
+  nodeMap.forEach((node) => {
+    node.nextNodeIds.forEach((nextId) => {
+      const next = nodeMap.get(nextId);
+      if (next) segments.push([nodeVec3(node), nodeVec3(next)]);
+    });
+  });
+  return segments;
+}
+
+// 点pointから線分a-bまでの最短距離(XZ平面、道は概ね平坦なのでYは無視する)。
+function distanceToSegmentXZ(point, a, b) {
+  const abx = b.x - a.x;
+  const abz = b.z - a.z;
+  const lenSq = abx * abx + abz * abz;
+  let t = lenSq > 1e-9 ? ((point.x - a.x) * abx + (point.z - a.z) * abz) / lenSq : 0;
+  t = Math.max(0, Math.min(1, t));
+  const cx = a.x + abx * t;
+  const cz = a.z + abz * t;
+  const dx = point.x - cx;
+  const dz = point.z - cz;
+  return Math.sqrt(dx * dx + dz * dz);
+}
+
+function distanceToAnySegment(point, segments) {
+  let min = Infinity;
+  for (const [a, b] of segments) {
+    const d = distanceToSegmentXZ(point, a, b);
+    if (d < min) min = d;
+  }
+  return min;
+}
+
+// 道の中心(from)から建物の位置(to)まで、幅の狭い「私道」を1本敷く(2026-08-16、
+// 「家から道じゃない見た目強化の道が伸びているか」という利用者からの指摘に対応)。
+// buildRibbon(本編の道リボン)と同じ考え方だが、道幅は約1/3(0.22)に抑えて
+// 「玄関先の小道」に見えるようにしている。
+function buildDrivewayStub(from, to) {
+  const dir = new THREE.Vector3(to.x - from.x, 0, to.z - from.z);
+  if (dir.lengthSq() < 1e-6) return null;
+  dir.normalize();
+  const normal = new THREE.Vector3(-dir.z, 0, dir.x);
+  const halfWidth = 0.22;
+  const positions = [];
+  const uvs = [];
+  [from, to].forEach((p, i) => {
+    const left = p.clone().addScaledVector(normal, halfWidth);
+    const right = p.clone().addScaledVector(normal, -halfWidth);
+    positions.push(left.x, p.y - 0.44, left.z, right.x, p.y - 0.44, right.z);
+    uvs.push(0, i, 1, i);
+  });
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex([0, 2, 1, 1, 2, 3]);
+  geometry.computeVertexNormals();
+  const texture = textureLoader.load(ROAD_TEXTURE_URL);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ map: texture }));
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
 // 外周ループを順序復元しつつ、分岐ノード(接続マスへの入口)がループの何%地点にあるかを返す。
 // playMapIntroの「分岐点付近で速度を落とす」演出用(2026-08-13、32マス化でノード数・分岐位置が
 // 変わったため、id命名規則やノード数を決め打ちしないId順序復元ベースの汎用実装に変更)。
@@ -825,24 +896,80 @@ function loadDecorationModel(owner, config) {
     });
 }
 
-// ノードの位置を中心から外側へoffset分押し出した位置にownerを配置する共通ヘルパー
-// (中心を向く方角に応じてrotation.yも設定する。既存の各種装飾配置で繰り返していたパターン)。
-function placeOutwardDecoration(pos, centerX, centerZ, offset, config) {
-  const dir = new THREE.Vector3(pos.x - centerX, 0, pos.z - centerZ).normalize();
-  const group = new THREE.Group();
-  group.position.set(pos.x + dir.x * offset, pos.y, pos.z + dir.z * offset);
-  group.rotation.y = Math.atan2(-dir.x, -dir.z);
-  scene.add(group);
-  loadDecorationModel(group, config);
-  return group.position;
-}
-
 function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
-  const jobNode = nodes.find((n) => n.nodeType === "job");
   const zonePropPositions = [];
+
+  // 2026-08-16、分岐ノード付近では複数方向へ道が伸びているため、「ノード中心から外側へ
+  // offsetぶん押し出す」だけの配置だと、その方向にたまたま別の道(接続マスへのスプール等)が
+  // 通っていて建物が道に食い込む不具合があった(利用者指摘、実機で複数箇所確認)。
+  // 候補位置がどの道の線分にも近すぎる場合、角度・距離をずらして再試行する
+  // (押し出す方向がスプール道とほぼ平行なケースは距離を伸ばすだけでは避けられないため、
+  // 角度も振る)。
+  const roadSegments = collectAllRoadSegments();
+  // 2026-08-16、当初は道の中心線から一律0.55の余白しか見ておらず、大きな建物モデル
+  // (Meshy標準パイプラインで水平寸法が約2.0に正規化される慣例、config.scaleを掛けた分だけ
+  // 実際の見た目の半幅がある)だと、アンカー座標は道から離れていても建物本体の手前側が
+  // 道にめり込んで見える不具合が残っていた(実測デバッグで確認: building-house scale1.269は
+  // 半幅約1.27あり、offset1.9でもほぼ道に接する計算になっていた)。config.scaleから建物本体の
+  // 半幅を見積もり、道の半幅と合わせて必要な余白を建物ごとに動的に決める。
+  function roadClearanceFor(config) {
+    const footprintHalfWidth = (config && config.scale ? config.scale : 0.4) * 1.0;
+    return ROAD_HALF_WIDTH + footprintHalfWidth + 0.5;
+  }
+
+  function resolveClearOutwardPosition(pos, offset, config, opts) {
+    const dir = new THREE.Vector3(pos.x - centerX, 0, pos.z - centerZ).normalize();
+    // gate-start(道をまたぐアーチ)のように、意図的に道の真上へ配置する装飾は対象外にする。
+    if (opts && opts.straddleRoad) {
+      return { worldPos: pos.clone().addScaledVector(dir, offset), dir };
+    }
+    const clearance = roadClearanceFor(config);
+    for (const angleDeg of [0, -18, 18, -34, 34]) {
+      const angle = (angleDeg * Math.PI) / 180;
+      const candidateDir = dir.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+      for (let extra = 0; extra <= 5; extra++) {
+        const candidate = pos.clone().addScaledVector(candidateDir, offset + extra * 0.7);
+        const conflict = zonePropPositions.some((p) => p.distanceTo(candidate) < SNACK_ZONE_PROP_MIN_GAP);
+        const onRoad = distanceToAnySegment(candidate, roadSegments) < clearance;
+        if (!conflict && !onRoad) return { worldPos: candidate, dir };
+      }
+    }
+    return null;
+  }
+
+  // ノードの位置を中心から外側へoffset分押し出した位置にownerを配置する共通ヘルパー
+  // (中心を向く方角に応じてrotation.yも設定する。既存の各種装飾配置で繰り返していたパターン)。
+  // opts.drivewayを立てると、ノード(道)から建物までの間に「見た目強化用の小道」を敷く
+  // (2026-08-16、「家から道じゃない道が伸びているか」という利用者指摘への対応)。
+  // opts.straddleRoadを立てると道回避を無効化する(スタートゲートのように道をまたぐ意図の装飾用)。
+  function placeOutwardDecoration(pos, offset, config, opts) {
+    const resolved = resolveClearOutwardPosition(pos, offset, config, opts);
+    if (!resolved) return null;
+    const { worldPos, dir } = resolved;
+    const group = new THREE.Group();
+    group.position.copy(worldPos);
+    group.rotation.y = Math.atan2(-dir.x, -dir.z);
+    scene.add(group);
+    loadDecorationModel(group, config);
+    if (opts && opts.driveway) {
+      const stub = buildDrivewayStub(pos, worldPos);
+      if (stub) scene.add(stub);
+    }
+    return worldPos;
+  }
+
+  function tryPlaceZoneProp(pos, offset, modelKey, opts) {
+    const config = SNACK_ZONE_MODELS[modelKey];
+    if (!config) return;
+    const placed = placeOutwardDecoration(pos, offset, config, opts);
+    if (placed) zonePropPositions.push(placed);
+  }
+
+  const jobNode = nodes.find((n) => n.nodeType === "job");
   if (jobNode) {
     const pos = nodePositions.get(jobNode.id);
-    zonePropPositions.push(placeOutwardDecoration(pos, centerX, centerZ, 1.7, SNACK_STAGE_MODELS.jobCenter));
+    const placed = placeOutwardDecoration(pos, 1.7, SNACK_STAGE_MODELS.jobCenter, { driveway: true });
+    if (placed) zonePropPositions.push(placed);
   }
 
   // 中央広場(円形タイル+肉球噴水)。CREDITS.mdの用途通り、マップの中心にまとめて設置する。
@@ -890,7 +1017,8 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
     .slice(0, 6);
   flowerNodes.forEach((n) => {
     const pos = nodePositions.get(n.id);
-    zonePropPositions.push(placeOutwardDecoration(pos, centerX, centerZ, 1.3, SNACK_STAGE_MODELS.flowerbed));
+    const placed = placeOutwardDecoration(pos, 1.3, SNACK_STAGE_MODELS.flowerbed);
+    if (placed) zonePropPositions.push(placed);
   });
 
   // 島の縁に沿って点在させる簡易な岩(専用GLBが無いため、低ポリの正二十面体を粗いグレー
@@ -928,29 +1056,35 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
     .filter((n) => n.nodeType === "shop")
     .forEach((n) => {
       const pos = nodePositions.get(n.id);
-      zonePropPositions.push(placeOutwardDecoration(pos, centerX, centerZ, 1.6, SNACK_STAGE_MODELS.shopKiosk));
+      const placed = placeOutwardDecoration(pos, 1.6, SNACK_STAGE_MODELS.shopKiosk, { driveway: true });
+      if (placed) zonePropPositions.push(placed);
     });
 
   nodes
     .filter((n) => n.nodeType === "branch")
     .forEach((n) => {
       const pos = nodePositions.get(n.id);
-      zonePropPositions.push(placeOutwardDecoration(pos, centerX, centerZ, 1.4, SNACK_STAGE_MODELS.routeSignpost));
+      const placed = placeOutwardDecoration(pos, 1.4, SNACK_STAGE_MODELS.routeSignpost);
+      if (placed) zonePropPositions.push(placed);
     });
 
   nodes
     .filter((n) => n.nodeType === "item-box")
     .forEach((n) => {
       const pos = nodePositions.get(n.id);
-      zonePropPositions.push(placeOutwardDecoration(pos, centerX, centerZ, 1.0, SNACK_STAGE_MODELS.itemBox));
+      const placed = placeOutwardDecoration(pos, 1.0, SNACK_STAGE_MODELS.itemBox);
+      if (placed) zonePropPositions.push(placed);
     });
 
   // 駅ゾーン(北西): 見本の「北西=駅、スタート地点」に合わせ、駅とスタートゲートを配置。
   const startNode = nodes.find((n) => n.nodeType === "start");
   if (startNode) {
     const pos = nodePositions.get(startNode.id);
-    zonePropPositions.push(placeOutwardDecoration(pos, centerX, centerZ, 2.4, SNACK_ZONE_MODELS["building-station"]));
-    zonePropPositions.push(placeOutwardDecoration(pos, centerX, centerZ, 1.2, SNACK_ZONE_MODELS["gate-start"]));
+    const stationPlaced = placeOutwardDecoration(pos, 2.4, SNACK_ZONE_MODELS["building-station"]);
+    if (stationPlaced) zonePropPositions.push(stationPlaced);
+    // ゲートは道をまたぐアーチとして意図的に道の真上へ置くため、道回避の対象から外す。
+    const gatePlaced = placeOutwardDecoration(pos, 1.2, SNACK_ZONE_MODELS["gate-start"], { straddleRoad: true });
+    if (gatePlaced) zonePropPositions.push(gatePlaced);
   }
 
   // 方角ゾーン別の建物・木・道沿いの小物を巡回配置する(見本の「北=オフィス/ショップ、
@@ -960,27 +1094,12 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
   const decoratedTypes = new Set(["job", "shop", "branch", "item-box", "start"]);
   const zoneEligibleNodes = nodes.filter((n) => n.zone === "outer" && !decoratedTypes.has(n.nodeType));
 
-  function tryPlaceZoneProp(pos, offset, modelKey) {
-    const config = SNACK_ZONE_MODELS[modelKey];
-    if (!config) return;
-    const dir = new THREE.Vector3(pos.x - centerX, 0, pos.z - centerZ).normalize();
-    const worldPos = pos.clone().addScaledVector(dir, offset);
-    const conflict = zonePropPositions.some((p) => p.distanceTo(worldPos) < SNACK_ZONE_PROP_MIN_GAP);
-    if (conflict) return;
-    const group = new THREE.Group();
-    group.position.copy(worldPos);
-    group.rotation.y = Math.atan2(-dir.x, -dir.z);
-    scene.add(group);
-    loadDecorationModel(group, config);
-    zonePropPositions.push(worldPos);
-  }
-
   zoneEligibleNodes.forEach((n, idx) => {
     const pos = nodePositions.get(n.id);
     const zoneName = n.buildingZone;
     if (zoneName === "park") {
       // 公園ゾーンは施設1つ+木を多めに配置し、緑豊かな見た目にする
-      if (idx % 3 === 0) tryPlaceZoneProp(pos, 2.1, "facility-park");
+      if (idx % 3 === 0) tryPlaceZoneProp(pos, 2.1, "facility-park", { driveway: true });
       tryPlaceZoneProp(pos, 1.6, SNACK_TREE_MODEL_KEYS[idx % SNACK_TREE_MODEL_KEYS.length]);
     } else if (zoneName === "station") {
       // 駅・ゲートは上で個別配置済みのため、街灯等の小物のみ巡回配置する
@@ -992,7 +1111,7 @@ function placeStageDecorations(nodes, centerX, centerZ, halfX, halfZ) {
       if (themeModels) {
         const used = themeCounters[zoneName] || 0;
         themeCounters[zoneName] = used + 1;
-        tryPlaceZoneProp(pos, 1.9, themeModels[used % themeModels.length]);
+        tryPlaceZoneProp(pos, 1.9, themeModels[used % themeModels.length], { driveway: true });
       }
     }
     const streetKey = SNACK_STREET_PROP_MODEL_KEYS[idx % SNACK_STREET_PROP_MODEL_KEYS.length];
